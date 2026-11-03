@@ -173,8 +173,11 @@ defmodule AtlasControl.Pages do
   """
   def settable_relation?(description, relation, by \\ nil) do
     case get_in(description, ["relations", relation]) do
-      %{} = spec -> not parent?(spec) and spec["set_by"] in [nil, by]
-      _ -> false
+      %{} = spec ->
+        not parent?(spec) and (spec["set_by"] == nil or by in List.wrap(spec["set_by"]))
+
+      _ ->
+        false
     end
   end
 
@@ -446,7 +449,7 @@ defmodule AtlasControl.Pages do
             how =
               cond do
                 Map.has_key?(spec, "set_by") ->
-                  "; set by a #{spec["set_by"]}, never by hand"
+                  "; set by a #{Enum.join(List.wrap(spec["set_by"]), " or ")}, never by hand"
 
                 is_map(spec["only_target"]) ->
                   "; #{spec["only_target"]["error"] || "only one of them sets it"}: in the TUI, never by an agent"
@@ -690,7 +693,7 @@ defmodule AtlasControl.Pages do
           not may_link?(description, relation, form[:by], form[:by_kind]) ->
             why =
               cond do
-                rel["set_by"] -> "only a #{rel["set_by"]} sets it"
+                rel["set_by"] -> "only a #{Enum.join(List.wrap(rel["set_by"]), " or ")} sets it"
                 rel["only_target"] -> rel["only_target"]["error"] || "not by this client"
                 true -> "it says what the fact belongs under"
               end

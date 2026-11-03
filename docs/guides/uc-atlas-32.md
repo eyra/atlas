@@ -21,7 +21,7 @@ atlas tui --env test
 | Reopen | `a` (now labelled Reopen), a note of one or more lines, `ctrl-s` | Back to `To test`; the page shows `Accepted by  —` with `… · by melle · <the note>`. Without a note it is refused. Every earlier link stays in State as the link's history. |
 | Only a person | `atlas set UC-Atlas-NN accepted_by=melle --env test` | Refused: `Accepted by is not set here: only a person accepts.` An agent's page offers neither Accept nor Reopen, and `atlas tools` leaves them out. |
 | No completed field | `atlas help use_case --env test`; `atlas help issue --env test` | No `completed` field, and issue stages are specification, design, development. `use_case` lists `Links: accepted_by: to person, at most one`. |
-| History only | `atlas set IS-Atlas-NN done_in=PR-… --env test` | Refused: `Also done in is not set here: only a migration sets it.` `atlas tools` does not offer it. |
+| History only | `atlas set IS-Atlas-NN done_in=PR-… --env test` | Refused: `Also done in is not set here: only a migration or connector sets it.` `atlas tools` does not offer it. |
 
 ### Completed, worked out (IS-Atlas-63)
 

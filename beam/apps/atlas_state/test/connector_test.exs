@@ -39,10 +39,18 @@ defmodule AtlasState.ConnectorTest do
           "system" => "outside",
           "address" => "link",
           "fields" => %{"title" => "name", "shade" => "tone", "done" => "finished"},
-          "until" => %{"done" => [true]}
+          "until" => %{"done" => [true]},
+          # A finished widget whose name names parts was also done for them.
+          "names" => %{
+            "field" => "title",
+            "relation" => "also_for",
+            "when" => %{"done" => [true]}
+          }
         }
-      }
-    }
+      },
+      "part" => %{"create" => %{"id" => %{"prefix" => "P-"}}}
+    },
+    "relations" => %{"also_for" => %{"from" => ["part"], "to" => ["widget"]}}
   }
 
   setup %{tmp_dir: dir} do
@@ -123,6 +131,37 @@ defmodule AtlasState.ConnectorTest do
     Outside.put(ctx.outside, "out/2", %{"name" => "Two", "tone" => "light"})
     fact("create", "W-2", %{"title" => "?", "link" => "out/2"})
     eventually(fn -> values(ctx.rela, "W-2")["title"] == "Two" end)
+  end
+
+  test "a finished fact whose name names other facts links them to it, once", ctx do
+    for key <- ["P-1", "P-2"] do
+      envelope = Envelope.new("fact", "part")
+
+      :ok =
+        AtlasBus.send(envelope, %{"op" => "create", "key" => key, "values" => %{"title" => key}})
+
+      id = envelope.id
+      assert_receive {:atlas_bus, %Envelope{id: ^id, class: "stored"}, _}, 1_000
+    end
+
+    fact("create", "W-1", %{"title" => "x", "link" => "o/1"})
+    Outside.put(ctx.outside, "o/1", %{"name" => "Fixes P-1, P-2 and P-9", "finished" => false})
+    connector = start_connector(ctx)
+    :ok = Connector.round(connector)
+    # Not finished yet: nothing linked.
+    assert FakeRela.links(ctx.rela)["P-1"] in [nil, %{}]
+
+    Outside.put(ctx.outside, "o/1", %{"name" => "Fixes P-1, P-2 and P-9", "finished" => true})
+    :ok = Connector.round(connector)
+    links = FakeRela.links(ctx.rela)
+    assert links["P-1"]["also_for"] == ["W-1"]
+    assert links["P-2"]["also_for"] == ["W-1"]
+    # P-9 does not exist: nothing to link.
+    refute Map.has_key?(links, "P-9")
+
+    # The next round finds them linked and sends nothing.
+    :ok = Connector.round(connector)
+    assert FakeRela.links(ctx.rela) == links
   end
 
   test "a fact that is done is read no more", ctx do
