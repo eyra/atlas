@@ -178,6 +178,18 @@ defmodule AtlasControl.Pages do
     end
   end
 
+  @doc """
+  The route a submit endpoint of the contract (`defendpoint`, call :submit) acts on, from
+  its name and parameters: the page whose form or confirm it comes from.
+  """
+  def submit_route(:create, p), do: {:new, p.kind}
+  def submit_route(:create_under, p), do: {:new, p.kind, {p.relation, p.parent}}
+  def submit_route(:update, p), do: {:edit, p.kind, p.key}
+  def submit_route(:delete, p), do: {:delete, p.kind, p.key}
+  def submit_route(:link, p), do: {:links, p.kind, p.key, p.relation}
+  def submit_route(:accept, p), do: {:set, p.kind, p.key, p.relation}
+  def submit_route(:reopen, p), do: {:remove, p.kind, p.key, p.relation}
+
   # A route's path, by the contract's page for it.
   def path(:home), do: Blocks.path(:home)
   def path(:kinds), do: Blocks.path(:kinds)

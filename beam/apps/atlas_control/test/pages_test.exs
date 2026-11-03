@@ -80,6 +80,49 @@ defmodule AtlasControl.PagesTest do
         do: assert({:ok, _, _} = AtlasControl.Blocks.match(to), "#{to} is no page")
   end
 
+  test "every submit endpoint of the contract acts on a page; every form submits to one" do
+    submits = for %{call: :submit} = e <- AtlasControl.Blocks.endpoints(), do: e
+
+    assert Enum.map(submits, & &1.name) ==
+             [:create, :create_under, :update, :delete, :link, :accept, :reopen]
+
+    for endpoint <- submits do
+      params = Map.new(endpoint.params, &{&1, "x #{&1}"})
+      route = Pages.submit_route(endpoint.name, params)
+
+      # The page a submit endpoint acts on is the one at the same path: its form's own.
+      assert Pages.route(Pages.path(route)) == route
+
+      assert {:ok, endpoint.name, params} ==
+               AtlasControl.Blocks.endpoint(:submit, Pages.path(route))
+
+      assert %{takes: :values, replies: [%{name: :stored}, %{name: :refused}]} = endpoint
+    end
+
+    part = Map.put(fact("P-1", %{"title" => "Wheel"}), "links", %{"of_widget" => ["W-1"]})
+
+    forms = [
+      Pages.render({:new, "widget"}, @d, []),
+      Pages.render({:new, "part", {"of_widget", "W-1"}}, @d, []),
+      Pages.render({:edit, "part", "P-1"}, @d, [%{"fact" => part}, %{"facts" => []}]),
+      Pages.render({:delete, "part", "P-1"}, @d, [%{"fact" => part, "incoming" => %{}}])
+    ]
+
+    submits_to =
+      for page <- forms,
+          %{"props" => props} <- page.blocks,
+          to <- [props["submit_to"], props["confirm_to"]],
+          is_binary(to),
+          do: to
+
+    assert length(submits_to) == 4
+
+    for to <- submits_to,
+        do: assert({:ok, _, _} = AtlasControl.Blocks.endpoint(:submit, to), "#{to} is no submit")
+
+    assert AtlasControl.Blocks.endpoint(:submit, "/k/widget") == :error
+  end
+
   defp destinations(value) when is_map(value) do
     Enum.flat_map(value, fn
       {key, to} when key in ~w(to back cancel_to submit_to confirm_to) and is_binary(to) -> [to]

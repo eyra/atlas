@@ -30,9 +30,14 @@ defmodule AtlasBFF.Example do
   end
 
   # Written in an order that is not the one they match in: a literal wins.
-  defpage(:card, "/cards/:id")
-  defpage(:new_card, "/cards/new")
-  defpage(:home, "/")
+  defpage :card, "/cards/:id"
+  defpage :new_card, "/cards/new"
+  defpage :home, "/"
+
+  defendpoint :save_card, "/cards/:id",
+    call: :submit,
+    takes: :values,
+    replies: [saved: :view_model, refused: :view_model]
 end
 
 defmodule AtlasBFF.Example.Server do
