@@ -25,7 +25,7 @@ Run it again in a second terminal for TUI 2. `--env test` is needed: `atlas` on 
 
 | Step | Where | What you should see |
 |---|---|---|
-| A scene with a use case and two issues | TUI 1: `n` a scene, `a` a use case in it, `a` two issues in that, each with a title and `ctrl-s`; then `esc` back to the scene | Under **Use cases**: `UC-Atlas-NN · Specification · 2/2`. On the scenes list: `SC-Atlas-NN · Specification · 1/1`. |
+| A scene with a use case and two issues | TUI 1: `c` a scene, `c` a use case in it, `c` two issues in that, each with a title and `ctrl-s`; then `esc` back to the scene | Under **Use cases**: `UC-Atlas-NN · Specification · 2/2`. On the scenes list: `SC-Atlas-NN · Specification · 1/1`. |
 | Move one issue on | in a terminal: `atlas set IS-Atlas-NN stage=testing --env test` | The use case's row changes to `Specification · 1/2`: one issue is still in Specification. |
 | Move the other | `atlas set IS-Atlas-MM stage=testing --env test` | `Testing · 2/2`, in TUI 1 and in TUI 2 on the same page, within a second (`updated by hint at …`). |
 | Complete them | `atlas set IS-Atlas-NN completed=true --env test`, then the other | `Done · 2/2`. The scenes list shows the scene as `Done · 1/1`. |

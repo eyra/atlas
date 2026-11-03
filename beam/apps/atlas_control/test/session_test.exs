@@ -47,7 +47,7 @@ defmodule AtlasControl.SessionTest do
     a = client(port)
     next(a, "page")
     put(a, %{"op" => "open", "to" => "/k/tag/new/on_part/P-1"})
-    assert %{"title" => "New tag in P-1"} = next(a, "page")
+    assert %{"title" => "Create tag in P-1"} = next(a, "page")
 
     put(a, %{"op" => "submit", "to" => "/k/tag/new/on_part/P-1", "values" => %{"name" => "nope"}})
     assert %{"tone" => "error", "text" => "Not sent: the form says why."} = next(a, "notice")
@@ -103,7 +103,7 @@ defmodule AtlasControl.SessionTest do
     next(b, "page")
 
     put(a, %{"op" => "open", "to" => "/k/widget/new"})
-    assert %{"title" => "New widget"} = next(a, "page")
+    assert %{"title" => "Create widget"} = next(a, "page")
 
     put(a, %{
       "op" => "submit",
@@ -192,7 +192,7 @@ defmodule AtlasControl.SessionTest do
              next(b, "page")
 
     put(a, %{"op" => "open", "to" => "/k/part/new/of_widget/W-1"})
-    assert %{"title" => "New part in W-1"} = next(a, "page")
+    assert %{"title" => "Create part in W-1"} = next(a, "page")
 
     put(a, %{
       "op" => "submit",
@@ -284,7 +284,7 @@ defmodule AtlasControl.SessionTest do
 
     put(a, %{"op" => "open", "to" => "/k/part/new/_parent/W-1"})
 
-    assert %{"title" => "New part in W-1", "blocks" => [%{"props" => form}]} = next(a, "page")
+    assert %{"title" => "Create part in W-1", "blocks" => [%{"props" => form}]} = next(a, "page")
     assert form["submit_to"] == "/k/part/new/of_widget/W-1"
 
     put(a, %{

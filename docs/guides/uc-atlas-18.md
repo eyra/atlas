@@ -26,7 +26,7 @@ When State refuses a step, the run stops there, and the agent proposes what next
 
 | Step | Keys | What you should see |
 |---|---|---|
-| The item is gone | ask on a scene, then in TUI 2 delete that scene (`d`, `y`) before you press `enter` in TUI 1 | Step 1 is refused: `SC-Atlas-NN does not exist`. Then `Planning…`, and the new plan says **Before**: `Step 1 (New use case in SC-Atlas-NN) was refused: SC-Atlas-NN does not exist. Nothing was stored. Not run: step 2, step 3.` What the agent proposes there cannot run either: its steps show `[!] … SC-Atlas-NN is not a scene in Atlas`. `esc`. |
+| The item is gone | ask on a scene, then in TUI 2 delete that scene (`d`, `y`) before you press `enter` in TUI 1 | Step 1 is refused: `SC-Atlas-NN does not exist`. Then `Planning…`, and the new plan says **Before**: `Step 1 (Create use case in SC-Atlas-NN) was refused: SC-Atlas-NN does not exist. Nothing was stored. Not run: step 2, step 3.` What the agent proposes there cannot run either: its steps show `[!] … SC-Atlas-NN is not a scene in Atlas`. `esc`. |
 | A step that breaks a rule | ask, `e` on step 2, clear its title, `ctrl-s`, `enter` | Step 1 is stored. Step 2 is refused (`title is required`), and the rest is not run. The new plan's **Before** says so and proposes what is left. `enter` runs it. |
 
 With Claude as the planner, the summary says what was refused and why. Claude is told never to propose the refused step again only to get it stored.

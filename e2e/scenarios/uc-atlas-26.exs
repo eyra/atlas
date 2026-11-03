@@ -44,8 +44,8 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
       "html_url" => skeleton
     })
 
-    press(t1, "a")
-    see(t1, ~r/^ New pull request in IS-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
     type(t1, skeleton)
     at = press(t1, "C-s")
     stored(t1, "✓ Stored as PR-eyra-atlas-e2e-2601", at)
@@ -60,7 +60,7 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     see(t1, ~r/Draft\s+yes/)
     see(t1, ~r/Last read\s+\d{4}-\d\d-\d\d \d\d:\d\d UTC from GitHub/)
     # Still GitHub's: a change only moves it to another issue, and never sets them.
-    press(t1, "e")
+    press(t1, "u")
     see(t1, ~r/In issue \*\s+‹ IS-Atlas-\d+/)
     for field <- ["Title", "State", "Draft"], do: refute_see(t1, ~r/^\s+#{field}\s/m)
     press(t1, "Escape")
@@ -98,8 +98,8 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
 
   step "A read that fails: the page says so, and the next round tries again", fn ->
     GitHub.put(flaky, {:status, 503})
-    press(t1, "a")
-    see(t1, ~r/^ New pull request in IS-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
     type(t1, flaky)
     at = press(t1, "C-s")
     stored(t1, "Pull request PR-eyra-atlas-e2e-2602: #{flaky}", at)
