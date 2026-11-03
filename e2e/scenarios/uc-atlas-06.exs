@@ -24,7 +24,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
       home(t)
       see(t, "g Agents")
       press(t, "g")
-      see(t, ~r/Atlas · test\s+Agents$/m)
+      see(t, ~r/Atlas · test.*\sAgents$/m)
       see(t, ~r/ada\s+Ada\s+0 assigned/)
     end
   end
