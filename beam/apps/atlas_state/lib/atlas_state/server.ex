@@ -17,12 +17,16 @@ defmodule AtlasState.Server do
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
-  "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional}`.
+  "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional,
+  "was" => %{property or relation => value or keys} on a change, optional}`.
   On a create the links are the fact's first; on a change each relation named is replaced
   by the keys given (`[]` removes its links), so a fact moves to another parent or an
   association is set or removed; the hint then reaches every listener of its kind, on
   the old parent's page and the new one's. The cause and who sent it are kept with
-  State's answer and go along with the hint.
+  State's answer and go along with the hint. A change on an old version is refused only
+  when what it sets changed meanwhile: with `was` (the values and links the sender read)
+  and every field and relation it sets still as it was, it is applied on the current
+  version, so a write to other fields (Flow's, a connector's) never fails a user's save.
   """
   use GenServer
 
@@ -321,7 +325,16 @@ defmodule AtlasState.Server do
             {:ok, targets} ->
               with {:ok, targets} <- target_kinds(state, op, targets),
                    :ok <- targets_exist(state, op, targets) do
-                store(state.rela, spec, op, key, values, content["version"], targets)
+                store(
+                  state.rela,
+                  spec,
+                  op,
+                  key,
+                  values,
+                  content["version"],
+                  targets,
+                  content["was"]
+                )
               end
 
             {:error, problems} ->
@@ -340,7 +353,7 @@ defmodule AtlasState.Server do
 
   defp store(state, _kind, _content), do: {{:refused, ["a fact needs an op and a key"]}, state}
 
-  defp store(rela, spec, "create", key, values, _version, targets) do
+  defp store(rela, spec, "create", key, values, _version, targets, _was) do
     values = Map.reject(values, fn {_, v} -> v in [nil, ""] end)
     plural = spec["plural"]
 
@@ -356,7 +369,7 @@ defmodule AtlasState.Server do
   end
 
   # The links of a change replace the relation's keys: a move to another parent.
-  defp store(rela, spec, "change", key, values, version, targets) do
+  defp store(rela, spec, "change", key, values, version, targets, was) do
     values = Map.new(values, fn {k, v} -> {k, if(v == "", do: nil, else: v)} end)
     plural = spec["plural"]
 
@@ -366,13 +379,13 @@ defmodule AtlasState.Server do
     else
       # The current rela has already stored the change; say so instead of hiding it.
       {:ok, warnings} -> {:refused, ["rela stored it with warnings: " | warnings]}
-      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values, targets)
+      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values, targets, was)
       {:error, :not_found} -> {:refused, ["#{key} does not exist (any more)"]}
       error -> failure(error)
     end
   end
 
-  defp store(rela, spec, "delete", key, _values, version, _targets) do
+  defp store(rela, spec, "delete", key, _values, version, _targets, _was) do
     # The current rela ignores If-Match on delete, so State compares the version itself.
     current =
       case Rela.get(rela, spec["plural"], key) do
@@ -394,7 +407,7 @@ defmodule AtlasState.Server do
     end
   end
 
-  defp store(_rela, _spec, op, _key, _values, _version, _targets),
+  defp store(_rela, _spec, op, _key, _values, _version, _targets, _was),
     do: {:refused, ["unknown op #{inspect(op)}"]}
 
   defp both(:ok, :ok), do: :ok
@@ -424,17 +437,51 @@ defmodule AtlasState.Server do
   end
 
   # A change on an old version: already applied (a resend) or a real conflict.
-  defp changed_meanwhile(rela, plural, key, values, targets) do
+  # A change on an old version: already applied (a resend), applied now when only other
+  # fields changed meanwhile, or a real conflict.
+  defp changed_meanwhile(rela, plural, key, values, targets, was, tries \\ 3) do
     case Rela.get(rela, plural, key) do
       {:ok, fact} ->
-        if same?(fact, values) and same_links?(fact, targets),
-          do: :stored,
-          else: {:refused, ["#{key} changed meanwhile; open it again"]}
+        cond do
+          same?(fact, values) and same_links?(fact, targets) ->
+            :stored
+
+          tries > 0 and untouched?(fact, values, targets, was) ->
+            case Rela.change(rela, plural, key, values, fact.version, targets) do
+              {:ok, []} ->
+                :stored
+
+              {:ok, warnings} ->
+                {:refused, ["rela stored it with warnings: " | warnings]}
+
+              {:error, :version_mismatch} ->
+                changed_meanwhile(rela, plural, key, values, targets, was, tries - 1)
+
+              error ->
+                failure(error)
+            end
+
+          true ->
+            {:refused, ["#{key} changed meanwhile; open it again"]}
+        end
 
       error ->
         failure(error)
     end
   end
+
+  # Every field and relation the change sets still has the value its sender read.
+  defp untouched?(fact, values, targets, was) when is_map(was) do
+    Enum.all?(values, fn {name, _} ->
+      Map.has_key?(was, name) and loose(fact.properties[name]) == loose(was[name])
+    end) and
+      Enum.all?(targets, fn {relation, _} ->
+        Map.has_key?(was, relation) and
+          Enum.sort(fact.links[relation] || []) == Enum.sort(List.wrap(was[relation]))
+      end)
+  end
+
+  defp untouched?(_fact, _values, _targets, _was), do: false
 
   defp same_links?(fact, targets) do
     Enum.all?(targets, fn {relation, {_kind, keys}} ->

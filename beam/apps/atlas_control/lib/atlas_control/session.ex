@@ -271,11 +271,29 @@ defmodule AtlasControl.Session do
 
     with {:ok, links} <- moves(parents, was),
          [] <- over_limits(state, kind, key, links) do
+      # Only what was edited is sent, with what the form was read with for it: State then
+      # refuses an old version only when one of these changed meanwhile, never because
+      # other fields did, and a save never puts back an old value of a field left alone.
+      read = state.form[:was] || %{}
+
+      values =
+        for {name, value} <- values,
+            loose(value) != loose(read[name]),
+            into: %{},
+            do: {name, value}
+
+      seen =
+        Map.merge(
+          Map.new(values, fn {name, _} -> {name, read[name]} end),
+          Map.new(links, fn {relation, _} -> {relation, List.wrap(was[relation])} end)
+        )
+
       content = %{
         "op" => "change",
         "key" => key,
         "values" => values,
-        "version" => state.form[:version]
+        "version" => state.form[:version],
+        "was" => seen
       }
 
       content =
@@ -392,6 +410,9 @@ defmodule AtlasControl.Session do
 
   # The cause a move is stored with: "Moved from UC-Atlas-01 to UC-Atlas-30 (in_use_case),
   # by a change in Control".
+  defp loose(value) when value in [nil, ""], do: nil
+  defp loose(value), do: to_string(value)
+
   defp moved(links, was) do
     changes =
       Enum.map_join(links, "; ", fn {relation, [to]} ->
@@ -591,13 +612,14 @@ defmodule AtlasControl.Session do
     form = Map.merge(state.form, %{by: state.by, by_kind: state.by_kind})
     page = Pages.render(route, state.description, answers, form)
 
-    # Remember the version a change form was made from, so the change names it, and the
-    # parents the fact had, so only a parent that differs moves it.
+    # Remember the version a change form was made from, so the change names it; the values
+    # it was read with, so only a change to the same fields refuses it; and the parents the
+    # fact had, so only a parent that differs moves it.
     form =
       case {route, answers} do
         {{:edit, kind, _}, [%{"fact" => %{"version" => version} = fact} | _]} ->
           parents = Pages.parent_values(state.description, kind, fact)
-          Map.merge(state.form, %{version: version, parents: parents})
+          Map.merge(state.form, %{version: version, parents: parents, was: fact["values"] || %{}})
 
         _ ->
           state.form

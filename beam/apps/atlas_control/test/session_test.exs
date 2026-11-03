@@ -491,6 +491,28 @@ defmodule AtlasControl.SessionTest do
     refute Map.has_key?(List.last(FakeStore.sent()), "cause")
   end
 
+  test "an update sends only what was edited, with what the form was read with (was)",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One", "shade" => "light"})
+    a = client(port)
+    next(a, "page")
+    put(a, %{"op" => "open", "to" => "/k/widget/W-1/edit"})
+    next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/edit",
+      "values" => %{"title" => "Uno", "shade" => "light"}
+    })
+
+    assert %{"reason" => "stored"} = next(a, "page")
+
+    # The shade was left as it was: it is not sent, so it can never put an old value back.
+    assert %{"values" => values, "version" => "v0", "was" => was} = List.last(FakeStore.sent())
+    assert values == %{"title" => "Uno"}
+    assert was == %{"title" => "One"}
+  end
+
   test "a link only a migration sets is never sent", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     a = client(port)
