@@ -41,7 +41,8 @@ defmodule AtlasAgent.Steer do
   A run goes one step at a time, and waits `agent.step_pause_ms` (from the settings, 0 by
   default) after a step shows as stored before the next, so a user can follow it and has
   all of that wait to stop, however long State took. A stop is seen before the next
-  step, also during that wait (UC-Atlas-18); the steps not run say so.
+  step, also during that wait (UC-Atlas-18); the steps not run say so. After the last
+  step there is nothing to stop, so the run ends without that wait.
   """
 
   alias AtlasAgent.{Client, Overrule, Plan, Record}
@@ -258,8 +259,12 @@ defmodule AtlasAgent.Steer do
         state = keep_step(state, run.client, n, key, was)
         state = show(%{state | run: %{run | order: rest}})
         # The pause starts once the step shows as stored, so the user always has all of it
-        # to stop the run, however long keeping the step took (State may be busy).
-        Process.send_after(self(), :step, pause(state))
+        # to stop the run, however long keeping the step took (State may be busy). It is
+        # there to stop before the next step: after the last one the run ends at once.
+        if rest == [],
+          do: send(self(), :step),
+          else: Process.send_after(self(), :step, pause(state))
+
         state
 
       {:refused, reasons} ->

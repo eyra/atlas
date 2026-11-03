@@ -61,7 +61,9 @@
 # tests and agents always pass --env test, or ATLAS_ENV_FILE: a private instance (other
 # ports and data) whose environment is the file's "env", so a trial never meets Melle's.
 # --env and the file's "env" must agree. ATLAS_NO_UPDATE=1 keeps `atlas tui` from
-# updating the main clone first.
+# updating the main clone first. ATLAS_AS=<agent key> makes the agents' commands that
+# agent (ATLAS_AS=coordinator atlas get IS-Atlas-12): what is assigned to it shows its
+# What to do (IS-Atlas-54), and what it writes is by it.
 set -euo pipefail
 
 # The repository this script lives in, also when it is called through a link.

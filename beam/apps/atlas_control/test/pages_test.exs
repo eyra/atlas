@@ -1459,6 +1459,108 @@ defmodule AtlasControl.PagesTest do
       Pages.render({:list, "card"}, @open, [%{"facts" => []}, %{"facts" => []}])
 
     assert empty["rows"] == [] and empty["empty"] == "Nothing is held."
+
+  # What to do (IS-Atlas-54): a flow on widgets, on their card; its state is the card's step.
+  @todo @carded
+        |> put_in(["entities", "card", "properties", "step"], %{"type" => "string"})
+        |> Map.put("todo", %{
+          "title" => "Your move",
+          "why" => "Because",
+          "instructions" => "How",
+          "answers" => "Keys"
+        })
+        |> Map.put("flows", %{
+          "f" => %{
+            "kinds" => ["widget"],
+            "on" => "card",
+            "field" => "todo",
+            "state_field" => "step",
+            "owner_relation" => "held_by",
+            "states" => [
+              %{
+                "name" => "check",
+                "why" => "it is painted",
+                "todo" => %{
+                  "instructions" => "Look it over.",
+                  "section" => %{"field" => "notes", "heading" => "Check"},
+                  "answers" => [%{"key" => "a", "label" => "Approve"}]
+                }
+              }
+            ]
+          }
+        })
+
+  test "a fact's owner sees what to do, first; anyone else does not" do
+    notes = "Some intro.\n\nCheck: the paint is even\nand dry.\n\n## Later\nnot this"
+
+    widget =
+      fact("W-1", %{"title" => "One", "notes" => notes})
+      |> Map.put("links", %{"card" => ["C-W-1"]})
+
+    card =
+      fact("C-W-1", %{"of" => "W-1", "todo" => "Check it", "step" => "check"})
+      |> Map.put("links", %{"held_by" => ["ada"]})
+      |> Map.put("origins", %{
+        "held_by" => %{
+          "since" => "2026-11-03T10:00:00Z",
+          "by" => "flow",
+          "cause" => "Flow f: painted → ada"
+        }
+      })
+
+    answers =
+      for read <- Pages.reads({:item, "widget", "W-1"}, @todo) do
+        case read do
+          {"widget", _} -> %{"fact" => widget}
+          {"card", _} -> %{"fact" => card}
+          _ -> %{"facts" => []}
+        end
+      end
+
+    page = Pages.render({:item, "widget", "W-1"}, @todo, answers, %{by: "ada"})
+    assert [%{"id" => "todo", "type" => "item", "props" => todo} | _] = page.blocks
+
+    assert %{"start" => "todo", "props" => %{"title" => "Your move", "role" => "todo"}} =
+             hd(page.markup)
+
+    assert todo["title"] == "Your move: Check it"
+
+    assert [
+             %{
+               "label" => "Because",
+               "value" => "Flow f: painted → ada",
+               "origin" => %{"by" => "flow"}
+             },
+             %{"label" => "How", "value" => "Look it over."},
+             %{"label" => "Check", "value" => "the paint is even\nand dry."},
+             %{"label" => "Keys", "value" => "a Approve"}
+           ] = todo["fields"]
+
+    # The state is not a field of the fact.
+    item = Enum.find(page.blocks, &(&1["id"] == "item"))
+    refute Enum.any?(item["props"]["fields"], &(&1["label"] == "Step"))
+
+    # Not the owner, or no state written yet: no such part.
+    for {form, answers} <- [
+          {%{by: "bob"}, answers},
+          {%{by: nil}, answers},
+          {%{by: "ada"},
+           List.replace_at(answers, -1, %{"fact" => put_in(card, ["values", "step"], nil)})}
+        ] do
+      page = Pages.render({:item, "widget", "W-1"}, @todo, answers, form)
+      refute Enum.any?(page.blocks, &(&1["id"] == "todo"))
+    end
+  end
+
+  test "the section a heading names: to the next heading" do
+    assert Pages.section("Melle can test: open it.\nThen look.", "Melle can test") ==
+             "open it.\nThen look."
+
+    assert Pages.section("x\n## Melle can test\none\n\ntwo\n## Next\nthree", "melle can test") ==
+             "one\n\ntwo"
+
+    assert Pages.section("nothing here", "Melle can test") == nil
+    assert Pages.section(nil, "Melle can test") == nil
   end
 
   test "a client of a kind the start's relation points at opens on what points at it" do

@@ -134,8 +134,9 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
     open_row(t1, "A scene for Ada")
     see(t1, "No use cases yet")
 
-    # A use case under it: a new state, so its own owner (the same name is the same key).
-    atlas(i, ["put", "agent", "--name", "Coordinator"])
+    # A use case under it: a new state, Build it. Its owner is the coordinator, which this
+    # scenario does not make, so later scenarios' pages hold no owner: the owner waits for
+    # it, and UC-27's scenarios show a new fact getting it.
     {_, at} = atlas_json(i, ["put", "use_case", "--in", key, "--title", "Ada's first use case"])
     by_hint(t1, "Ada's first use case", at)
 
@@ -143,15 +144,12 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
       Enum.reduce_while(1..50, nil, fn _, _ ->
         {got, _} = atlas_json(i, ["get", key])
 
-        if ["Assigned to", "coordinator"] in got["fields"],
+        if ["Expected", "Build it"] in got["fields"],
           do: {:halt, got},
           else: Process.sleep(100) && {:cont, got}
       end)
 
-    ["Assigned to", "coordinator"] in got["fields"] || raise inspect(got["fields"])
-
-    got["origins"]["Assigned to"]["cause"] =~ "not all under it is completed" ||
-      raise inspect(got)
+    ["Expected", "Build it"] in got["fields"] || raise inspect(got["fields"])
   end
 
   # IS-Atlas-85: Open work, every open fact with its owner, what is expected and its
