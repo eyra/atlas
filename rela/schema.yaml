@@ -144,7 +144,7 @@ entities:
 
   agent_request:
     label: Agent request
-    plural: agent requests
+    plural: agent_requests
     aliases: [rq]
     id_type: manual
     id_prefix: "RQ-"
@@ -162,7 +162,7 @@ entities:
 
   agent_step:
     label: Agent step
-    plural: agent steps
+    plural: agent_steps
     aliases: [st]
     id_type: manual
     id_prefix: "ST-"

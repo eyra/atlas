@@ -108,18 +108,15 @@ defmodule AtlasAgent do
   @doc """
   One fact: `%{"key", "path", "title", "fields" => [[label, value]], "lists" =>
   [%{"title", "rows"}], "values" => %{name => text}}`. `values` are what its change form
-  holds, so exactly what was stored; empty when the fact cannot be changed.
+  holds, so exactly what was stored; empty when it has no change form.
   """
   def get(client, key) do
     with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}") do
       case Client.blocks(page, "item") do
         [item] ->
-          edit = page["path"] <> "/edit"
-
-          values =
-            if Enum.any?(item["actions"] || [], &(&1["to"] == edit)),
-              do: edit_values(client, edit),
-              else: %{}
+          # The change form holds the exact values; it answers at its path also for a kind
+          # that offers no key to change it (one only the agent writes).
+          values = edit_values(client, page["path"] <> "/edit")
 
           {:ok,
            %{
