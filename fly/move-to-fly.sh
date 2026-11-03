@@ -36,7 +36,6 @@ done
 from="${from/#\~/$HOME}"
 [ -n "$from" ] && [ -d "$from" ] || { echo "move-to-fly: no folder to move from ($from)" >&2; exit 1; }
 from="$(cd "$from" && pwd -P)"
-fly="$(command -v fly || command -v flyctl)" || { echo "move-to-fly: install flyctl first" >&2; exit 1; }
 fail() { echo "move-to-fly: $*" >&2; exit 1; }
 
 echo "From:  $from (this Mac)"
@@ -67,6 +66,9 @@ fi
 echo "Check: this build's description describes all of it"
 
 here="$("$root/fly/counts.sh" "$from/rela")"
+
+# The checks above are this Mac's; from here on it talks to Fly.
+fly="$(command -v fly || command -v flyctl)" || fail "install flyctl first (brew install flyctl), then: fly auth login"
 remote_counts() { "$fly" ssh console -q -a "$rela_app" -C "/app/fly/counts.sh /data/rela" 2>/dev/null | tr -d '\r'; }
 there="$(remote_counts || echo "(could not read: is $rela_app running? atlas status)")"
 echo
