@@ -43,6 +43,13 @@ defmodule AtlasState.Copies do
     entry = get(kind, key) || %{"read_at" => nil}
     entry = entry |> Map.merge(changes) |> Map.put("source", source)
     :ok = :dets.insert(@table, {{kind, key}, entry})
-    :ok = :dets.sync(@table)
+
+    (fn ->
+       t0 = System.monotonic_time(:microsecond)
+       r = :dets.sync(@table)
+       require Logger
+       Logger.info("DETS copies sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       r
+     end).()
   end
 end

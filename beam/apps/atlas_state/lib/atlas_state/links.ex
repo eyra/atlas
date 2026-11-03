@@ -29,7 +29,13 @@ defmodule AtlasState.Links do
     :ok =
       :dets.insert(table, {{kind, key, relation}, history(table, kind, key, relation) ++ [entry]})
 
-    :ok = :dets.sync(table)
+    (fn ->
+       t0 = System.monotonic_time(:microsecond)
+       r = :dets.sync(table)
+       require Logger
+       Logger.info("DETS links sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       r
+     end).()
   end
 
   @doc "Every entry for one link, oldest first."
@@ -62,6 +68,13 @@ defmodule AtlasState.Links do
   @doc "Forget a deleted fact's links."
   def forget(table, kind, key) do
     :ok = :dets.match_delete(table, {{kind, key, :_}, :_})
-    :ok = :dets.sync(table)
+
+    (fn ->
+       t0 = System.monotonic_time(:microsecond)
+       r = :dets.sync(table)
+       require Logger
+       Logger.info("DETS links sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       r
+     end).()
   end
 end

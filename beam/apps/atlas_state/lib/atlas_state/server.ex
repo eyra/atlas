@@ -108,8 +108,12 @@ defmodule AtlasState.Server do
 
     case result do
       :stored ->
+        t0 = System.monotonic_time(:microsecond)
         position = Ledger.stored(state.ledger, envelope.id, about)
+        t1 = System.monotonic_time(:microsecond)
         remember_links(state, envelope.kind, content, about, position)
+        t2 = System.monotonic_time(:microsecond)
+        Logger.info("STEPS ledger #{div(t1 - t0, 1000)}ms links #{div(t2 - t1, 1000)}ms")
         reply(envelope, "stored", about, position)
 
       {:refused, reasons} ->

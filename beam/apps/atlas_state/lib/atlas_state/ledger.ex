@@ -37,12 +37,26 @@ defmodule AtlasState.Ledger do
     :ok =
       :dets.insert(table, [{:position, position}, {{:answer, id}, {"stored", content, position}}])
 
-    :ok = :dets.sync(table)
+    (fn ->
+       t0 = System.monotonic_time(:microsecond)
+       r = :dets.sync(table)
+       require Logger
+       Logger.info("DETS ledger sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       r
+     end).()
+
     position
   end
 
   def refused(table, id, content) do
     :ok = :dets.insert(table, {{:answer, id}, {"refused", content, nil}})
-    :ok = :dets.sync(table)
+
+    (fn ->
+       t0 = System.monotonic_time(:microsecond)
+       r = :dets.sync(table)
+       require Logger
+       Logger.info("DETS ledger sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       r
+     end).()
   end
 end
