@@ -16,7 +16,9 @@ defmodule AtlasBFFContract.Blocks do
   # 0.8.0: a pair may carry its origin: the fact that set it (since, by, cause).
   # 0.9.0: the pages Control serves (defpage); a path outside them is no page.
   # 0.10.0: the form submits Control takes (defendpoint, call :submit).
-  version "0.10.0"
+  # 0.11.0: a form's submit_to and a confirm's confirm_to name an endpoint and its params
+  # (a `call`), no longer a path; the session's other calls; hello carries the version.
+  version "0.11.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -94,12 +96,19 @@ defmodule AtlasBFFContract.Blocks do
     field :links, {:list, :link}
   end
 
-  # Submitting sends the inputs' values to `submit_to`.
+  # A call of one of the contract's endpoints: its name and its parameters, by name. A
+  # client sends it as it is: {"op": "submit", "endpoint": ..., "params": ..., "values": ...}.
+  defmodel :call do
+    field :endpoint, :string, required: true
+    field :params, {:map, :string}
+  end
+
+  # Submitting sends the inputs' values to the endpoint `submit_to` names.
   defblock :form do
     field :title, :string, required: true
     field :inputs, {:list, :input}, required: true
     field :submit_label, :string, required: true
-    field :submit_to, :string, required: true
+    field :submit_to, :call, required: true
     field :cancel_to, :string
     field :errors, {:list, :string}
   end
@@ -110,7 +119,7 @@ defmodule AtlasBFFContract.Blocks do
     field :title, :string, required: true
     field :text, :string, required: true
     field :confirm_label, :string
-    field :confirm_to, :string
+    field :confirm_to, :call
     field :cancel_to, :string, required: true
   end
 
@@ -182,11 +191,12 @@ defmodule AtlasBFFContract.Blocks do
   defpage :set, "/k/:kind/:key/set/:relation"
   defpage :remove, "/k/:kind/:key/remove/:relation"
 
-  # The form submits Control takes: {"op": "submit", "to": path, "values": {name => text}},
-  # where `to` is a form's submit_to or a confirm's confirm_to. The values are the form's
-  # inputs by name; what they hold comes from rela's description, at run time, so no kind
-  # is named here. stored: the page to go to next (reason "stored"); refused: the form
-  # again, with its errors (reason "refused"). Notices come with either.
+  # The form submits Control takes: {"op": "submit", "endpoint": name, "params": {...},
+  # "values": {name => text}}, as a form's submit_to or a confirm's confirm_to names them
+  # (a `call`); the path is what the endpoint is at. The values are the form's inputs by
+  # name; what they hold comes from rela's description, at run time, so no kind is named
+  # here. stored: the page to go to next (reason "stored"); refused: the form again, with
+  # its errors (reason "refused"). Notices come with either.
   @submit [call: :submit, takes: :values, replies: [stored: :view_model, refused: :view_model]]
 
   defendpoint :create, "/k/:kind/new", @submit
@@ -196,4 +206,66 @@ defmodule AtlasBFFContract.Blocks do
   defendpoint :link, "/k/:kind/:key/links/:relation", @submit
   defendpoint :accept, "/k/:kind/:key/set/:relation", @submit
   defendpoint :reopen, "/k/:kind/:key/remove/:relation", @submit
+
+  # The session's other messages, in JSON lines over the socket (bff/README.md, Protocol).
+  # Each endpoint's call is the message's "op".
+
+  # A client's first message: its environment, what it is, and the contract version it
+  # implements. Control of another environment, or one newer than the client's version,
+  # answers bye and closes; else welcome, then its start page.
+  defmodel :hello do
+    field :env, :string, required: true
+    field :client, :string, required: true
+    field :spec, :string, required: true
+  end
+
+  defmodel :welcome do
+    field :env, :string, required: true
+    field :spec, :string, required: true
+  end
+
+  defmodel :bye do
+    field :text, :string, required: true
+  end
+
+  # A line for the status bar: pending (until State answers), ok, error or info.
+  defmodel :notice do
+    field :tone, :string, required: true
+    field :text, :string, required: true
+    field :at, :string
+  end
+
+  defendpoint :hello, call: :hello, takes: :hello, replies: [welcome: :welcome, bye: :bye]
+
+  # Read the page shown again, from State: what a client does on an interval.
+  defendpoint :refresh, call: :refresh, replies: [page: :view_model]
+
+  # What Control sends unasked: a page again when a change it shows was stored by anyone
+  # (reason "hint"), a notice, or bye before it closes.
+  defendpoint :hint, call: :page, replies: [page: :view_model]
+  defendpoint :notice, call: :notice, replies: [notice: :notice]
+  defendpoint :bye, call: :bye, replies: [bye: :bye]
+
+  # The agent behind a client's `:` (today `atlas steer`, which the client starts; later
+  # Control): ask for a plan made on the page at `on`, run its kept steps, cancel, stop.
+  # It answers the plan block, after every change, and notices.
+  defmodel :ask do
+    field :request, :string, required: true
+    field :on, :string, required: true
+    field :intent, :string
+  end
+
+  defmodel :run_step do
+    field :n, :integer, required: true
+    field :values, {:map, :string}
+  end
+
+  defmodel :run do
+    field :steps, {:list, :run_step}, required: true
+  end
+
+  defendpoint :ask, call: :ask, takes: :ask, replies: [plan: :plan, notice: :notice]
+  defendpoint :run, call: :run, takes: :run, replies: [plan: :plan, notice: :notice]
+  defendpoint :cancel, call: :cancel, replies: [plan: :plan]
+  defendpoint :stop, call: :stop, replies: [plan: :plan, notice: :notice]
 end

@@ -48,7 +48,7 @@ defmodule AtlasBFF.Targets.Json do
             %{
               "name" => Atom.to_string(endpoint.name),
               "call" => Atom.to_string(endpoint.call),
-              "path" => endpoint.path,
+              "path" => endpoint.path || "",
               "params" => Enum.map(endpoint.params, &Atom.to_string/1),
               "replies" =>
                 Map.new(endpoint.replies, &{Atom.to_string(&1.name), returns(&1.returns)})
@@ -73,6 +73,7 @@ defmodule AtlasBFF.Targets.Json do
   defp returns(other), do: Atom.to_string(other)
 
   defp type({:list, inner}), do: "list of " <> type(inner)
+  defp type({:map, inner}), do: "map of " <> type(inner)
   defp type(type), do: Atom.to_string(type)
 
   defp pretty(value), do: IO.iodata_to_binary(pretty(value, 0)) <> "\n"

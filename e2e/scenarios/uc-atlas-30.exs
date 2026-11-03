@@ -20,7 +20,7 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
 
     see(t2, "No issues yet.")
     open_row(t1, "An issue that moves")
-    see(t1, ~r/In use case\s+#{from}/)
+    see(t1, ~r/In use case[\s─│]+#{from}/u)
   end
 
   step "Update: the use case is a choice, the current one selected; choose the other", fn ->
@@ -31,7 +31,7 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
     press(t1, ["Tab", "Tab", "Tab", "Right"])
     see(t1, "‹ #{to}: Where the issue goes ›")
     at = press(t1, "C-s")
-    stored(t1, ~r/In use case\s+#{to}/, at)
+    stored(t1, ~r/In use case[\s─│]+#{to}/u, at)
     by_hint(t2, "An issue that moves", at)
   end
 

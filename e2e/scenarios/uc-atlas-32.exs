@@ -107,7 +107,10 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     see(t1, ~r/Atlas · test.*\sScenes$/m)
     open_row(t1, "A scene to accept")
     see(t1, "Scene #{scene}: A scene to accept")
-    see(t1, ~r/Progress\s+To test · 1\/1/)
+    # Its page has more lines than its content part shows (the owner, IS-Atlas-75).
+    {got, _} = atlas_json(i, ["get", scene])
+    progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
+    progress == "To test · 1/1" || raise inspect(got["fields"])
     press(t1, "Escape")
     see(t1, ~r/Atlas · test.*\sScenes$/m)
   end
@@ -133,10 +136,15 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     at = press(t1, "C-s")
     stored(t1, "Use case #{use_case}: A use case to accept", at)
     see(t1, "a Accept")
-    press(t1, "Tab")
-    press(t1, ["j", "j", "j", "j"])
-    see(t1, "by melle · Found a bug in the footer")
-    press(t1, ["k", "k", "k", "k", "Tab", "Escape"])
+    # The note is the cause of the fact that removed the link (more lines than the content
+    # part shows, since IS-Atlas-75 adds the owner).
+    {got, _} = atlas_json(i, ["get", use_case])
+    origin = got["origins"]["Accepted by"]
+
+    (origin["by"] == "melle" and origin["cause"] == "Found a bug in the footer") ||
+      raise inspect(origin)
+
+    press(t1, "Escape")
     see(t1, ~r/#{use_case}\s+A use case to accept\s+To test · 1\/1/)
   end
 end

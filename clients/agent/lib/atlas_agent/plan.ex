@@ -108,7 +108,7 @@ defmodule AtlasAgent.Plan do
   defp check_step(%{"tool" => "delete", "key" => key} = step, client, _tools)
        when is_binary(key) do
     case AtlasAgent.delete_confirm(client, key) do
-      {:ok, %{"confirm_to" => to} = confirm} when is_binary(to) ->
+      {:ok, %{"confirm_to" => to} = confirm} when is_map(to) ->
         Map.merge(step, %{"label" => confirm["title"], "inputs" => [], "problem" => nil})
 
       {:ok, confirm} ->

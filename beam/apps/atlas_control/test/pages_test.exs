@@ -112,13 +112,13 @@ defmodule AtlasControl.PagesTest do
       for page <- forms,
           %{"props" => props} <- page.blocks,
           to <- [props["submit_to"], props["confirm_to"]],
-          is_binary(to),
+          is_map(to),
           do: to
 
     assert length(submits_to) == 4
 
     for to <- submits_to,
-        do: assert({:ok, _, _} = AtlasControl.Blocks.endpoint(:submit, to), "#{to} is no submit")
+        do: assert({:ok, _, _} = Pages.submit_call(to), "#{inspect(to)} is no submit")
 
     assert AtlasControl.Blocks.endpoint(:submit, "/k/widget") == :error
   end
@@ -252,7 +252,10 @@ defmodule AtlasControl.PagesTest do
     assert Pages.route("/k/part/new/of_widget/W-1") == route
     %{back: "/k/widget/W-1", blocks: [%{"props" => form}]} = Pages.render(route, @d, [])
     assert form["title"] == "Create part in W-1"
-    assert form["submit_to"] == "/k/part/new/of_widget/W-1"
+
+    assert Pages.submit_call(form["submit_to"]) ==
+             {:ok, :create_under, %{kind: "part", relation: "of_widget", parent: "W-1"}}
+
     assert form["cancel_to"] == "/k/widget/W-1"
   end
 
@@ -583,7 +586,7 @@ defmodule AtlasControl.PagesTest do
     assert %{"required" => true} = hd(form["inputs"])
     # The description marks notes as text of several lines.
     assert Enum.map(form["inputs"], & &1["kind"]) == ["text", "multiline"]
-    assert form["submit_to"] == "/k/widget/new"
+    assert Pages.submit_call(form["submit_to"]) == {:ok, :create, %{kind: "widget"}}
 
     # Without a rule: every field a user may set, still no id.
     %{blocks: [%{"props" => plain}]} = Pages.render({:new, "part"}, @d, [])
@@ -732,7 +735,9 @@ defmodule AtlasControl.PagesTest do
   test "deleting asks first, and is refused while facts still hang under it" do
     free = %{"fact" => fact("W-1", %{"title" => "One"}), "incoming" => %{"of_widget" => []}}
     %{blocks: [%{"props" => confirm}]} = Pages.render({:delete, "widget", "W-1"}, @d, [free])
-    assert confirm["confirm_to"] == "/k/widget/W-1/delete"
+
+    assert Pages.submit_call(confirm["confirm_to"]) ==
+             {:ok, :delete, %{kind: "widget", key: "W-1"}}
 
     held = %{
       "fact" => fact("W-1", %{"title" => "One"}),
@@ -1395,7 +1400,10 @@ defmodule AtlasControl.PagesTest do
       assert inputs["to"]["value"] == "ada"
       assert Enum.map(inputs["to"]["choices"], & &1["value"]) == ["", "ada", "bob"]
       assert inputs["note"]["kind"] == "multiline"
-      assert form["submit_to"] == "/k/widget/W-1/links/checked_by"
+
+      assert Pages.submit_call(form["submit_to"]) ==
+               {:ok, :link, %{kind: "widget", key: "W-1", relation: "checked_by"}}
+
       assert Pages.link_keys("ada, bob ada") == ["ada", "bob"]
       assert Pages.link_keys("") == []
     end
@@ -1482,7 +1490,9 @@ defmodule AtlasControl.PagesTest do
       %{blocks: [%{"props" => confirm}]} =
         Pages.render(route, @d, [widget(%{}), %{"facts" => [done]}], @member)
 
-      assert confirm["confirm_to"] == "/k/widget/W-1/set/approved_by"
+      assert Pages.submit_call(confirm["confirm_to"]) ==
+               {:ok, :accept, %{kind: "widget", key: "W-1", relation: "approved_by"}}
+
       assert confirm["text"] =~ "will be approved by ada"
 
       %{blocks: [%{"props" => confirm}]} =

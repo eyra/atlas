@@ -39,7 +39,7 @@ defmodule AtlasTuiTest do
         "props" => %{
           "title" => "Create thing",
           "submit_label" => "Create",
-          "submit_to" => "/k/thing/new",
+          "submit_to" => %{"endpoint" => "create", "params" => %{"kind" => "thing"}},
           "cancel_to" => "/k/thing",
           "inputs" => [
             %{"name" => "_key", "label" => "Id", "kind" => "text", "required" => true},
@@ -340,7 +340,8 @@ defmodule AtlasTuiTest do
               {:send,
                %{
                  "op" => "submit",
-                 "to" => "/k/thing/new",
+                 "endpoint" => "create",
+                 "params" => %{"kind" => "thing"},
                  "values" => %{"_key" => "T-1", "state" => "b"}
                }}
             ]} =
@@ -564,14 +565,18 @@ defmodule AtlasTuiTest do
               "title" => "Delete T-1?",
               "text" => "Gone.",
               "confirm_label" => "Delete",
-              "confirm_to" => "/k/thing/T-1/delete",
+              "confirm_to" => %{
+                "endpoint" => "delete",
+                "params" => %{"kind" => "thing", "key" => "T-1"}
+              },
               "cancel_to" => "/k/thing/T-1"
             }
           }
         ]
     }
 
-    assert {_, [{:send, %{"op" => "submit", "to" => "/k/thing/T-1/delete"}}]} =
+    assert {_,
+            [{:send, %{"op" => "submit", "endpoint" => "delete", "params" => %{"key" => "T-1"}}}]} =
              press(model(confirm), [{:char, "y"}])
 
     assert {_, [{:send, %{"op" => "open", "to" => "/k/thing/T-1"}}]} =

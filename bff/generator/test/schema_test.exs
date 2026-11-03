@@ -5,7 +5,7 @@ defmodule AtlasBFF.SchemaTest do
     schema = AtlasBFF.Example.__schema__()
     assert %{version: "1.0.0", file: file} = schema
     assert String.ends_with?(file, "test/support/example.ex")
-    assert Enum.map(schema.models, & &1.name) == [:link]
+    assert Enum.map(schema.models, & &1.name) == [:link, :greeting]
     assert Enum.map(schema.blocks, & &1.name) == [:card, :note]
     assert Enum.map(schema.markup, & &1.name) == [:group, :tint]
 

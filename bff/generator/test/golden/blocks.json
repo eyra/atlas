@@ -81,6 +81,17 @@
         "saved": "view model"
       },
       "takes": "values"
+    },
+    {
+      "call": "greet",
+      "name": "greet",
+      "params": [],
+      "path": "",
+      "replies": {
+        "hi": "greeting",
+        "page": "view model"
+      },
+      "takes": "greeting"
     }
   ],
   "markup": [
@@ -120,6 +131,21 @@
         }
       ],
       "name": "link"
+    },
+    {
+      "fields": [
+        {
+          "name": "name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "tags",
+          "required": false,
+          "type": "map of string"
+        }
+      ],
+      "name": "greeting"
     }
   ],
   "pages": [

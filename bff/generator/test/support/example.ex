@@ -10,6 +10,12 @@ defmodule AtlasBFF.Example do
     field :to, :string, required: true
   end
 
+  # A message of its own, and a map: what a path-less endpoint takes.
+  defmodel :greeting do
+    field :name, :string, required: true
+    field :tags, {:map, :string}
+  end
+
   defblock :card do
     field :title, :string, required: true
     field :count, :integer
@@ -38,6 +44,8 @@ defmodule AtlasBFF.Example do
     call: :submit,
     takes: :values,
     replies: [saved: :view_model, refused: :view_model]
+
+  defendpoint :greet, call: :greet, takes: :greeting, replies: [hi: :greeting, page: :view_model]
 end
 
 defmodule AtlasBFF.Example.Server do
