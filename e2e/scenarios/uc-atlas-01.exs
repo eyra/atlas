@@ -7,8 +7,8 @@ scenario "UC-Atlas-01: Manage scenes", fn %{t1: t1, t2: t2, instance: instance} 
   end
 
   step "Create asks only a title and a description; the code is made", fn ->
-    press(t1, "n")
-    form = see(t1, ~r/^ New scene$/m)
+    press(t1, "c")
+    form = see(t1, ~r/^ Create scene$/m)
     for field <- ["Title *", "Description"], do: form =~ field || raise("no #{field}")
     for field <- ["Id", "Flux group", "Status", "Completed", "Flux id"], do: refute_see(t1, field)
 
@@ -33,9 +33,9 @@ scenario "UC-Atlas-01: Manage scenes", fn %{t1: t1, t2: t2, instance: instance} 
     see(t2, ~r/Scene SC-Atlas-\d+: Write the first scene/)
   end
 
-  step "Change: the code is read-only; TUI 2 follows by hint", fn ->
-    press(t1, "e")
-    see(t1, ~r/Change scene SC-Atlas-\d+/)
+  step "Update: the code is read-only; TUI 2 follows by hint", fn ->
+    press(t1, "u")
+    see(t1, ~r/Update SC-Atlas-\d+/)
     see(t1, ~r/Id\s+SC-Atlas-\d+/)
     type(t1, " (changed)")
     at = press(t1, "C-s")
@@ -46,11 +46,11 @@ scenario "UC-Atlas-01: Manage scenes", fn %{t1: t1, t2: t2, instance: instance} 
   step "A refusal: an empty title", fn ->
     press(t1, "Escape")
     see(t1, ~r/› SC-Atlas-\d+  Write the first scene \(changed\)/)
-    press(t1, "n")
-    see(t1, ~r/^ New scene$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create scene$/m)
     at = press(t1, "C-s")
     stored(t1, "title is required", at)
-    see(t1, ~r/^ New scene$/m)
+    see(t1, ~r/^ Create scene$/m)
     press(t1, "Escape")
     see(t1, ~r/› SC-Atlas-\d+  Write the first scene \(changed\)/)
   end
@@ -58,8 +58,8 @@ scenario "UC-Atlas-01: Manage scenes", fn %{t1: t1, t2: t2, instance: instance} 
   step "Delete; TUI 2 follows by hint", fn ->
     press(t2, "Escape")
     see(t2, ~r/› SC-Atlas-\d+  Write the first scene \(changed\)/)
-    press(t1, "n")
-    see(t1, ~r/^ New scene$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create scene$/m)
     type(t1, "To be deleted")
     at = press(t1, "C-s")
     stored(t1, ~r/Scene SC-Atlas-\d+: To be deleted/, at)

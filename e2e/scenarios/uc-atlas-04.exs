@@ -7,22 +7,22 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
   issue = ~r/Issue IS-Atlas-\d+: An issue with pull requests/
 
   step "An issue, with no pull requests yet", fn ->
-    press(t1, "n")
-    see(t1, ~r/^ New scene$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create scene$/m)
     type(t1, "A scene for pull requests")
     at = press(t1, "C-s")
     stored(t1, ~r/Scene SC-Atlas-\d+: A scene for pull requests/, at)
-    press(t1, "a")
-    see(t1, ~r/^ New use case in/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create use case in/m)
     type(t1, "A use case for pull requests")
     at = press(t1, "C-s")
     stored(t1, ~r/Use case UC-Atlas-\d+: A use case for pull requests/, at)
-    press(t1, "a")
-    see(t1, ~r/^ New issue in/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create issue in/m)
     type(t1, "An issue with pull requests")
     at = press(t1, "C-s")
     stored(t1, issue, at)
-    see(t1, "No pull requests yet. Press a to add one.")
+    see(t1, "No pull requests yet. Press c to create one.")
 
     open_row(t2, "A scene for pull requests")
     see(t2, ~r/Scene SC-Atlas-\d+: A scene for pull requests/)
@@ -33,8 +33,8 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
   end
 
   step "Link one: only its URL; the id is made from it", fn ->
-    press(t1, "a")
-    see(t1, ~r/^ New pull request in IS-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
     see(t1, "Url *")
     for field <- ["Title", "State", "Draft"], do: refute_see(t1, field)
     type(t1, url)
@@ -46,8 +46,8 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
     refute_see(t1, ~r/Title\s/)
     by_hint(t2, url, at)
 
-    # Change only moves it to another issue (IS-Atlas-59): the URL is read-only.
-    press(t1, "e")
+    # Update only moves it to another issue (IS-Atlas-59): the URL is read-only.
+    press(t1, "u")
     see(t1, ~r/In issue \*\s+‹ IS-Atlas-\d+: An issue with pull requests ›/)
     see(t1, ~r/Url\s+#{Regex.escape(url)}/)
     for field <- ["Title", "State", "Draft"], do: refute_see(t1, ~r/^\s+#{field}\s/m)
@@ -57,7 +57,7 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
 
   # IS-Atlas-47. The run's browser is a stand-in that records the address.
   step "o opens it in the browser, on its page and on its row in the issue", fn ->
-    see(t1, "d Delete   o Open in browser")
+    see(t1, "d Delete pull request   o Open in browser")
     at = press(t1, "o")
     opened(i, url, at, 1)
     see(t1, "Opened #{url} in the browser")
@@ -76,8 +76,8 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
   step "The same URL again is the same pull request", fn ->
     press(t1, "Escape")
     see(t1, issue)
-    press(t1, "a")
-    see(t1, ~r/^ New pull request in IS-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
     type(t1, url)
     at = press(t1, "C-s")
     stored(t1, "Pull request PR-eyra-atlas-12: #{url}", at)
@@ -87,8 +87,8 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
   end
 
   step "A URL that is not a GitHub pull request is never sent", fn ->
-    press(t1, "a")
-    see(t1, ~r/^ New pull request in IS-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
     type(t1, "https://gitlab.com/eyra/atlas/-/merge_requests/3")
     at = press(t1, "C-s")
     stored(t1, "url must be a GitHub pull request URL", at)
@@ -108,13 +108,13 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
   step "The same URL from another issue is refused", fn ->
     press(t1, "Escape")
     see(t1, ~r/Use case UC-Atlas-\d+: A use case for pull requests/)
-    press(t1, "a")
-    see(t1, ~r/^ New issue in/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create issue in/m)
     type(t1, "Another issue")
     at = press(t1, "C-s")
     stored(t1, ~r/Issue IS-Atlas-\d+: Another issue/, at)
-    press(t1, "a")
-    see(t1, ~r/^ New pull request in IS-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
     type(t1, url)
     at = press(t1, "C-s")
     stored(t1, "PR-eyra-atlas-12 already exists", at)

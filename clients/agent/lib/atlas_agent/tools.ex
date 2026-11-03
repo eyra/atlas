@@ -79,10 +79,20 @@ defmodule AtlasAgent.Tools do
     %{
       "tool" => "set",
       "kind" => kind["kind"],
-      "title" => "Change #{field(kind, "Kind")}",
+      "title" => update_label(kind),
       "fields" => fields,
       "usage" => "set <#{kind["kind"]} key> <field>=<text> ..."
     }
+  end
+
+  # The update action as Control names it on every page ("Update <kind>"); the command's
+  # own verb when Control names none.
+  defp update_label(kind) do
+    Enum.find_value(
+      kind["actions"] || [],
+      "Set #{kind["kind"]}",
+      &(String.ends_with?(&1["to"] || "", "/edit") && &1["label"])
+    )
   end
 
   defp reads do
