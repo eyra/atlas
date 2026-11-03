@@ -10,6 +10,7 @@ defmodule AtlasFlow.Definition do
         "on": "<relation>",                writes on the fact this relation of its fact
                                            points at (its Assignment), not on the fact
         "field": "<property>",             where it writes what the owner is expected to do
+        "state_field": "<property>",       where it writes the name of the state (optional)
         "owner_relation": "<relation>",    where it writes the owner (optional)
         "states": [                        in order: the first that holds is the state
           {"name": ..., "when": {...}, "done": true},

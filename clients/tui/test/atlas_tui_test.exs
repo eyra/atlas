@@ -189,7 +189,9 @@ defmodule AtlasTuiTest do
 
   # A page in two parts, as Control sends an item's page: its main part (the content) and
   # its related part (two lists).
-  defp parted(lines) do
+  defp parted(lines), do: lines |> parted_page() |> model()
+
+  defp parted_page(lines) do
     notes = Enum.map_join(1..lines, "\n", &"Line #{&1} of the notes")
     row = fn label, detail, to -> %{"label" => label, "detail" => detail, "to" => to} end
 
@@ -246,7 +248,48 @@ defmodule AtlasTuiTest do
         }
       ]
     })
+  end
+
+  # The page above with its owner's part first, as Control sends it to the owner.
+  defp with_todo(page) do
+    todo = %{
+      "id" => "todo",
+      "type" => "item",
+      "props" => %{
+        "title" => "Your move: Check it",
+        "fields" => [
+          %{
+            "label" => "Because",
+            "value" => "it is painted",
+            "origin" => %{"since" => "2026-11-03T10:00:00Z", "by" => "flow"}
+          },
+          %{"label" => "How", "value" => "Look it over."},
+          %{"label" => "Keys", "value" => "a Approve"}
+        ]
+      }
+    }
+
+    part = %{
+      "kind" => "part",
+      "start" => "todo",
+      "end" => "todo",
+      "props" => %{"title" => "Your move", "role" => "todo"}
+    }
+
+    page
+    |> Map.merge(%{"blocks" => [todo | page["blocks"]], "markup" => [part | page["markup"]]})
     |> model()
+  end
+
+  test "the owner's part comes first, and gets its room before the references" do
+    m = with_todo(parted_page(60))
+    assert hd(Model.parts(m)) == ["todo"]
+    text = tall(m)
+
+    assert text =~
+             ~r/┌─ Your move ─+┐\n.*Your move: Check it(.*\n)+.*Keys\s+a Approve.*\n.*└─+┘\n.*┌─ Content/u
+
+    assert text =~ "› Wheel"
   end
 
   test "a page in parts: a long content never hides the references" do
