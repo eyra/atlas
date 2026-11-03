@@ -89,6 +89,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
   step "h on a new scene: Hand to… Ada with a deadline, in one change; Flow keeps her", fn ->
     {scene, _} = atlas_json(i, ["put", "scene", "--title", "A scene handed over at once"])
     key = scene["key"]
+    Process.put(:uc06hand, key)
     home(t1)
     open_row(t1, "A scene handed over at once")
     see(t1, "h Hand to…")
@@ -148,6 +149,42 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
       end)
 
     ["Assigned to", "coordinator"] in got["fields"] || raise inspect(got["fields"])
-    got["origins"]["Assigned to"]["cause"] =~ "not all under it is completed" || raise inspect(got)
+
+    got["origins"]["Assigned to"]["cause"] =~ "not all under it is completed" ||
+      raise inspect(got)
   end
+
+  # IS-Atlas-85: Open work, every open fact with its owner, what is expected and its
+  # deadline, late first; what is assigned to one person is the same list, filtered.
+  step "l Open work: every open fact with its owner and what is expected; late comes first",
+       fn ->
+         handed = Process.get(:uc06hand)
+         home(t1)
+         see(t1, "l Open work")
+         press(t1, "l")
+         see(t1, ~r/Atlas · test.*\s+Open work$/m)
+         see(t1, ~r/#{handed}\s+A scene handed over at once/)
+
+         row = fn ->
+           {rows, _} = atlas_json(i, ["list", "assignment"])
+           {Enum.find(rows, &(&1["key"] == handed)), rows}
+         end
+
+         {mine, _} = row.()
+
+         mine["detail"] =~
+           ~r/^ada · Break it down into use cases and issues · Deadline 2099-03-04 09:30/ ||
+           raise inspect(mine)
+
+         # Its deadline passes: it is late, and comes first.
+         {_, at} = atlas_json(i, ["set", "AS-#{handed}", "deadline=2020-05-06 07:08"])
+         by_hint(t1, ~r/#{handed}\s+A scene handed over at once/, at)
+         {mine, [first | _]} = row.()
+
+         mine["detail"] =~
+           ~r/^ada · Break it down into use cases and issues · Late · deadline 2020-05-06 07:08/ ||
+           raise inspect(mine)
+
+         first["key"] == handed || raise "not first: #{inspect(first)}"
+       end
 end
