@@ -1,0 +1,16 @@
+# rela for an Atlas environment on Fly. Built from the repository root:
+#   fly deploy --config fly/<env>/rela.toml   (CI does this on a merge)
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+# The rela version start-test.sh pins, for this machine (linux_amd64).
+COPY rela/scripts /app/rela/scripts
+RUN ATLAS_RELA_BIN=/app/bin /app/rela/scripts/start-test.sh install
+
+COPY rela/schema.yaml rela/data-entry.yaml /app/rela/
+COPY fly/apply-move.sh fly/rela-run.sh fly/counts.sh /app/fly/
+
+CMD ["/app/fly/rela-run.sh"]
