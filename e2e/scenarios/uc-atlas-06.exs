@@ -148,6 +148,8 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
       end)
 
     ["Assigned to", "coordinator"] in got["fields"] || raise inspect(got["fields"])
-    got["origins"]["Assigned to"]["cause"] =~ "not all under it is completed" || raise inspect(got)
+
+    got["origins"]["Assigned to"]["cause"] =~ "not all under it is completed" ||
+      raise inspect(got)
   end
 end
