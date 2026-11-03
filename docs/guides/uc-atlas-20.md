@@ -5,10 +5,10 @@ What you can do: give a scene, use case or issue a title longer than its field, 
 ## Start
 
 ```sh
-atlas tui
+atlas tui --env test
 ```
 
-(See `docs/guides/uc-atlas-01.md` for what it starts. Open a second TUI with `atlas tui` in another terminal to watch the changes arrive there.)
+(See `docs/guides/uc-atlas-01.md` for what it starts. Open a second TUI with `atlas tui --env test` in another terminal to watch the changes arrive there.)
 
 ## Try
 

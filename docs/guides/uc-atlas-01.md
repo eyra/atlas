@@ -2,21 +2,21 @@
 
 What you can do: start the TUI with `--env test`; list, create, open, change and delete scenes; a second TUI shows each change without refreshing.
 
-Test environment only, on this MacBook. Nothing touches prod, Fly or the live rela store.
+Try it in test: `atlas tui --env test`. Without `--env test`, `atlas` opens prod, which holds real data; the header says which one you are in (`Atlas · prod` in white on red, `Atlas · test` plain). Nothing here touches prod, Fly or the live rela store.
 
 ## Start
 
 In any terminal, from any folder:
 
 ```sh
-atlas tui
+atlas tui --env test
 ```
 
-That is all. It starts rela test and the core (Bus, State, Control) in the background when they are not answering, also after a reboot, and opens the TUI. A first start compiles for about half a minute. When the running core is from an older build, `atlas tui` restarts it, so you never try an old build by accident. It also updates `~/projects/eyra/atlas` to the newest develop first.
+That is all. It starts rela test and the core (Bus, State, Control) in the background when they are not answering, also after a reboot, and opens the TUI. A first start compiles for about half a minute. When the running core is from an older build, `atlas tui --env test` restarts it, so you never try an old build by accident. It also updates `~/projects/eyra/atlas` to the newest develop first.
 
-For TUI 2, run `atlas tui` again in a second terminal, beside the first.
+For TUI 2, run `atlas tui --env test` again in a second terminal, beside the first.
 
-More: `atlas status` shows what runs and which build; `atlas logs` follows the core's log; `atlas stop` stops the core (rela keeps running); `atlas restart` restarts it.
+More, each with `--env test`: `atlas status --env test` shows what runs and which build; `atlas logs --env test` follows the core's log; `atlas stop --env test` stops the core (rela keeps running); `atlas restart --env test` restarts it.
 
 Once, to get the `atlas` command: `~/projects/eyra/atlas/bin/atlas install` (it links `~/.local/bin/atlas` to the main clone).
 
@@ -41,7 +41,7 @@ Also try:
 - **Two at once.** Press `n` in both TUIs, give each a title, and save both. They get different codes. If both take the same number, State refuses the second, and its TUI tries the next number by itself (`… is taken; trying …`).
 - **A deleted code.** Delete the newest scene and create another right away. rela keeps a deleted code reserved for a few minutes, so the TUI says the code is taken and moves on to the next number.
 - **A scene with use cases.** Deleting a scene that still has use cases is refused, with the number of use cases (see UC-Atlas-02).
-- **Losing Control.** Run `atlas stop` in a third terminal. Both TUIs say `Not connected to Control. Retrying…` and show nothing old as current. Run `atlas restart`; they come back on the page they were on.
+- **Losing Control.** Run `atlas stop --env test` in a third terminal. Both TUIs say `Not connected to Control. Retrying…` and show nothing old as current. Run `atlas restart --env test`; they come back on the page they were on.
 
 ## What is underneath
 

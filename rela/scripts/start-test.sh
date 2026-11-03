@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Start the Atlas test rela on this Mac: loopback only, its own dataset.
+# Start an Atlas rela (test, or prod with bin/atlas --env prod) on this Mac: loopback
+# only, its own dataset. bin/atlas sets the port, data and binaries per environment.
 #
 #   start-test.sh            # runs in the foreground; Ctrl-C stops it
 #
@@ -45,5 +46,5 @@ cp "$here/schema.yaml" "$here/data-entry.yaml" "$data/"
 
 # No acl.yaml and a loopback bind: every local caller may read and write.
 # RELA_DATAENTRY_USER names the writer in rela's audit log.
-export RELA_DATAENTRY_USER="${RELA_DATAENTRY_USER:-atlas-test}"
+export RELA_DATAENTRY_USER="${RELA_DATAENTRY_USER:-atlas-${ATLAS_ENV:-test}}"
 exec "$bin/rela-server" -project "$data" -bind 127.0.0.1 -port "$port" -quiet

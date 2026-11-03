@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
-# atlas: try Atlas from any folder (test only, for now).
+# atlas: try Atlas from any folder.
 #
-#   atlas              open a TUI; starts rela test and the core in the background when
+#   atlas              open a TUI on prod; starts rela and the core in the background when
 #                      they are not answering, and restarts a core from an older build
 #   atlas tui          the same; open as many as you like, each in its own terminal
-#   atlas stop         stop the core (rela test keeps running)
+#   atlas stop         stop the core (rela keeps running)
 #   atlas restart      stop the core and start this build in the background
 #   atlas status       what runs, and which build
 #   atlas logs         follow the core's log
 #   atlas where        the folder the build comes from
+#   atlas env          the environment a command works on, and its settings file
 #   atlas install      link `atlas` into ~/.local/bin (from the main clone only)
 #   atlas up           run the core in the foreground (what `atlas` starts in the background)
-#   atlas e2e [uc-atlas-01 ...]  the end-to-end test, on a private instance of its own
+#   atlas e2e [uc-atlas-01 ...]  the end-to-end test, on a private test instance of its own
 #   atlas rela-status, atlas rela-stop
 #
-# Every command takes --env test, the default; prod is not built yet. ATLAS_ENV_FILE
-# runs a private instance (other ports and data), so an agent's run never meets Melle's.
-# ATLAS_NO_UPDATE=1 keeps `atlas tui` from updating the main clone first.
+# Every command works on prod unless it gets --env test: `atlas tui --env test`. Scripts,
+# tests and agents always pass --env test, or ATLAS_ENV_FILE: a private instance (other
+# ports and data) whose environment is the file's "env", so a trial never meets Melle's.
+# --env and the file's "env" must agree. ATLAS_NO_UPDATE=1 keeps `atlas tui` from
+# updating the main clone first.
 set -euo pipefail
 
 # The repository this script lives in, also when it is called through a link.
@@ -26,26 +29,39 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd)"
-usage() { sed -n '2,19p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,22p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+
+no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
 
 cmd=tui
 case "${1:-}" in -*|"") ;; *) cmd="$1"; shift ;; esac
-# The end-to-end test makes its own private instance; it never reads env/<env>.json.
-if [ "$cmd" = e2e ]; then cd "$root/e2e" && exec mix atlas.e2e "$@"; fi
-env=test
+env=""
+args=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --env) env="${2:-}"; shift 2 ;;
-    --env=*) env="${1#--env=}"; shift ;;
+    --env) [ -n "${2:-}" ] || no_env; env="$2"; shift 2 ;;
+    --env=?*) env="${1#--env=}"; shift ;;
+    --env=) no_env ;;
     -h|--help) usage ;;
-    *) echo "atlas: unknown option $1" >&2; usage ;;
+    *) [ "$cmd" = e2e ] || { echo "atlas: unknown option $1" >&2; usage; }; args+=("$1"); shift ;;
   esac
 done
 
-if [ "$env" = prod ]; then echo "atlas: prod is not built yet; use --env test" >&2; exit 1; fi
-settings="${ATLAS_ENV_FILE:-$root/env/$env.json}"
+# The end-to-end test makes its own private test instance; it never reads env/<env>.json
+# and never runs on prod.
+if [ "$cmd" = e2e ]; then
+  if [ -n "$env" ] && [ "$env" != test ]; then
+    echo "atlas: e2e runs only on a private test instance, never on $env" >&2; exit 1
+  fi
+  cd "$root/e2e" && exec mix atlas.e2e ${args[@]+"${args[@]}"}
+fi
+
+settings="${ATLAS_ENV_FILE:-}"
+if [ -z "$settings" ]; then
+  env="${env:-prod}"
+  settings="$root/env/$env.json"
+fi
 [ -f "$settings" ] || { echo "atlas: no environment '$env' (no $settings)" >&2; exit 1; }
-export ATLAS_ROOT="$root" ATLAS_ENV="$env"
 
 # A value from the settings file: plutil on macOS, jq elsewhere (CI).
 setting() {
@@ -53,6 +69,15 @@ setting() {
   if command -v plutil >/dev/null; then v="$(plutil -extract "$1" raw -o - "$settings")"; else v="$(jq -er ".$1" "$settings")"; fi
   echo "${v/#\~/$HOME}"
 }
+# The file says which environment it is; a private file without --env is that one.
+file_env="$(setting env)"
+env="${env:-$file_env}"
+case "$env" in test|prod) ;; *) echo "atlas: no environment '$env'; use --env test or --env prod" >&2; exit 1 ;; esac
+if [ "$file_env" != "$env" ]; then
+  echo "atlas: $settings is for $file_env, not $env" >&2; exit 1
+fi
+export ATLAS_ROOT="$root" ATLAS_ENV="$env"
+
 rela_url="$(setting rela.url)"
 port="$(setting control.port)"
 # The rela scripts take their port, data and binaries from these.
@@ -155,6 +180,7 @@ case "$cmd" in
     start_core
     ;;
   status)
+    echo "env:    $env ($settings)"
     echo "build:  $root at $(head_now)"
     if pid="$(core_pid)"; then
       echo "core:   running (pid $pid, build $(cat "$headfile" 2>/dev/null)), log $log"
@@ -167,6 +193,7 @@ case "$cmd" in
     ;;
   logs) exec tail -f "$log" ;;
   where) echo "$root" ;;
+  env) echo "$env $settings" ;;
   install)
     # Only the main clone: a worktree goes away, and its build is not develop.
     if [ "$(main_clone)" != "$root" ]; then

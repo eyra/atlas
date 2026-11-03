@@ -63,7 +63,10 @@ jobs:
           key: rela-26.10.14-linux_amd64
       - run: mix compile --warnings-as-errors && mix format --check-formatted
         working-directory: e2e
-      - run: bin/atlas e2e
+      # bin/atlas itself: prod by default, test only when asked, e2e never on prod.
+      - run: mix test
+        working-directory: e2e
+      - run: bin/atlas e2e --env test
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
