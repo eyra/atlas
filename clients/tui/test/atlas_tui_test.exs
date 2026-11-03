@@ -274,6 +274,30 @@ defmodule AtlasTuiTest do
     refute tall(parted(2)) =~ "more line"
   end
 
+  test "rows start with the id, in a column as wide as the longest; a long label is cut" do
+    rows = [
+      %{"id" => "T-1", "label" => "Short", "detail" => "Testing · 1/2", "to" => "/k/thing/T-1"},
+      %{
+        "id" => "T-1234",
+        "label" => String.duplicate("A very long label ", 6),
+        "detail" => "Merged",
+        "to" => "/k/thing/T-1234"
+      }
+    ]
+
+    [list] = @list["blocks"]
+    lines = model(%{@list | "blocks" => [put_in(list["props"]["rows"], rows)]}) |> screen()
+    [first, second] = Regex.scan(~r/^ (?:›| ) T-1.*$/mu, lines) |> Enum.map(&hd/1)
+
+    assert first =~ ~r/^ › T-1     Short\s+  Testing · 1\/2$/u
+    assert second =~ ~r/^   T-1234  A very long label .*…  Merged$/u
+
+    # The labels and the details each start in one column.
+    at = fn line, text -> line |> String.split(text) |> hd() |> String.length() end
+    assert at.(first, "Short") == at.(second, "A very")
+    assert String.length(first) <= 90 and String.length(second) <= 90
+  end
+
   test "a hint redraws the list and keeps the selected row" do
     {m, _} = press(model(@list), [:down])
     hinted = Model.message(m, %{@list | "reason" => "hint", "position" => 4})
@@ -586,7 +610,7 @@ defmodule AtlasTuiTest do
                "",
                " Parts ────────────────────────────────",
                "",
-               " › Wheel                 P-1"
+               " › Wheel                            P-1"
              ]
     end
 

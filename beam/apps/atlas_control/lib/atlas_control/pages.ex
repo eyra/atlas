@@ -337,6 +337,7 @@ defmodule AtlasControl.Pages do
           |> Enum.sort_by(& &1["key"])
           |> Enum.map(fn fact ->
             Blocks.row(
+              id: fact["key"],
               label: label(spec, fact),
               detail: detail(description, spec, fact),
               to: path({:item, kind, fact["key"]}),
@@ -586,6 +587,7 @@ defmodule AtlasControl.Pages do
           |> Enum.sort_by(& &1["key"])
           |> Enum.map(
             &Blocks.row(
+              id: &1["key"],
               label: label(from_spec, &1),
               detail: detail(description, from_spec, &1),
               to: path({:item, from, &1["key"]}),
@@ -655,7 +657,7 @@ defmodule AtlasControl.Pages do
 
       rows =
         for key <- Enum.sort(keys),
-            do: Blocks.row(label: key, detail: singular(to_spec, to), to: path({:item, to, key}))
+            do: Blocks.row(id: key, label: singular(to_spec, to), to: path({:item, to, key}))
 
       {"parent:" <> relation,
        {String.capitalize(spec["label"] || relation), Blocks.list(rows: rows)}}
@@ -1052,7 +1054,11 @@ defmodule AtlasControl.Pages do
       end
 
     progress = if progress?, do: progress_text(fact["progress"]), else: nil
-    Enum.join([fact["key"] | Enum.reject(shown ++ [progress], &is_nil/1)], " · ")
+    # The id is the row's own; the detail does not repeat it.
+    case Enum.reject(shown ++ [progress], &is_nil/1) do
+      [] -> nil
+      parts -> Enum.join(parts, " · ")
+    end
   end
 
   defp progress_text(%{"label" => label, "count" => count, "of" => of}),

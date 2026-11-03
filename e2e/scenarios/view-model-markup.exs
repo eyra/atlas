@@ -47,7 +47,7 @@ scenario "Markup: a scene's page in two parts, content and references", fn %{t1:
       raise "no content part:\n#{page}"
 
     press(t1, "Escape")
-    see(t1, ~r/ Use cases ─+ │\n │\s+│\n │ › A use case in the section\s+UC-Atlas-\d+/u)
+    see(t1, ~r/ Use cases ─+ │\n │\s+│\n │ › UC-Atlas-\d+\s+A use case in the section/u)
   end
 
   step "Wide: the two parts side by side; tab moves the focus", fn ->
@@ -56,7 +56,7 @@ scenario "Markup: a scene's page in two parts, content and references", fn %{t1:
     resize(t2, 160, 30)
     page = see(t2, ~r/┌─ Content ─+┐ +┌─ References ─+┐/u)
     page =~ ~r/│ Scene SC-Atlas-\d+: A scene with markup\s+│ +│ Use cases ─+ │/u || raise page
-    see(t2, ~r/A use case in the section\s+UC-Atlas-\d+/)
+    see(t2, ~r/UC-Atlas-\d+\s+A use case in the section/)
     see(t2, "↑↓ move")
     press(t2, "Tab")
     see(t2, "↑↓ scroll")

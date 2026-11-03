@@ -7,7 +7,7 @@ defmodule AtlasContract.MixProject do
   def project do
     [
       app: :atlas_contract,
-      version: "0.5.0",
+      version: "0.6.0",
       elixir: "~> 1.18",
       start_permanent: false,
       deps: [{:atlas_spec, path: "../generator"}]
