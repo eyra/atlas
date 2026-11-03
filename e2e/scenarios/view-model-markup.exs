@@ -1,5 +1,5 @@
-# Markup on a scene's page: two parts, its content and its references, each in a border,
-# side by side when the terminal is wide (bff/README.md, "Markup"; IS-Atlas-48).
+# Markup on a scene's page: two parts, its content (main) and its references (related),
+# which the TUI draws as boxes side by side when the terminal is wide (bff/README.md, "Markup"; IS-Atlas-48).
 import AtlasE2E.Scenario
 
 scenario "Markup: a scene's page in two parts, content and references", fn %{t1: t1, t2: t2} ->
