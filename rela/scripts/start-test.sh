@@ -3,6 +3,7 @@
 # only, its own dataset. bin/atlas sets the port, data and binaries per environment.
 #
 #   start-test.sh            # runs in the foreground; Ctrl-C stops it
+#   start-test.sh install    # only install the pinned rela into $ATLAS_RELA_BIN (the Fly image)
 #
 # The description (schema.yaml, plus the data-entry.yaml rela-server needs)
 # next to scripts/ is copied into the data
@@ -15,6 +16,8 @@ root="${ATLAS_TEST_ROOT:-$HOME/.local/share/atlas/test}"
 data="${ATLAS_RELA_DATA:-$root/rela}"
 bin="${ATLAS_RELA_BIN:-$root/bin}"
 port="${ATLAS_RELA_PORT:-7690}"
+# Loopback on a Mac; on Fly the private network (fly/rela/run.sh sets it).
+bind="${ATLAS_RELA_BIND:-127.0.0.1}"
 
 version=26.10.14
 # The archive for this machine: the MacBook and the Mac mini (darwin_arm64), CI (linux_amd64).
@@ -39,12 +42,14 @@ if [ ! -x "$bin/rela-server" ] || [ "$("$bin/rela" version)" != "rela version $v
   tar -xzf "$tmp/$archive" -C "$bin" rela rela-server
   rm -rf "$tmp"
 fi
+[ "${1:-}" != install ] || exit 0
 
 mkdir -p "$data/entities" "$data/relations"
 cp "$here/schema.yaml" "$here/data-entry.yaml" "$data/"
 "$bin/rela" --project "$data" --quiet validate
 
-# No acl.yaml and a loopback bind: every local caller may read and write.
+# No acl.yaml and a loopback bind (on Fly: test's own private network, which only its core
+# and admitted devices join): every caller there may read and write.
 # RELA_DATAENTRY_USER names the writer in rela's audit log.
 export RELA_DATAENTRY_USER="${RELA_DATAENTRY_USER:-atlas-${ATLAS_ENV:-test}}"
-exec "$bin/rela-server" -project "$data" -bind 127.0.0.1 -port "$port" -quiet
+exec "$bin/rela-server" -project "$data" -bind "$bind" -port "$port" -quiet

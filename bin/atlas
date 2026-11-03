@@ -40,6 +40,14 @@
 #                      put, set, get, list, delete, tools, plan, load-plan and the migrations go
 #                      through Control like the TUI, and start nothing: Control must run (`atlas status`).
 #
+# On Fly (IS-Atlas-26): an environment whose settings have a "fly" section (test) runs its
+# core and rela on Fly, on its own private network; a merge to develop deploys them (CI).
+# The commands above reach its Control through a WireGuard tunnel (`fly proxy`) that they
+# open in the background; `atlas status` and `atlas logs` show Fly's machines and logs.
+#   atlas move-to-fly [--from <folder>] [--dry-run]   copy this Mac's test data (rela/ and
+#                      beam/ in <folder>, by default the one the Mac kept test's data in) to
+#                      the Fly apps, replacing theirs (kept there in /data/before-move)
+#
 # Every command works on prod unless it gets --env test: `atlas tui --env test`. Scripts,
 # tests and agents always pass --env test, or ATLAS_ENV_FILE: a private instance (other
 # ports and data) whose environment is the file's "env", so a trial never meets Melle's.
@@ -54,7 +62,9 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
-usage() { sed -n '2,47p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+# The comment above, up to `set -euo pipefail`: the usage.
+header() { sed -n '2,/^set -euo/p' "$root/bin/atlas" | sed '$d' | sed 's/^# \{0,1\}//'; }
+usage() { header; exit 2; }
 
 caller="$PWD"
 no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
@@ -70,7 +80,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-assignment|help) args+=("$1"); shift ;;
+        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-assignment|move-to-fly|help) args+=("$1"); shift ;;
         *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
       esac ;;
   esac
@@ -110,11 +120,26 @@ if [ "$file_env" != "$env" ]; then
 fi
 export ATLAS_ROOT="$root" ATLAS_ENV="$env"
 
-rela_url="$(setting rela.url)"
+has_setting() {
+  if command -v plutil >/dev/null; then plutil -extract "$1" raw -o - "$settings" >/dev/null 2>&1
+  else jq -e ".$1" "$settings" >/dev/null 2>&1; fi
+}
+
 port="$(setting control.port)"
-# The rela scripts take their port, data and binaries from these.
-export ATLAS_RELA_PORT="$(setting rela.port)" ATLAS_RELA_DATA="$(setting rela.data)" ATLAS_RELA_BIN="$(setting rela.bin)"
-export ATLAS_TEST_ROOT="$(dirname "$ATLAS_RELA_DATA")"
+fly_app=""
+if has_setting fly.app; then
+  # The core and rela run on Fly (IS-Atlas-26). control.port is this Mac's end of the
+  # tunnel to Control; this Mac keeps only the tunnel's files and the TUI's agent log.
+  fly_app="$(setting fly.app)"
+  fly_rela_app="$(setting fly.rela_app)"
+  fly_port="$(setting fly.control_port)"
+  export ATLAS_TEST_ROOT="$(setting fly.local)"
+else
+  rela_url="$(setting rela.url)"
+  # The rela scripts take their port, data and binaries from these.
+  export ATLAS_RELA_PORT="$(setting rela.port)" ATLAS_RELA_DATA="$(setting rela.data)" ATLAS_RELA_BIN="$(setting rela.bin)"
+  export ATLAS_TEST_ROOT="$(dirname "$ATLAS_RELA_DATA")"
+fi
 
 # The background core's files, beside rela's (the same files the stopgap used).
 state="$ATLAS_TEST_ROOT"
@@ -222,6 +247,92 @@ ensure_rela() {
   echo "atlas: rela $env ran an older description; restarted it on this build's (its data stays)"
 }
 
+# The tunnel to an environment on Fly: `fly proxy` from this Mac's control.port to Control
+# on the environment's private network, over WireGuard. It runs in the background, like
+# the core does when it runs on this Mac, and the commands open it when it is not.
+tunnel_pidfile() { echo "$ATLAS_TEST_ROOT/tunnel.pid"; }
+tunnel_log() { echo "$ATLAS_TEST_ROOT/tunnel.log"; }
+fly_cli() {
+  command -v fly || command -v flyctl || {
+    echo "atlas: $env runs on Fly; install flyctl (brew install flyctl), then: fly auth login" >&2
+    exit 1
+  }
+}
+tunnel_pid() {
+  local pid; pid="$(cat "$(tunnel_pidfile)" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+stop_tunnel() {
+  local pid; pid="$(tunnel_pid || true)"
+  [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
+  rm -f "$(tunnel_pidfile)"
+}
+ensure_tunnel() {
+  local fly holder
+  if tunnel_pid >/dev/null && listening; then return 0; fi
+  stop_tunnel
+  if listening; then
+    holder="$(lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+    echo "atlas: port $port is taken by pid ${holder:-?}, not by atlas's tunnel to $fly_app; stop it first" >&2
+    exit 1
+  fi
+  fly="$(fly_cli)"
+  mkdir -p "$ATLAS_TEST_ROOT"
+  echo "atlas: opening the tunnel to $env's Control on Fly ($fly_app, over WireGuard)" >&2
+  nohup "$fly" proxy "$port:$fly_port" -a "$fly_app" -q >"$(tunnel_log)" 2>&1 </dev/null &
+  echo $! >"$(tunnel_pidfile)"
+  for _ in $(seq 1 120); do
+    listening && return 0
+    if ! kill -0 "$(cat "$(tunnel_pidfile)")" 2>/dev/null; then
+      echo "atlas: the tunnel to $fly_app did not open; the last lines of $(tunnel_log):" >&2
+      tail -5 "$(tunnel_log)" >&2
+      echo "atlas: is flyctl logged in to the eyra organisation? fly auth whoami" >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+  echo "atlas: the tunnel to $fly_app did not open within a minute; see $(tunnel_log)" >&2
+  exit 1
+}
+
+# What only an environment on Fly does differently; the rest of the commands below serve both.
+if [ -n "$fly_app" ]; then
+  on_fly="$env runs on Fly ($fly_app and $fly_rela_app); a merge to develop deploys it"
+  case "$cmd" in
+    up) echo "atlas: $on_fly, so there is no core to run here" >&2; exit 1 ;;
+    stop) stop_tunnel; echo "atlas: closed this Mac's tunnel to $fly_app; $on_fly"; exit 0 ;;
+    restart)
+      stop_tunnel; ensure_tunnel
+      echo "atlas: reopened the tunnel; $on_fly, so its build is develop's (atlas status)"
+      exit 0 ;;
+    status)
+      echo "env:    $env ($settings), on Fly"
+      echo "build:  $root at $(head_now) (this Mac's clients; the core is what CI deployed, below)"
+      if pid="$(tunnel_pid)" && listening; then
+        echo "tunnel: open (pid $pid), 127.0.0.1:$port -> $fly_app:$fly_port, log $(tunnel_log)"
+      else
+        echo "tunnel: closed; any command opens it"
+      fi
+      fly="$(fly_cli)"
+      for app in "$fly_app" "$fly_rela_app"; do
+        "$fly" status -a "$app" 2>&1 | sed '/^$/d; s/^/  /' || true
+      done
+      exit 0 ;;
+    logs) exec "$(fly_cli)" logs -a "$fly_app" ;;
+    rela-status) exec "$(fly_cli)" status -a "$fly_rela_app" ;;
+    rela-stop) echo "atlas: $on_fly; rela keeps running there" >&2; exit 1 ;;
+    migrate-*) echo "atlas: the migrations read rela on this Mac; $on_fly" >&2; exit 1 ;;
+    move-to-fly)
+      export ATLAS_FLY_APP="$fly_app" ATLAS_FLY_RELA_APP="$fly_rela_app"
+      export ATLAS_MOVE_FROM="$(setting fly.move_from)"
+      exec "$root/fly/move-to-fly.sh" ${args[@]+"${args[@]}"} ;;
+    put|set|get|list|delete|tools|plan|steer|help|load-plan) ensure_tunnel ;;
+  esac
+elif [ "$cmd" = move-to-fly ]; then
+  echo "atlas: $env does not run on Fly ($settings has no \"fly\")" >&2
+  exit 1
+fi
+
 # The migrations this script offers, from its own usage above.
 migrations() {
   local found
@@ -232,9 +343,9 @@ migrations() {
 case "$cmd" in
   tui)
     update_build
-    ensure_rela
+    if [ -n "$fly_app" ]; then ensure_tunnel; else ensure_rela; fi
     clean_build
-    ensure_core
+    [ -n "$fly_app" ] || ensure_core
     # Ctrl-S saves a form; without this the terminal would take it as "pause output".
     saved="$(stty -g 2>/dev/null || true)"
     stty -ixon 2>/dev/null || true
@@ -296,7 +407,7 @@ case "$cmd" in
     kind_named=""
     for arg in ${args[@]+"${args[@]}"}; do case "$arg" in -*) ;; *) kind_named=1 ;; esac; done
     if [ "$cmd" = help ] && [ -z "$kind_named" ] && [[ " ${args[*]-} " != *" --json "* ]]; then
-      sed -n '2,47p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
+      header; echo
     fi
     clean_build
     cd "$root/clients/agent"
