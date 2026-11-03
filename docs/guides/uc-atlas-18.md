@@ -49,7 +49,7 @@ The agent (`atlas steer`) runs one step at a time and reads its messages between
 ## What changed for this
 
 - **The agent:** the pause between steps; steps not run say why; after a refusal it asks the planner what next, with what happened (`before`).
-- **Control's contract:** the plan block's `before` (spec 0.5.0).
+- **Control's contract:** the plan block's `before` (contract 0.5.0).
 - **The agent:** a plan of at most `agent.ask_above` steps runs without asking (test and prod: 1).
 - **The TUI:** "Stopping after this step…" is cleared when the plan ends.
 - **The end-to-end test:** `e2e/scenarios/uc-atlas-18.exs`.
