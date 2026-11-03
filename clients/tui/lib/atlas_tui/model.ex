@@ -223,7 +223,7 @@ defmodule AtlasTui.Model do
   def parts(%__MODULE__{markup: []}), do: []
 
   def parts(model) do
-    case AtlasSpec.Markup.tree(model.ids, model.markup) do
+    case AtlasBFF.Markup.tree(model.ids, model.markup) do
       [{:markup, %{"value" => %Columns{}}, [_, _ | _] = columns}] -> Enum.map(columns, &ids_in/1)
       _ -> []
     end
