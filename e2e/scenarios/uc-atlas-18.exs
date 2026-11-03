@@ -1,0 +1,69 @@
+# UC-Atlas-18: run, follow and stop the steps (docs/guides/uc-atlas-18.md). The instance
+# waits agent.step_pause_ms (500) between steps, so each one can be seen, and stopped.
+import AtlasE2E.Scenario
+
+scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, instance: i} ->
+  description = """
+  Melle watches the agent work.
+
+  - Watch the first step
+  - Watch the second step
+  - Watch the third step
+  """
+
+  row = fn title -> ~r/#{Regex.escape(title)}\s+UC-Atlas-\d+/ end
+
+  scene = fn title ->
+    {scene, at} =
+      atlas_json(i, ["put", "scene", "--title", title, "--description", "-"], 0, description)
+
+    for t <- [t1, t2] do
+      by_hint(t, title, at)
+      open_row(t, title)
+      see(t, "No use cases yet.")
+    end
+
+    scene["key"]
+  end
+
+  ask = fn ->
+    press(t1, ":")
+    type(t1, "propose use cases from this scene's description")
+    press(t1, "Enter")
+    see(t1, "Proposed: 3 steps", 10_000)
+  end
+
+  step "Each step shows as it runs; TUI 2 shows each by hint", fn ->
+    scene.("A scene to watch")
+    ask.()
+    at = press(t1, "Enter")
+    see(t1, "Running: 1 of 3 stored")
+    by_hint(t2, row.("Watch the first step"), at)
+    refute_see(t2, row.("Watch the third step"))
+    see(t1, "esc stop after this step")
+    see(t1, "Done: 3 of 3 stored", 5_000)
+    see(t2, row.("Watch the third step"))
+    press(t1, "Enter")
+    for t <- [t1, t2], do: home(t)
+  end
+
+  step "esc stops the run before its next step; stored steps stay", fn ->
+    key = scene.("A scene to stop")
+    ask.()
+    press(t1, "Enter")
+    see(t1, "Running: 1 of 3 stored")
+    press(t1, "Escape")
+    see(t1, "Stopped: 1 of 3 stored", 3_000)
+    screen = see(t1, "Not run: stopped before it.")
+    length(String.split(screen, "Not run: stopped before it.")) == 3 || raise screen
+    refute_see(t1, "Stopping after this step")
+
+    {got, _} = atlas_json(i, ["get", key])
+    [%{"label" => "Watch the first step"}] = hd(got["lists"])["rows"]
+    see(t2, row.("Watch the first step"))
+    refute_see(t2, row.("Watch the second step"))
+
+    press(t1, "Enter")
+    see(t1, row.("Watch the first step"))
+  end
+end

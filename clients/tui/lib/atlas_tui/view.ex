@@ -312,7 +312,9 @@ defmodule AtlasTui.View do
           []
 
         text ->
-          style = if step.state in ["blocked", "refused"], do: :error, else: :ok
+          style =
+            %{"blocked" => :error, "refused" => :error, "not_run" => :dim}[step.state] || :ok
+
           Enum.map(Text.wrap(text, width - 9), &[{style, "       " <> &1}])
       end
 

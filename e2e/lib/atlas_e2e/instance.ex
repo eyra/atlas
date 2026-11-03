@@ -58,7 +58,9 @@ defmodule AtlasE2E.Instance do
       # The planning agent is a scripted stand-in, so no model is needed (UC-Atlas-16).
       "agent" => %{
         "planner" => ["elixir", Path.join(@root, "e2e/fixtures/planner.exs")],
-        "name" => "the e2e stand-in"
+        "name" => "the e2e stand-in",
+        # Long enough to see each step go, and to stop a run between two (UC-Atlas-18).
+        "step_pause_ms" => 500
       }
     }
 

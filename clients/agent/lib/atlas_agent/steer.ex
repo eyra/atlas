@@ -21,6 +21,10 @@ defmodule AtlasAgent.Steer do
   Nothing is written except by `run`, and only the steps of the plan it was given, so
   nothing the planner answers runs before a person accepts it. Each plan and each run
   has a Control connection of its own, closed when it is done.
+
+  A run goes one step at a time, and waits `agent.step_pause_ms` (from the settings, 0 by
+  default) before the next, so a person can follow it. A stop is seen before the next
+  step, also during that wait (UC-Atlas-18); the steps not run say so.
   """
 
   alias AtlasAgent.{Client, Plan}
@@ -186,7 +190,7 @@ defmodule AtlasAgent.Steer do
 
     case write(run.client, step) do
       {:ok, key} ->
-        send(self(), :step)
+        Process.send_after(self(), :step, pause(state))
         state = put_step(state, n, %{"state" => "stored", "detail" => "Stored as #{key}."})
         show(%{state | run: %{run | order: rest}})
 
@@ -212,11 +216,19 @@ defmodule AtlasAgent.Steer do
     steps =
       Enum.map(
         plan.steps,
-        &if(&1["n"] in run.order, do: Map.put(&1, "state", "not_run"), else: &1)
+        &if(&1["n"] in run.order,
+          do: Map.merge(&1, %{"state" => "not_run", "detail" => not_run(outcome)}),
+          else: &1
+        )
       )
 
     show(%{state | run: nil, plan: %{plan | state: outcome, steps: steps}})
   end
+
+  defp not_run("stopped"), do: "Not run: stopped before it."
+  defp not_run(_outcome), do: "Not run: an earlier step was refused."
+
+  defp pause(state), do: get_in(state.settings, ["agent", "step_pause_ms"]) || 0
 
   defp put_step(%{plan: plan} = state, n, change) do
     steps = Enum.map(plan.steps, &if(&1["n"] == n, do: Map.merge(&1, change), else: &1))
