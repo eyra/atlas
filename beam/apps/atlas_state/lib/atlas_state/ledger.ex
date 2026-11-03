@@ -41,7 +41,8 @@ defmodule AtlasState.Ledger do
        t0 = System.monotonic_time(:microsecond)
        r = :dets.sync(table)
        require Logger
-       Logger.info("DETS ledger sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       d = div(System.monotonic_time(:microsecond) - t0, 1000)
+       if d >= 20, do: Logger.warning("DETS ledger sync #{d}ms")
        r
      end).()
 
@@ -55,7 +56,8 @@ defmodule AtlasState.Ledger do
        t0 = System.monotonic_time(:microsecond)
        r = :dets.sync(table)
        require Logger
-       Logger.info("DETS ledger sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       d = div(System.monotonic_time(:microsecond) - t0, 1000)
+       if d >= 20, do: Logger.warning("DETS ledger sync #{d}ms")
        r
      end).()
   end

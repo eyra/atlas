@@ -694,10 +694,6 @@ defmodule AtlasControl.Session do
   end
 
   defp send_client(state, message) do
-    Logger.info(
-      "SESSION #{inspect(self())} to client #{message["op"]} #{message["reason"]} #{message["path"]} #{inspect(message["notice"] || message["text"])}"
-    )
-
     case :gen_tcp.send(state.socket, [JSON.encode!(message), "\n"]) do
       :ok -> :ok
       {:error, reason} -> Logger.debug("Control could not reach its client: #{inspect(reason)}")

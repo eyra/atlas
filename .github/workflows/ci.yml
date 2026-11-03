@@ -129,12 +129,19 @@ jobs:
       # bin/atlas itself: prod by default, test only when asked, e2e never on prod.
       - run: mix test
         working-directory: e2e
+      # DIAGNOSTICS (IS-Atlas-80, temporary): the kernel's I/O pressure and dirty pages every 100 ms.
+      - name: Sample I/O pressure
+        run: |
+          mkdir -p io-samples
+          nohup bash -c 'while true; do echo "$(date +%H:%M:%S.%3N) $(grep -E "^(Dirty|Writeback):" /proc/meminfo | tr -s " " | tr "\n" " ")| $(tr "\n" " " < /proc/pressure/io)"; sleep 0.1; done' > io-samples/io.log 2>&1 &
       - run: bin/atlas e2e --env test
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-screens-${{ matrix.run }}
-          path: e2e/artifacts
+          path: |
+            e2e/artifacts
+            io-samples
 
   # A merge to develop deploys test on Fly (d-0014, IS-Atlas-26): rela first, then the core,
   # once every check above passed; then a smoke check against the deployed test, over

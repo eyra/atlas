@@ -33,7 +33,8 @@ defmodule AtlasState.Links do
        t0 = System.monotonic_time(:microsecond)
        r = :dets.sync(table)
        require Logger
-       Logger.info("DETS links sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       d = div(System.monotonic_time(:microsecond) - t0, 1000)
+       if d >= 20, do: Logger.warning("DETS links sync #{d}ms")
        r
      end).()
   end
@@ -73,7 +74,8 @@ defmodule AtlasState.Links do
        t0 = System.monotonic_time(:microsecond)
        r = :dets.sync(table)
        require Logger
-       Logger.info("DETS links sync #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms")
+       d = div(System.monotonic_time(:microsecond) - t0, 1000)
+       if d >= 20, do: Logger.warning("DETS links sync #{d}ms")
        r
      end).()
   end

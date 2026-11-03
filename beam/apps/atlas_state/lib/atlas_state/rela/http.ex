@@ -151,9 +151,8 @@ defmodule AtlasState.Rela.Http do
     r = :httpc.request(method, request, options, body_format: :binary)
     require Logger
 
-    Logger.info(
-      "HTTP #{method} #{url} #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms #{elem(r, 0)}"
-    )
+    d = div(System.monotonic_time(:microsecond) - t0, 1000)
+    if d >= 50, do: Logger.warning("HTTP #{method} #{url} #{d}ms #{elem(r, 0)}")
 
     case r do
       {:ok, {{_, status, _}, headers, raw}} ->
