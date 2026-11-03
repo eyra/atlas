@@ -24,25 +24,28 @@ atlas status  # what runs, and which build (also: atlas logs, atlas stop, atlas 
 |---|---|
 | `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. |
 | `clients/tui/` | The TUI, a client of Control. Renders Control's blocks; knows no entity. Not part of the BEAM platform. |
-| `spec/control/` | Control's spec: blocks, wire format, protocol. The spec itself is Elixir in `atlas_control`; `mix atlas.gen` makes server and client code from it. |
+| `spec/` | Control's spec, in three parts (ADR 0001): `generator/` (the DSL, the rules of markup, the targets, `mix atlas.gen`; none of Atlas's values), `contract/` (the blocks, models and markup Control sends; only that), `targets/` (generated files: `json/blocks.json` for clients in other languages). Control and the TUI read the contract at compile time. `spec/README.md` has the view model, the wire format and the protocol. |
 | `rela/` | rela's description (`schema.yaml`): every entity Atlas knows. `atlas.json` adds what this rela cannot hold, as data per kind: which fields a create asks for, how ids are made, defaults, fields only a connector fills. Plus the scripts that run the rela test instance. |
 | `env/` | One settings file per environment (`test.json`), read by the core and the clients. |
 | `bin/atlas` | The `atlas` command: starts the environment in the background and opens the TUI. `bin/atlas install` links it into `~/.local/bin` from the main clone. |
 | `docs/guides/` | How to try each use case. |
+| `docs/adr/` | Decisions, one short record each. |
 | `e2e/` | The end-to-end test: one scenario per use case, run on a private instance with two TUIs in tmux. |
 
 ## Rules the tests check
 
 - Layers talk only over the Bus: no layer depends on, calls or names another (`beam/apps/atlas_bus/test/boundary_test.exs`).
 - Nothing on the BEAM side or in the TUI names an entity; entities live in `rela/schema.yaml` only (same test).
-- The generated block code matches Control's spec (`mix atlas.gen --check`).
+- The generated files match the contract, and none is left over (`mix atlas.gen --check` in `spec/contract`).
+- The generator holds none of Atlas's values and compiles without the contract; its targets read only `__schema__/0`.
 
 ## Develop
 
 ```sh
 cd beam && mix test          # Bus, State, Control (with a fake rela and a fake State)
 cd clients/tui && mix test   # the TUI
-cd beam && mix atlas.gen     # after changing Control's spec
+cd spec/generator && mix test   # the DSL, the rules of markup, the targets (on a neutral contract)
+cd spec/contract && mix atlas.gen   # after changing the contract: writes spec/targets/
 bin/atlas e2e                # the end-to-end test (needs tmux); also: cd e2e && mix atlas.e2e
 ```
 

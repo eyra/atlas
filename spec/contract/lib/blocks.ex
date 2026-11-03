@@ -1,16 +1,16 @@
-defmodule AtlasControl.Spec.Blocks do
+defmodule AtlasContract.Blocks do
   @moduledoc """
   Control's block catalogue: what Control sends and every client renders.
 
   Blocks know nothing of what they show. Control fills them from rela's description and
   facts; a client renders them without knowing any kind of fact.
 
-  This file is the single source of the spec (the DSL is `AtlasControl.Spec`); it lives in
-  spec/control and compiles into Control. `mix atlas.gen` turns it into server code
-  (`AtlasControl.Blocks`), client code for the TUI (`AtlasTui.Blocks`) and
-  `spec/control/blocks.json` for other clients.
+  The contract, the single source of the spec, written in the generator's DSL
+  (`AtlasSpec.Schema`). Control and the TUI read it at compile time
+  (`AtlasControl.Blocks`, `AtlasTui.Blocks`); `mix atlas.gen` here writes
+  `spec/targets/json/blocks.json` for clients in other languages.
   """
-  use AtlasControl.Spec
+  use AtlasSpec.Schema
 
   version "0.2.0"
 
@@ -90,7 +90,7 @@ defmodule AtlasControl.Spec.Blocks do
   end
 
   # Markup: kinds that cover a stretch of a view model's blocks. All markup nests, of
-  # every kind; see AtlasSpec.Markup (spec/control/rules/markup.ex).
+  # every kind; see AtlasSpec.Markup in the generator.
 
   # A titled part of the view; a client may let the user fold a collapsible one.
   defmarkup :section do

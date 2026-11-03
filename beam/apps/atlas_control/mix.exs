@@ -20,12 +20,11 @@ defmodule AtlasControl.MixProject do
     [extra_applications: [:logger], mod: {AtlasControl.Application, []}]
   end
 
-  # The block catalogue lives with the rest of Control's spec, in spec/control.
-  @spec_dir Path.expand("../../../spec/control", __DIR__)
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
-  defp elixirc_paths(:test), do: ["lib", @spec_dir, "test/support"]
-  defp elixirc_paths(_), do: ["lib", @spec_dir]
-
-  # Control reaches the other layers only over the Bus.
-  defp deps, do: [{:atlas_bus, in_umbrella: true}]
+  # Control reaches the other layers only over the Bus. Its blocks come from Control's
+  # contract (spec/contract), read at compile time.
+  defp deps,
+    do: [{:atlas_bus, in_umbrella: true}, {:atlas_contract, path: "../../../spec/contract"}]
 end

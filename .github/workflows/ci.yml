@@ -6,6 +6,48 @@ on:
   pull_request:
 
 jobs:
+  generator:
+    name: Spec generator on its own
+    runs-on: ubuntu-latest
+    env:
+      MIX_ENV: test
+    defaults:
+      run:
+        working-directory: spec/generator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.18"
+      - name: The generator holds none of Atlas's values
+        run: |
+          if grep -rniE 'AtlasContract|AtlasControl|AtlasTui|submit_to|cancel_to|confirm_to|\.\./contract|spec/contract|"0\.2\.0"' lib test mix.exs; then
+            echo "::error::spec/generator mentions Atlas's contract. Keep Atlas's values in spec/contract."
+            exit 1
+          fi
+      # Compiled and tested without spec/contract, on a neutral example contract.
+      - run: mix compile --warnings-as-errors
+      - run: mix format --check-formatted
+      - run: mix test --warnings-as-errors
+
+  contract:
+    name: Contract and its file targets
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spec/contract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.18"
+      - run: mix compile --warnings-as-errors
+      - run: mix format --check-formatted
+      # Fails when a file in spec/targets differs from what the contract generates, or is left over.
+      - run: mix atlas.gen --check
+
   beam:
     name: Bus, State, Control
     runs-on: ubuntu-latest
@@ -22,7 +64,6 @@ jobs:
           elixir-version: "1.18"
       - run: mix compile --warnings-as-errors
       - run: mix format --check-formatted
-      - run: mix atlas.gen --check
       - run: mix test
 
   tui:

@@ -1,0 +1,85 @@
+{
+  "blocks": [
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "count",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "links",
+          "required": false,
+          "type": "list of link"
+        }
+      ],
+      "name": "card"
+    },
+    {
+      "fields": [
+        {
+          "name": "text",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "done",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "name": "note"
+    }
+  ],
+  "markup": [
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "group"
+    },
+    {
+      "fields": [
+        {
+          "name": "shade",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "tint"
+    }
+  ],
+  "models": [
+    {
+      "fields": [
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "link"
+    }
+  ],
+  "version": "1.0.0",
+  "wire": {
+    "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
+    "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",
+    "props": "an optional prop without a value is left out",
+    "view_model": "{\"blocks\": [<block>], \"markup\": [<markup>]}; all markup nests"
+  }
+}
