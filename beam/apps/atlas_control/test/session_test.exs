@@ -277,6 +277,45 @@ defmodule AtlasControl.SessionTest do
     refute Map.has_key?(FakeStore.last_fact(), "links")
   end
 
+  test "a limited relation: a create or a move to a full parent is refused, never sent",
+       %{port: port} do
+    FakeStore.link("P-1", "W-1")
+    FakeStore.link("P-2", "W-1")
+    FakeStore.put("T-a-1", %{"name" => "#a/1", "note" => "live"}, "tag", %{"on_part" => ["P-1"]})
+    FakeStore.put("T-b-1", %{"name" => "#b/1", "note" => "live"}, "tag", %{"on_part" => ["P-2"]})
+    a = client(port)
+    next(a, "page")
+
+    put(a, %{"op" => "submit", "to" => "/k/tag/new/on_part/P-1", "values" => %{"name" => "#c/1"}})
+    assert %{"tone" => "error", "text" => "Not sent: the form says why."} = next(a, "notice")
+
+    assert %{"reason" => "refused", "blocks" => [%{"props" => %{"errors" => [error]}}]} =
+             next(a, "page")
+
+    assert error == "P-1 already has T-a-1 (live); one tag per part"
+    assert FakeStore.last_fact() == nil
+
+    put(a, %{"op" => "open", "to" => "/k/tag/T-b-1/edit"})
+    next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/tag/T-b-1/edit",
+      "values" => %{"name" => "#b/1", "on_part" => "P-1"}
+    })
+
+    assert %{"reason" => "refused", "blocks" => [%{"props" => %{"errors" => [^error]}}]} =
+             next(a, "page")
+
+    # Once the one there no longer counts, the same create goes through.
+    FakeStore.put("T-a-1", %{"name" => "#a/1", "note" => "dropped"}, "tag", %{
+      "on_part" => ["P-1"]
+    })
+
+    put(a, %{"op" => "submit", "to" => "/k/tag/new/on_part/P-1", "values" => %{"name" => "#c/1"}})
+    assert %{"path" => "/k/tag/T-c-1", "reason" => "stored"} = next(a, "page")
+  end
+
   test "a client that knows only the parent's key submits to _parent", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     a = client(port)

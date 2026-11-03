@@ -22,6 +22,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-25.md`: how far a scene and its use cases are, from the issues under them (UC-Atlas-25).
 - `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
 - `docs/guides/uc-atlas-30.md`: move an item to another parent, in the TUI and with `atlas set` (UC-Atlas-30, IS-Atlas-59).
+- `docs/guides/uc-atlas-31.md`: an issue has one open or merged pull request; a second is refused, and says why (UC-Atlas-31, IS-Atlas-60).
 
 ```sh
 atlas                     # prod: starts what is needed in the background, then opens a TUI
