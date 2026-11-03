@@ -461,6 +461,7 @@ defmodule AtlasTui.View do
     about =
       [
         {"You asked", plan.request},
+        {"Before", plan.before},
         {"By", plan.by},
         {"It says", plan.summary}
       ]
@@ -528,7 +529,9 @@ defmodule AtlasTui.View do
           []
 
         text ->
-          style = if step.state in ["blocked", "refused"], do: :error, else: :ok
+          style =
+            %{"blocked" => :error, "refused" => :error, "not_run" => :dim}[step.state] || :ok
+
           Enum.map(Text.wrap(text, width - 9), &[{style, "       " <> &1}])
       end
 
