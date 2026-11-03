@@ -31,6 +31,17 @@ When State refuses a step, the run stops there, and the agent proposes what next
 
 With Claude as the planner, the summary says what was refused and why. Claude is told never to propose the refused step again only to get it stored.
 
+### Small plans run without asking
+
+A plan of at most `agent.ask_above` steps (1 by default, in `env/<env>.json`; 0 asks always) runs at once, as long as every step can run and none deletes. A plan made after a refusal always asks.
+
+| Step | Keys | What you should see |
+|---|---|---|
+| One step | on a scene: `:`, `rename this scene to A day in Atlas`, `enter` | No question: `Running …, without asking`, then `Done: 1 of 1 stored, without asking`. The scene's new title shows in both TUIs. |
+| More steps | `:`, `propose use cases from this scene's description` | `Proposed: N steps`: it asks, as before. |
+
+A plan that ran by itself shows like an accepted one, so each step can still be overruled (UC-Atlas-19).
+
 ## How it works
 
 The agent (`atlas steer`) runs one step at a time and reads its messages between steps, so a stop is seen before the next step. It waits `agent.step_pause_ms` between steps, set in `env/<env>.json` and 0 when unset. That is long enough to follow a run and to stop it. The end-to-end test uses 500.
@@ -39,5 +50,6 @@ The agent (`atlas steer`) runs one step at a time and reads its messages between
 
 - **The agent:** the pause between steps; steps not run say why; after a refusal it asks the planner what next, with what happened (`before`).
 - **Control's contract:** the plan block's `before` (spec 0.5.0).
+- **The agent:** a plan of at most `agent.ask_above` steps runs without asking (test and prod: 1).
 - **The TUI:** "Stopping after this step…" is cleared when the plan ends.
 - **The end-to-end test:** `e2e/scenarios/uc-atlas-18.exs`.
