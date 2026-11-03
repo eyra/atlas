@@ -155,19 +155,24 @@ defmodule AtlasFlow.Engine do
   end
 
   # A fact's process, started when it has none. It finds out itself whether it is open.
+  # The Registry forgets a stopped process only a moment after it stopped, so the one it
+  # names may be gone: a fact that reopens right after it was done gets a new process then,
+  # and does not wait for the next round (IS-Atlas-86). Starting one under the same name
+  # works while the Registry still names the stopped one.
   defp ensure(kind, key, state) do
     case Registry.lookup(AtlasFlow.Items, {kind, key}) do
-      [{pid, _}] ->
-        pid
+      [{pid, _}] -> if Process.alive?(pid), do: pid, else: start(kind, key, state)
+      [] -> start(kind, key, state)
+    end
+  end
 
-      [] ->
-        spec = {Item, {kind, key, every: state.every}}
+  defp start(kind, key, state) do
+    spec = {Item, {kind, key, every: state.every}}
 
-        case DynamicSupervisor.start_child(AtlasFlow.Supervisor, spec) do
-          {:ok, pid} -> pid
-          {:error, {:already_started, pid}} -> pid
-          other -> Logger.warning("flow could not start #{key}: #{inspect(other)}")
-        end
+    case DynamicSupervisor.start_child(AtlasFlow.Supervisor, spec) do
+      {:ok, pid} -> pid
+      {:error, {:already_started, pid}} -> pid
+      other -> Logger.warning("flow could not start #{key}: #{inspect(other)}")
     end
   end
 
