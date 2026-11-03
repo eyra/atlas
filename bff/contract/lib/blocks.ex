@@ -12,7 +12,8 @@ defmodule AtlasBFFContract.Blocks do
   """
   use AtlasBFF.Schema
 
-  version "0.6.0"
+  # 0.7.0: markup names meaning; part (main, related) replaces border and columns.
+  version "0.7.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -130,22 +131,22 @@ defmodule AtlasBFFContract.Blocks do
   end
 
   # Markup: kinds that cover a stretch of a view model's blocks. All markup nests, of
-  # every kind; see AtlasBFF.Markup in the generator.
+  # every kind; see AtlasBFF.Markup in the generator. Markup says what a stretch means,
+  # never how it looks: each client decides the layout (boxes, columns, tabs) itself.
+  # Ask of every new kind: does it name a meaning, or an appearance?
 
-  # A titled part of the view; a client may let the user fold a collapsible one.
+  # A top-level division of a view, with its title. `role` says what it holds: `main`
+  # (the item itself) or `related` (what it links to). Parts do not nest in parts;
+  # sections nest in parts.
+  defmarkup :part do
+    field :title, :string, required: true
+    field :role, :string, required: true
+  end
+
+  # A titled stretch of the view; a client may let the user fold a collapsible one.
   defmarkup :section do
     field :title, :string, required: true
     field :collapsible, :boolean
-  end
-
-  # A line drawn around the blocks, with an optional title in it.
-  defmarkup :border do
-    field :title, :string
-  end
-
-  # The blocks side by side, `count` to a row; a client too narrow stacks them.
-  defmarkup :columns do
-    field :count, :integer, required: true
   end
 
   # The blocks marked, in a tone: info, ok, error or pending.

@@ -414,23 +414,21 @@ defmodule AtlasControl.Pages do
              child_list(description, {relation, from, rel_spec}, key, child_answer, create_key)}
           end)
 
-        # Two parts, side by side where there is room: the content (the fact itself, and
-        # later what is said about it) and its references (the related lists, then the
-        # facts it points at). Each list in a section that carries its title.
+        # Two parts, by what they hold, never how they look: the main part (the fact
+        # itself, and later what is said about it) and the related part (the related
+        # lists, then the facts it points at). Each list in a section that carries its
+        # title. A client lays the parts out as it sees fit.
         references = lists ++ parent_lists(description, kind, fact)
         ids = for {id, _} <- references, do: id
+        main = Blocks.part("item", "item", title: "Content", role: "main")
 
         markup =
           case ids do
             [] ->
-              [Blocks.border("item", "item", title: "Content")]
+              [main]
 
             [first | _] ->
-              [
-                Blocks.columns("item", List.last(ids), count: 2),
-                Blocks.border("item", "item", title: "Content"),
-                Blocks.border(first, List.last(ids), title: "References")
-              ] ++
+              [main, Blocks.part(first, List.last(ids), title: "References", role: "related")] ++
                 for {id, {title, _list}} <- references, do: Blocks.section(id, id, title: title)
           end
 

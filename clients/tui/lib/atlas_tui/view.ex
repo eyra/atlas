@@ -5,14 +5,13 @@ defmodule AtlasTui.View do
   """
 
   alias AtlasTui.Blocks.{
-    Border,
-    Columns,
     Confirm,
     Fallback,
     Form,
     Highlight,
     Input,
     Item,
+    Part,
     Plan,
     Section
   }
@@ -25,7 +24,8 @@ defmodule AtlasTui.View do
   @resting_rows 8
   # A focused one never shows fewer than this, however small the screen.
   @least_rows 3
-  # A page in parts shows them side by side from this width; narrower, one above the other.
+  # Markup says what a stretch of a page means; how it looks is this view's choice. A page
+  # in parts shows them side by side from this width; narrower, one above the other.
   @side_by_side 120
 
   @doc """
@@ -35,7 +35,7 @@ defmodule AtlasTui.View do
   def known,
     do: %{
       blocks: ~w(list item form confirm plan),
-      markup: ~w(section border columns highlight)
+      markup: ~w(part section highlight)
     }
 
   @doc "The screen: exactly `height` lines of plain segments."
@@ -124,16 +124,10 @@ defmodule AtlasTui.View do
   # The body's lines, and whether it is longer than its room. A page in parts fills its
   # room exactly, each part scrolled on its own; a part that is cut says so itself.
   defp laid_out(model, width, room) do
-    case content(model) do
-      [{:markup, _columns, parts}]
-      when model.connected and model.blocks != [] and model.plan == nil ->
-        if Model.parts(model) != [],
-          do: parts(parts, model, width, room),
-          else: plain_layout(model, width, room)
-
-      _ ->
-        plain_layout(model, width, room)
-    end
+    if model.connected and model.blocks != [] and model.plan == nil and
+         Model.parts(model) != [],
+       do: parts(content(model), model, width, room),
+       else: plain_layout(model, width, room)
   end
 
   defp plain_layout(model, width, room) do
@@ -207,7 +201,7 @@ defmodule AtlasTui.View do
       {lines, Enum.any?(columns, fn {{_, cut}, _} -> cut end)}
     else
       needs = for {_i, node} <- drawn, do: length(part_lines(node, model, width)) + 2
-      heights = share(needs, room, lists_part(model))
+      heights = share(needs, room, related_part(parts) || lists_part(model))
 
       drawn =
         for {{i, node}, h} <- Enum.zip(drawn, heights),
@@ -259,6 +253,11 @@ defmodule AtlasTui.View do
     end
   end
 
+  # The part whose role is related (what the page links to), if any: given room first.
+  defp related_part(parts) do
+    Enum.find_index(parts, &match?({:markup, %{"value" => %Part{role: "related"}}, _}, &1))
+  end
+
   # The part that holds the page's lists, if any.
   defp lists_part(model) do
     lists = for {id, %ListBlock{}} <- Enum.zip(model.ids, model.blocks), do: id
@@ -266,7 +265,7 @@ defmodule AtlasTui.View do
   end
 
   # What a part holds, at the width inside its frame.
-  defp part_lines({:markup, %{"value" => %Border{}}, children}, model, width),
+  defp part_lines({:markup, %{"value" => %Part{}}, children}, model, width),
     do: nodes(children, model, width - 4, :all)
 
   defp part_lines(node, model, width), do: nodes([node], model, width, :all)
@@ -277,7 +276,7 @@ defmodule AtlasTui.View do
   defp part(node, model, focused, scrolled, width, height) do
     title =
       case node do
-        {:markup, %{"value" => %Border{title: title}}, _} -> title
+        {:markup, %{"value" => %Part{title: title}}, _} -> title
         _ -> nil
       end
 
@@ -347,14 +346,14 @@ defmodule AtlasTui.View do
     |> Enum.concat()
   end
 
-  # Markup this TUI draws: sections and borders. Columns and highlights it does not draw
-  # yet; their blocks show as they are.
+  # Markup this TUI draws: a part as a box with its title, a section as a heading. It does
+  # not draw highlights yet; their blocks show as they are.
   defp markup(%Section{title: title}, children, model, width, room) do
     rule = String.duplicate("─", max(width - String.length(title) - 3, 0))
     [[{:bold, " " <> title}, {:dim, " " <> rule}], []] ++ nodes(children, model, width, room)
   end
 
-  defp markup(%Border{title: title}, children, model, width, room) do
+  defp markup(%Part{title: title}, children, model, width, room) do
     inner = width - 4
     label = if title, do: "─ " <> title <> " ", else: ""
     top = " ┌" <> label <> String.duplicate("─", max(inner - String.length(label), 0)) <> "┐"
@@ -369,7 +368,7 @@ defmodule AtlasTui.View do
     [[{:dim, top}]] ++ lines ++ [[{:dim, " └" <> String.duplicate("─", inner) <> "┘"}]]
   end
 
-  defp markup(%kind{}, children, model, width, room) when kind in [Columns, Highlight],
+  defp markup(%Highlight{}, children, model, width, room),
     do: nodes(children, model, width, room)
 
   # Rows in columns: the id (as wide as the list's longest), the label (the rest, cut
