@@ -72,7 +72,11 @@ defmodule AtlasFlow.FakeState do
 
   def set_description(description), do: GenServer.call(__MODULE__, {:description, description})
 
-  @doc "How many reads were answered so far, and of those how many plain."
+  @doc """
+  How many of Flow's reads were answered so far, and of those how many plain. Only reads
+  from Flow's endpoints count: the Bus is shared, and a process another test left behind
+  (a Control session still asking, in the same VM) reads from whatever the store is now.
+  """
   def reads, do: GenServer.call(__MODULE__, :reads)
 
   @impl true
@@ -105,8 +109,7 @@ defmodule AtlasFlow.FakeState do
 
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do
-    {all, plain} = s.reads
-    s = %{s | reads: {all + 1, plain + if(content["plain"] == true, do: 1, else: 0)}}
+    s = if flow?(e.sender), do: %{s | reads: count(s.reads, content)}, else: s
 
     answer =
       case {e.kind, content} do
@@ -155,4 +158,9 @@ defmodule AtlasFlow.FakeState do
   end
 
   def handle_info(_message, s), do: {:noreply, s}
+
+  defp flow?(sender), do: sender == "flow" or String.starts_with?(sender || "", "flow/")
+
+  defp count({all, plain}, content),
+    do: {all + 1, plain + if(content["plain"] == true, do: 1, else: 0)}
 end

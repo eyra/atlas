@@ -8,6 +8,14 @@ defmodule AtlasControl.SessionTest do
     AtlasBus.drop_hints(0)
     start_supervised!(FakeStore)
     start_supervised!({AtlasControl.Gateway, port: 0, name: :gateway})
+
+    # A session waiting on a read sees its client close only after its tries (6 s); stopped
+    # here, it cannot read on into the next test, or another app's tests in this VM.
+    on_exit(fn ->
+      for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasControl.Sessions),
+          do: DynamicSupervisor.terminate_child(AtlasControl.Sessions, pid)
+    end)
+
     %{port: AtlasControl.Gateway.port(:gateway)}
   end
 
