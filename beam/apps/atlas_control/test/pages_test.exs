@@ -358,6 +358,84 @@ defmodule AtlasControl.PagesTest do
     refute Pages.shows?({:list, "part"}, @d, "tag")
   end
 
+  describe "completion: done only when the fact itself is completed" do
+    @completing @rolled
+                |> put_in(["progress"], %{"done_label" => "Done"})
+                |> put_in(["entities", "widget", "completion"], %{"by" => "checked_by"})
+                |> put_in(["entities", "part", "completion"], [
+                  %{"over" => "on_part", "field" => "name", "value" => "#ok/1"}
+                ])
+
+    test "a hint of a kind completion looks at refreshes what shows it" do
+      assert "tag" in Pages.progress_from(@completing, "part")
+      assert Pages.shows?({:item, "widget", "W-1"}, @completing, "tag")
+    end
+
+    test "the page says how far it is and why it is done, with the fact that did it" do
+      origin = %{"since" => "2026-11-03T14:10:00Z", "by" => "ada", "cause" => "tested"}
+
+      answer = %{
+        "fact" => %{
+          "key" => "W-1",
+          "values" => %{"title" => "One"},
+          "links" => %{"checked_by" => ["ada"]},
+          "origins" => %{"checked_by" => origin},
+          "progress" => %{"done" => true, "label" => "Done", "count" => 2, "of" => 2},
+          "completion" => %{"done" => true, "by" => "checked_by", "keys" => ["ada"]},
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "widget", "W-1"}, @completing, [answer, %{"facts" => []}])
+
+      assert %{"value" => "Done · 2/2 · checked by ada", "origin" => ^origin} =
+               Enum.find(item["fields"], &(&1["label"] == "Progress"))
+
+      part = %{
+        "fact" => %{
+          "key" => "P-1",
+          "values" => %{"title" => "Wheel"},
+          "links" => %{"of_widget" => ["W-1"]},
+          "progress" => %{"done" => true, "label" => "Done"},
+          "completion" => %{
+            "done" => true,
+            "over" => "on_part",
+            "key" => "T-ok-1",
+            "value" => "#ok/1"
+          },
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "part", "P-1"}, @completing, [part, %{"facts" => []}])
+
+      assert %{"value" => "Done · T-ok-1 #ok/1"} =
+               Enum.find(item["fields"], &(&1["label"] == "Progress"))
+    end
+
+    test "not done, without children: its own field says it; no Progress line" do
+      answer = %{
+        "fact" => %{
+          "key" => "W-1",
+          "values" => %{"title" => "One", "shade" => "dark"},
+          "links" => %{},
+          "progress" => %{"value" => "dark", "label" => "Dark"},
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "widget", "W-1"}, @completing, [answer, %{"facts" => []}])
+
+      refute Enum.find(item["fields"], &(&1["label"] == "Progress"))
+    end
+  end
+
   test "a create form asks only what the kind's create rule asks; no id" do
     %{blocks: [%{"type" => "form", "props" => form}]} = Pages.render({:new, "widget"}, @d, [])
     assert Enum.map(form["inputs"], & &1["name"]) == ["title", "notes"]

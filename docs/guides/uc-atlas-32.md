@@ -2,7 +2,7 @@
 
 What you can do: see who accepted a use case or scene, since when, by whom and why, without a `completed` field anywhere. Completable is an association in rela: a kind has it when it is in `accepted_by`'s `from`. The link has no attributes; the fact that set it carries when, by whom and why, and State answers the link with that fact.
 
-This guide grows with the use case. IS-Atlas-62 (this part): the person kind, `accepted_by`, `done_in` as history, and the migration of prod. IS-Atlas-63 works out "completed" and "To test"; IS-Atlas-64 adds Accept (`a`) and Reopen (`r`) for a person only.
+This guide grows with the use case. IS-Atlas-62: the person kind, `accepted_by`, `done_in` as history, and the migration of prod. IS-Atlas-63: State works out "completed", and a parent whose children are all completed is "To test". IS-Atlas-64 adds Accept (`a`) and Reopen (`r`) for a person only.
 
 ## Start
 
@@ -19,6 +19,16 @@ atlas tui --env test
 | Remove it | `atlas set UC-Atlas-NN accepted_by= --cause "found a bug" --env test` | `Accepted by  —` with `… · by agent · found a bug`. Every earlier link stays in State as the link's history. |
 | No completed field | `atlas help use_case --env test`; `atlas help issue --env test` | No `completed` field, and issue stages are specification, design, development. `use_case` lists `Links: accepted_by: to person, at most one`. |
 | History only | `atlas set IS-Atlas-NN done_in=PR-… --env test` | Refused: `Also done in is not set here: only a migration sets it.` `atlas tools` does not offer it. |
+
+### Completed, worked out (IS-Atlas-63)
+
+| Step | Keys / command | What you should see |
+|---|---|---|
+| An issue whose pull request merges | link a pull request to an issue; merge it on GitHub (prod), or in the e2e on the stand-in | Within a connector round the issue's row shows `Done`, set by nobody. Its page and `atlas get IS-Atlas-NN` say why: `Progress  Done · PR-eyra-atlas-20 merged`. An issue `done_in` a merged pull request counts the same. |
+| Its use case | the use case's row on its scene | `To test · 1/1`: all its issues are completed, it is not. A parent is never done because its children are. |
+| Accept it | `atlas set UC-Atlas-NN accepted_by=melle --cause "tested it"` | Its row: `Done · 1/1`. Its page: `Progress  Done · 1/1 · accepted by melle`, and under it `since 3 Nov 15:10 · by agent · tested it`. The scene shows `To test` only once all its use cases are accepted. |
+
+The rules are data in `rela/atlas.json`: `completion` per kind (`by` an association; `over` a fact pointing at it with a value; `through` a fact it points at with a value), and `progress.to_test` for the label.
 
 `by` says who sent the fact: the TUI is `tui_user` from the environment's settings (`melle`), the command line is `agent`, the migration is `migration`. IS-Atlas-64 lets only a person accept.
 
@@ -45,7 +55,7 @@ The real run then stops rela, removes the old `completed` values with rela's own
 
 Check: `atlas get UC-Atlas-01 --env prod` shows `Accepted by: melle (since …, by migration: completion becomes an association (UC-Atlas-32))`; `atlas get IS-Atlas-34 --env prod` shows `Also done in: PR-eyra-atlas-14`.
 
-This PR and IS-Atlas-63 merge together, then the migration runs: without IS-Atlas-63 nothing would show Done, since Done came from the `completed` field.
+IS-Atlas-62 and IS-Atlas-63 merge together, then the migration runs. After it the accepted use cases show Done again, and every issue with a merged pull request (its own, or `done_in`) shows Done.
 
 ## What changed for this
 
@@ -54,3 +64,4 @@ This PR and IS-Atlas-63 merge together, then the migration runs: without IS-Atla
 - **Control:** a page shows each association with the fact that set it (`pair.origin` in the contract, 0.8.0). `/k/<kind>/<key>/links/<relation>` sets or removes an association's links, with a note as its cause; parents and `set_by` associations are refused there. Each fact carries `by`: who is on the session. A submit may carry a `cause`.
 - **Clients:** the TUI shows the origin dim under the value. `atlas set <key> <association>=<key>` sets a link, empty removes it, and `--cause` says why (put and set). `atlas get --json` gives `origins`.
 - **Tools:** `atlas migrate-completion` (`tools/plan`, `AtlasPlan.Completion`).
+- **IS-Atlas-63:** `AtlasState.Completion` works out why a fact is completed from its kind's `completion` rule; reads answer it as `completion`. `AtlasState.Progress` shows Done only for a completed fact, `To test` when all its children are and it is not. An issue has a progress rule of its own (`own: stage`), so its row shows `Done` in place of its stage. A pull request's change is a hint to every page whose progress or completion it changes. The page's `Progress` line says why it is done.
