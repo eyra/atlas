@@ -12,6 +12,8 @@ defmodule AtlasState.Connector.GitHub do
   - `token_command`: the command that prints the token, `["gh", "auth", "token"]`. It runs
     once per read; the token stays in memory for that read only. Atlas never writes it to
     disk and never logs it. Without a command, GitHub is read anonymously.
+  - `token_env`: instead of a command, the environment variable that holds the token; on
+    Fly it is a secret of the core's app (`fly/prod/core.json`). Read once per read too.
 
   Only GET requests: nothing is ever written to GitHub.
   """
@@ -26,7 +28,7 @@ defmodule AtlasState.Connector.GitHub do
   def read(_config, []), do: %{}
 
   def read(config, addresses) do
-    case token(config["token_command"]) do
+    case token(config) do
       {:ok, token} -> Map.new(addresses, &{&1, read_one(config, token, &1)})
       {:error, reason} -> Map.new(addresses, &{&1, {:error, reason}})
     end
@@ -103,10 +105,19 @@ defmodule AtlasState.Connector.GitHub do
 
   # The token for one read. What the command prints is never logged: a failure says only
   # which command failed and its exit status.
-  defp token(nil), do: {:ok, nil}
-  defp token([]), do: {:ok, nil}
+  defp token(%{"token_env" => name}) when is_binary(name) do
+    case System.get_env(name) do
+      token when token in [nil, ""] -> {:error, "no token: #{name} is not set"}
+      token -> {:ok, String.trim(token)}
+    end
+  end
 
-  defp token([command | args]) do
+  defp token(config), do: command_token(config["token_command"])
+
+  defp command_token(nil), do: {:ok, nil}
+  defp command_token([]), do: {:ok, nil}
+
+  defp command_token([command | args]) do
     case System.find_executable(command) do
       nil ->
         {:error, "no token: #{command} is not installed"}

@@ -6,7 +6,15 @@ set -euo pipefail
 
 /app/fly/apply-move.sh rela
 
-export ATLAS_RELA_DATA=/data/rela ATLAS_RELA_BIN=/app/bin ATLAS_RELA_BIND=:: ATLAS_RELA_PORT=7690
+# Held (atlas fetch-from-fly --hold, for a migration on a copy): the machine stays up, so
+# its data can be read and a move can arrive, but nothing serves or writes it. A move ends
+# the hold (apply-move.sh); so does: fly ssh console -C "rm /data/hold", then a restart.
+if [ -e /data/hold ]; then
+  echo "held: /data/hold is there; not starting rela until a move ends the hold"
+  exec sleep infinity
+fi
+
+export ATLAS_RELA_DATA=/data/rela ATLAS_RELA_BIN=/app/bin ATLAS_RELA_BIND=:: ATLAS_RELA_PORT="${ATLAS_RELA_PORT:-7690}"
 
 # As bin/atlas does on a Mac (IS-Atlas-73): a description that no longer describes data
 # rela holds does not start; that data needs a migration first.
