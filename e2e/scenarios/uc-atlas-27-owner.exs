@@ -1,7 +1,8 @@
 # UC-Atlas-27: every fact has an owner. IS-Atlas-52: the owner is the association
 # assigned_to, from every assignable kind to a person or an agent, at most one; the link
 # shows with the fact that set it (since, by, cause), and the owner's page lists what is
-# assigned to it. `atlas migrate-owner` gives every fact without one the coordinator.
+# assigned to it. `atlas migrate-owner` gave every fact without one the coordinator; since
+# IS-Atlas-75 Flow gives every new fact its owner, so it has nothing to give a new one.
 import AtlasE2E.Scenario
 
 scenario "UC-Atlas-27: Every fact has an owner", fn %{t1: t1, t2: t2, instance: i} ->
@@ -69,23 +70,31 @@ scenario "UC-Atlas-27: Every fact has an owner", fn %{t1: t1, t2: t2, instance: 
     see(t1, ~r/AS-#{key}\s+#{key}/)
   end
 
-  step "atlas migrate-owner: every fact without an owner gets the coordinator, once", fn ->
-    {lone, _} = atlas_json(i, ["put", "scene", "--title", "A scene without an owner"])
-    {out, 0, _} = atlas(i, ["migrate-owner", "--dry-run"])
-    out =~ "assign   AS-#{lone["key"]}  assigned_to coordinator" || raise out
-    out =~ ~r/IS-Atlas-52 migration: \d+ steps; cause: owner introduced/ || raise out
-    out =~ "Dry run: nothing was written." || raise out
-    String.contains?(out, "assign   AS-#{Process.get(:uc27)}") && raise "it would move an owner"
+  # IS-Atlas-75: Flow gives a new fact its owner from the flow's rule, so the migration
+  # that gave every fact without one the coordinator has nothing to give it.
+  step "A new fact gets its owner from Flow; atlas migrate-owner leaves it alone", fn ->
+    {lone, _} = atlas_json(i, ["put", "scene", "--title", "A scene Flow assigns"])
 
-    {out, 0, _} = atlas(i, ["migrate-owner"])
-    out =~ ~r/Done: (\d+) of \1 steps written\./ || raise out
+    got =
+      Enum.reduce_while(1..40, nil, fn _, _ ->
+        {got, _} = atlas_json(i, ["get", lone["key"]])
 
-    {out, 0, _} = atlas(i, ["migrate-owner", "--dry-run"])
-    out =~ "IS-Atlas-52 migration: 0 steps" || raise out
+        if ["Assigned to", "coordinator"] in got["fields"],
+          do: {:halt, got},
+          else:
+            (
+              Process.sleep(100)
+              {:cont, got}
+            )
+      end)
 
-    {got, _} = atlas_json(i, ["get", lone["key"]])
     ["Assigned to", "coordinator"] in got["fields"] || raise inspect(got["fields"])
-    got["origins"]["Assigned to"]["by"] == "migration" || raise inspect(got["origins"])
-    got["origins"]["Assigned to"]["cause"] == "owner introduced" || raise inspect(got["origins"])
+    got["origins"]["Assigned to"]["by"] == "flow" || raise inspect(got["origins"])
+
+    # The migration would still give a done fact the coordinator; Flow leaves it nobody.
+    {out, 0, _} = atlas(i, ["migrate-owner", "--dry-run"])
+
+    String.contains?(out, "AS-#{lone["key"]}") &&
+      raise "the migration would move its owner:\n" <> out
   end
 end

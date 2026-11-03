@@ -114,8 +114,22 @@ defmodule AtlasState.FlowsTest do
     |> put_in(["relations", "signed_by", "from"], ["card"])
   end
 
+  # With an owner relation, each owner names its kind.
+  defp owned(states, kind) do
+    for state <- states,
+        do:
+          if(state["owner"],
+            do: %{state | "owner" => %{"kind" => kind, "key" => state["owner"]}},
+            else: state
+          )
+  end
+
   test "with on, Flow writes on the fact that relation points at, and is checked there" do
-    description = on_card(description(@sound, %{"on" => "card", "owner_relation" => "signed_by"}))
+    description =
+      on_card(
+        description(owned(@sound, "clerk"), %{"on" => "card", "owner_relation" => "signed_by"})
+      )
+
     assert Flows.check(description) == %{"sign" => []}
 
     # Without on, the box has no todo, and signed_by does not start at it.
@@ -148,9 +162,23 @@ defmodule AtlasState.FlowsTest do
   defp rela_half(extra) do
     yaml = @root |> Path.join("rela/schema.yaml") |> File.read!()
 
+    acc =
+      for {_name, flow} <- extra["flows"],
+          relation = flow["owner_relation"],
+          is_binary(relation),
+          reduce: %{"entities" => %{}, "relations" => %{}} do
+        acc ->
+          block = block(yaml, "relations", relation)
+
+          put_in(acc, ["relations", relation], %{
+            "from" => list(block, "from"),
+            "to" => list(block, "to")
+          })
+      end
+
     for {_name, %{"on" => on}} <- extra["flows"],
         is_binary(on),
-        reduce: %{"entities" => %{}, "relations" => %{}} do
+        reduce: acc do
       acc ->
         block = block(yaml, "relations", on)
         [to] = list(block, "to")
@@ -183,6 +211,38 @@ defmodule AtlasState.FlowsTest do
   defp list(block, key) do
     [items] = Regex.run(~r/^    #{key}: \[([^\]]*)\]/m, block, capture: :all_but_first)
     items |> String.split(",") |> Enum.map(&String.trim/1)
+  end
+
+  test "with an owner relation, each owner names its kind, one the relation allows" do
+    description = description(owned(@sound, "clerk"), %{"owner_relation" => "signed_by"})
+    description = put_in(description, ["relations", "signed_by", "from"], ["box"])
+    assert Flows.check(description) == %{"sign" => []}
+
+    wrong = description(owned(@sound, "robot"), %{"owner_relation" => "signed_by"})
+    assert %{"sign" => problems} = Flows.check(wrong)
+    assert "check: signed_by does not allow its owner's kind, robot" in problems
+
+    bare = description(@sound, %{"owner_relation" => "signed_by"})
+    assert %{"sign" => problems} = Flows.check(bare)
+    assert "work: its owner names no kind (owner: {kind, key})" in problems
+  end
+
+  test "values: a condition on a property's values, never on one Flow writes" do
+    states = [
+      %{
+        "name" => "done",
+        "when" => %{"values" => %{"state" => ["merged", "closed"]}},
+        "done" => true
+      },
+      %{"name" => "open", "owner" => "bob", "next" => ["done"]}
+    ]
+
+    assert Flows.check(description(states)) == %{"sign" => []}
+
+    on_todo = [%{hd(states) | "when" => %{"values" => %{"todo" => ["x"]}}} | tl(states)]
+
+    assert %{"sign" => ["done depends on todo, which Flow writes"]} =
+             Flows.check(description(on_todo))
   end
 
   test "the definitions in rela/atlas.json are sound" do

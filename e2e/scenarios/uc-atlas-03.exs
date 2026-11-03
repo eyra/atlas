@@ -35,7 +35,7 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
     stored(t1, ~r/✓ Stored as IS-Atlas-\d+/, at)
     page = stored(t1, ~r/Issue IS-Atlas-\d+: Write the first issue/, at)
     page =~ ~r/Stage\s+Specification/ || raise "the stage is not Specification"
-    page =~ ~r/In use case\s+UC-Atlas-\d+/ || raise "it is not in the use case"
+    page =~ ~r/In use case[\s─│]+UC-Atlas-\d+/u || raise "it is not in the use case"
     for field <- ["Flux ref", "Flux id", "Status"], do: refute_see(t1, field)
     see(t1, "No pull requests yet.")
     by_hint(t2, "Write the first issue", at)
