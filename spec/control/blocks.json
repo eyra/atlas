@@ -1,0 +1,228 @@
+{
+  "blocks": [
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "rows",
+          "required": true,
+          "type": "list of row"
+        },
+        {
+          "name": "empty",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "actions",
+          "required": false,
+          "type": "list of action"
+        }
+      ],
+      "name": "list"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "fields",
+          "required": true,
+          "type": "list of pair"
+        },
+        {
+          "name": "actions",
+          "required": false,
+          "type": "list of action"
+        }
+      ],
+      "name": "item"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "inputs",
+          "required": true,
+          "type": "list of input"
+        },
+        {
+          "name": "submit_label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "submit_to",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "cancel_to",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "errors",
+          "required": false,
+          "type": "list of string"
+        }
+      ],
+      "name": "form"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "text",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "confirm_label",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "confirm_to",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "cancel_to",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "confirm"
+    }
+  ],
+  "models": [
+    {
+      "fields": [
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "action"
+    },
+    {
+      "fields": [
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "detail",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "row"
+    },
+    {
+      "fields": [
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "pair"
+    },
+    {
+      "fields": [
+        {
+          "name": "value",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "choice"
+    },
+    {
+      "fields": [
+        {
+          "name": "name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "value",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "required",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "name": "hint",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "choices",
+          "required": false,
+          "type": "list of choice"
+        }
+      ],
+      "name": "input"
+    }
+  ],
+  "version": "0.1.0",
+  "wire": "{\"type\": \"<block>\", \"props\": {...}}; an optional prop without a value is left out"
+}
