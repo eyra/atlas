@@ -1,8 +1,8 @@
 # UC-Atlas-28: My work on the front page. IS-Atlas-55: the TUI's user is a person, so
-# Control opens on what is assigned to them (start.assigned in rela/atlas.json): the
-# open facts that point at them through assigned_to, newest move first, each with what
-# its flow expects and since when and why; the header counts them on every page; a hint
-# updates it in every TUI. The scenes are one key away (s).
+# Control opens on what is assigned to them (start.assigned in rela/atlas.json): their
+# Assignments (IS-Atlas-78), each as the open fact it belongs to, newest move first, with
+# what its flow expects and since when and why; the header counts them on every page; a
+# hint updates it in every TUI. The scenes are one key away (s).
 import AtlasE2E.Scenario
 
 scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance: i} ->
@@ -97,5 +97,31 @@ scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance
     see(t1, ~r/Atlas · test.*\sAssigned to you$/m)
     open_row(t1, "A scene for you")
     see(t1, "Scene #{scene}: A scene for you")
+  end
+
+  # IS-Atlas-78: what is assigned is an Assignment; the list shows the fact it belongs to,
+  # while that fact is open.
+  step "Done: an accepted use case leaves the list; its Assignment still names you", fn ->
+    %{scene: scene} = Process.get(:uc28)
+
+    {done, _} =
+      atlas_json(i, ["put", "use_case", "--in", scene, "--title", "A use case to accept"])
+
+    atlas_json(i, ["set", done["key"], "assigned_to=melle", "--cause", "ready to accept"])
+    start_page.(t1)
+    see(t1, ~r/Atlas · test · 2 assigned to you/)
+    open_row(t1, "A use case to accept")
+    see(t1, "Use case #{done["key"]}: A use case to accept")
+    press(t1, "a")
+    see(t1, "will be accepted by melle")
+    at = press(t1, "y")
+    stored(t1, ~r/Accepted by ─+(.|\n)*melle  Person/, at)
+
+    start_page.(t1)
+    see(t1, ~r/Atlas · test · 1 assigned to you/)
+    refute_see(t1, "A use case to accept")
+
+    {part, _} = atlas_json(i, ["get", "AS-" <> done["key"]])
+    ["Assigned to", "melle"] in part["fields"] || raise inspect(part["fields"])
   end
 end
