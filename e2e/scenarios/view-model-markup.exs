@@ -17,7 +17,7 @@ scenario "Markup: a scene's page in two parts, content and references", fn %{t1:
     page =~ ~r/^ │ Scene SC-Atlas-\d+: A scene with markup\s+│$/mu ||
       raise "the title is not in the content part:\n#{page}"
 
-    page =~ ~r/^ │   Status\s+Refine\s+│$/mu ||
+    page =~ ~r/^ │   Flux group\s+Refine\s+│$/mu ||
       raise "the fields are not in the content part:\n#{page}"
 
     page =~ ~r/^ └─+┘\n ┌─ References ─+┐\n │ Use cases ─+ │$/mu ||

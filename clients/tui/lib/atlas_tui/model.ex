@@ -11,10 +11,14 @@ defmodule AtlasTui.Model do
   room and scrolling. Tab moves the focus from part to part. In the part with the lists,
   the arrows move the selected row; in another, they scroll it. The rows of all lists on
   a page are one selection (`rows/1`).
+
+  `:` asks the agent (UC-Atlas-17): a request line, then the agent's `plan` block over
+  the page. Effects to the agent are `{:agent, message}`; what it answers comes in
+  through `agent/2`.
   """
 
   alias AtlasTui.{Blocks, Text}
-  alias AtlasTui.Blocks.{Columns, Confirm, Form, Input, Item}
+  alias AtlasTui.Blocks.{Columns, Confirm, Form, Input, Item, Plan}
   alias AtlasTui.Blocks.List, as: ListBlock
 
   @scroll_step 10
@@ -44,7 +48,16 @@ defmodule AtlasTui.Model do
             updated: nil,
             last_hint: nil,
             waiting: false,
-            closed: false
+            closed: false,
+            # The request line (`:`): its text while it is open, nil when closed.
+            ask: nil,
+            # The agent's plan for the last request, shown over the page; nil when none.
+            plan: nil,
+            # What the person makes of a proposed plan: the selected step, the steps they
+            # dropped, the values they edited (by step number), the step being edited.
+            steps: %{selected: 0, dropped: MapSet.new(), values: %{}, editing: nil}
+
+  @no_steps %{selected: 0, dropped: MapSet.new(), values: %{}, editing: nil}
 
   def new(env), do: %__MODULE__{env: env}
 
@@ -97,6 +110,43 @@ defmodule AtlasTui.Model do
 
   def message(model, _other), do: model
 
+  # Messages from the agent
+
+  @doc "What the agent sent: the plan as it is now, or a notice."
+  def agent(%{plan: nil} = model, %{"op" => "plan"}), do: model
+
+  def agent(model, %{"op" => "plan", "block" => block}) do
+    case Blocks.decode(block) do
+      %Plan{} = plan ->
+        # A new proposal starts with every step kept, as the agent made it.
+        fresh = plan.state == "proposed" and model.plan.state != "proposed"
+        steps = if fresh, do: @no_steps, else: model.steps
+        %{model | plan: plan, steps: steps}
+
+      _ ->
+        %{model | notice: %{tone: "error", text: "The agent sent a plan this TUI cannot show."}}
+    end
+  end
+
+  def agent(model, %{"op" => "notice"} = msg),
+    do: %{model | notice: %{tone: msg["tone"], text: msg["text"], at: msg["at"]}}
+
+  def agent(model, _other), do: model
+
+  @doc "The agent stopped (its process ended); a plan it was making or running is lost."
+  def agent_gone(model, why) do
+    plan =
+      case model.plan do
+        %Plan{state: state} = plan when state in ["planning", "running"] ->
+          %{plan | state: "failed", title: "The agent stopped", summary: why}
+
+        other ->
+          other
+      end
+
+    %{model | plan: plan, notice: %{tone: "error", text: "The agent stopped: #{why}"}}
+  end
+
   # A page about one fact opens at its top, even when a list under it has a selected row.
   defp first_scroll(blocks), do: if(Enum.any?(blocks, &match?(%Item{}, &1)), do: 0, else: nil)
 
@@ -110,6 +160,48 @@ defmodule AtlasTui.Model do
   # The block that takes the keys.
 
   def form(model), do: Enum.find(model.blocks, &match?(%Form{}, &1))
+
+  @doc """
+  The form a step of the plan is edited in: the step's inputs, as Control's form for it
+  has them. nil when no step is being edited.
+  """
+  def step_form(%{plan: %Plan{} = plan, steps: %{editing: n}}) when n != nil do
+    step = Enum.find(plan.steps, &(&1.n == n))
+
+    %Form{
+      title: "Step #{n}: #{step.label}",
+      inputs: step.inputs || [],
+      submit_label: "Keep",
+      submit_to: "",
+      cancel_to: ""
+    }
+  end
+
+  def step_form(_model), do: nil
+
+  @doc """
+  The steps as they would run: dropped ones marked dropped, edited values in place.
+  """
+  def plan_steps(%{plan: %Plan{state: "proposed"} = plan, steps: steps}) do
+    Enum.map(plan.steps, fn step ->
+      step =
+        case steps.values[step.n] do
+          nil ->
+            step
+
+          values ->
+            inputs =
+              Enum.map(step.inputs || [], &%{&1 | value: Map.get(values, &1.name, &1.value)})
+
+            %{step | inputs: inputs}
+        end
+
+      if MapSet.member?(steps.dropped, step.n), do: %{step | state: "dropped"}, else: step
+    end)
+  end
+
+  def plan_steps(%{plan: %Plan{} = plan}), do: plan.steps
+  def plan_steps(_model), do: []
   def list(model), do: Enum.find(model.blocks, &match?(%ListBlock{}, &1))
   def confirm(model), do: Enum.find(model.blocks, &match?(%Confirm{}, &1))
 
@@ -206,12 +298,165 @@ defmodule AtlasTui.Model do
 
   def key(model, :ctrl_c), do: {model, [:quit]}
   def key(%{closed: true} = model, _key), do: {model, [:quit]}
+  def key(%{ask: text} = model, key) when is_binary(text), do: ask_key(model, text, key)
+
+  def key(%{plan: %Plan{}} = model, key) do
+    case step_form(model) do
+      nil -> plan_key(model, model.plan, key)
+      form -> step_form_key(model, form, key)
+    end
+  end
 
   def key(model, key) do
     cond do
       form = form(model) -> form_key(model, form, key)
+      key == {:char, ":"} -> {%{model | ask: ""}, []}
       confirm = confirm(model) -> confirm_key(model, confirm, key)
       true -> browse_key(model, key)
+    end
+  end
+
+  # The request line: type, enter asks the agent about the page you are on, esc closes.
+  defp ask_key(model, text, key) do
+    case key do
+      {:char, c} ->
+        {%{model | ask: text <> c}, []}
+
+      :backspace ->
+        {%{model | ask: String.slice(text, 0..-2//1)}, []}
+
+      :esc ->
+        {%{model | ask: nil}, []}
+
+      :enter ->
+        case String.trim(text) do
+          "" ->
+            {%{model | ask: nil}, []}
+
+          request ->
+            plan = %Plan{title: "Planning…", request: request, state: "planning", steps: []}
+            ask = %{"op" => "ask", "request" => request, "on" => model.path || "/"}
+            {%{model | ask: nil, plan: plan, steps: @no_steps, notice: nil}, [{:agent, ask}]}
+        end
+
+      _ ->
+        {model, []}
+    end
+  end
+
+  defp plan_key(model, %Plan{state: "planning"}, key) do
+    case key do
+      :esc -> close_plan(model, [{:agent, %{"op" => "cancel"}}])
+      _ -> {model, []}
+    end
+  end
+
+  defp plan_key(model, %Plan{state: "proposed"} = plan, key) do
+    steps = model.steps
+    last = max(length(plan.steps) - 1, 0)
+    selected = Enum.at(plan.steps, steps.selected)
+
+    case key do
+      k when k in [:up, {:char, "k"}] ->
+        {put_in(model.steps.selected, max(steps.selected - 1, 0)), []}
+
+      k when k in [:down, {:char, "j"}] ->
+        {put_in(model.steps.selected, min(steps.selected + 1, last)), []}
+
+      {:char, " "} when selected != nil ->
+        dropped =
+          if MapSet.member?(steps.dropped, selected.n),
+            do: MapSet.delete(steps.dropped, selected.n),
+            else: MapSet.put(steps.dropped, selected.n)
+
+        {put_in(model.steps.dropped, dropped), []}
+
+      {:char, "e"} when selected != nil and selected.inputs not in [nil, []] ->
+        edit_step(model, selected)
+
+      :enter ->
+        run(model)
+
+      {:char, ":"} ->
+        {%{model | ask: plan.request}, []}
+
+      :esc ->
+        close_plan(model, [{:agent, %{"op" => "cancel"}}])
+
+      _ ->
+        {model, []}
+    end
+  end
+
+  defp plan_key(model, %Plan{state: "running"}, key) do
+    case key do
+      :esc ->
+        notice = %{tone: "pending", text: "Stopping after this step…"}
+        {%{model | notice: notice}, [{:agent, %{"op" => "stop"}}]}
+
+      _ ->
+        {model, []}
+    end
+  end
+
+  # A plan that is over: done, stopped, refused, or not made.
+  defp plan_key(model, %Plan{}, key) do
+    case key do
+      k when k in [:esc, :enter, :left, {:char, "b"}] -> close_plan(model, [])
+      {:char, ":"} -> {%{model | ask: ""}, []}
+      {:char, "q"} -> {model, [:quit]}
+      _ -> {model, []}
+    end
+  end
+
+  defp close_plan(model, effects), do: {%{model | plan: nil, steps: @no_steps}, effects}
+
+  # Enter runs the kept steps, in order, with their edited values.
+  defp run(model) do
+    kept = Enum.reject(plan_steps(model), &(&1.state == "dropped"))
+
+    case Enum.filter(kept, &(&1.state == "blocked")) do
+      [] when kept == [] ->
+        {%{model | notice: %{tone: "info", text: "Every step is dropped; esc cancels."}}, []}
+
+      [] ->
+        steps =
+          for step <- kept,
+              do: %{
+                "n" => step.n,
+                "values" => Map.new(step.inputs || [], &{&1.name, &1.value || ""})
+              }
+
+        {model, [{:agent, %{"op" => "run", "steps" => steps}}]}
+
+      blocked ->
+        text = "Step #{Enum.map_join(blocked, ", ", & &1.n)} cannot run; drop it with space."
+        {%{model | notice: %{tone: "error", text: text}}, []}
+    end
+  end
+
+  # Editing a step: its values in the form the TUI knows; ctrl-s keeps them, esc does not.
+  defp edit_step(model, step) do
+    values = Map.new(step.inputs, &{&1.name, &1.value || ""})
+    values = Map.merge(values, model.steps.values[step.n] || %{})
+    model = %{model | values: values, focus: 0, cursor: nil}
+    {put_in(model.steps.editing, step.n), []}
+  end
+
+  defp step_form_key(model, form, key) do
+    {edited, effects} = form_key(model, form, key)
+
+    case effects do
+      [{:send, %{"op" => "submit", "values" => values}}] ->
+        n = model.steps.editing
+        steps = %{model.steps | editing: nil, values: Map.put(model.steps.values, n, values)}
+        {%{edited | steps: steps, values: %{}, waiting: false}, []}
+
+      [{:send, %{"op" => "open"}}] ->
+        {%{edited | steps: %{model.steps | editing: nil}, values: %{}}, []}
+
+      _ ->
+        {edited, []}
     end
   end
 
@@ -366,7 +611,7 @@ defmodule AtlasTui.Model do
 
   # Moving down into a multi-line input starts at its beginning; moving up, at its end.
   defp focus_to(model, to) do
-    last = length(focusable(form(model))) - 1
+    last = length(focusable(step_form(model) || form(model))) - 1
     to = to |> max(0) |> min(last)
 
     cond do

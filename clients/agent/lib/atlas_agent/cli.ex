@@ -21,6 +21,12 @@ defmodule AtlasAgent.CLI do
 
   def main(args) do
     {env, args} = take_flag(args, "--env", "prod")
+
+    # The agent behind the TUI's `:` speaks JSON lines with the TUI until its stdin ends.
+    if args == ["steer"], do: AtlasAgent.Steer.main(env), else: command(env, args)
+  end
+
+  defp command(env, args) do
     {json, args} = take_switch(args, "--json")
 
     result =

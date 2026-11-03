@@ -28,7 +28,9 @@ if config_env() != :test do
   config :atlas_state,
     rela_url: settings["rela"]["url"],
     description_extra: settings["rela"]["extra"] && Path.join(root, settings["rela"]["extra"]),
-    data_dir: expand.(settings["state"]["data"])
+    data_dir: expand.(settings["state"]["data"]),
+    # The connectors at State's edge: only those this environment has settings for.
+    connectors: settings["connectors"] || %{}
 
   config :atlas_control,
     host: settings["control"]["host"],
