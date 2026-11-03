@@ -247,5 +247,21 @@ defmodule AtlasState.ConnectorTest do
              } =
                GitHub.read(config, ["https://example.com/x"])
     end
+
+    test "on Fly the token comes from an environment variable, a secret of the app" do
+      {stub, config} = github(fn _ -> {200, ~s|{"title":"T","state":"open","merged":false}|} end)
+      config = config |> Map.delete("token_command") |> Map.put("token_env", "ATLAS_TEST_GH")
+
+      assert %{@pull => {:error, "no token: ATLAS_TEST_GH is not set"}} =
+               GitHub.read(config, [@pull])
+
+      assert [] = StubHttp.requests(stub)
+
+      System.put_env("ATLAS_TEST_GH", "s3cret\n")
+      on_exit(fn -> System.delete_env("ATLAS_TEST_GH") end)
+
+      assert %{@pull => {:ok, %{"title" => "T"}}} = GitHub.read(config, [@pull])
+      assert [%{headers: %{"authorization" => "Bearer s3cret"}}] = StubHttp.requests(stub)
+    end
   end
 end

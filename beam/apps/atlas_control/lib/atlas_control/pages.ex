@@ -273,6 +273,7 @@ defmodule AtlasControl.Pages do
   @doc "The kind a route is about."
   def kind_of(:home), do: :all
   def kind_of(:unknown), do: nil
+  def kind_of({:unavailable, _path, _failed}), do: nil
   def kind_of(:kinds), do: nil
   def kind_of(route), do: elem(route, 1)
 
@@ -295,7 +296,9 @@ defmodule AtlasControl.Pages do
   end
 
   def shows?({:list, of} = route, description, kind),
-    do: kind == kind_of(route) or kind in progress_from(description, of)
+    do:
+      kind == kind_of(route) or kind in progress_from(description, of) or
+        kind in for({_relation, from, _text} <- counts(description, of), do: from)
 
   def shows?(route, _description, kind), do: kind == kind_of(route)
 
@@ -370,7 +373,18 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def reads({:list, kind}, _), do: [{kind, %{}}]
+  # A kind whose rows count what points at it (`counts`) also reads, plainly, every fact of
+  # each kind those relations start at.
+  def reads({:list, kind}, description),
+    do: [
+      {kind, %{}}
+      | for(
+          {_relation, from, _text} <- counts(description, kind),
+          do: {from, %{"linked" => %{}, "plain" => true}}
+        )
+    ]
+
+  def reads({:unavailable, _path, _failed}, _), do: []
   def reads({:new, _}, _), do: []
   def reads({:new, _, _}, _), do: []
 
@@ -411,6 +425,16 @@ defmodule AtlasControl.Pages do
 
   def reads(:unknown, _), do: []
   def reads(:kinds, _), do: []
+
+  # What a list row of `kind` counts (`counts` in the description: relation, text with
+  # {count}): `[{relation, from, text}]`, one per kind the relation starts at.
+  defp counts(description, kind) do
+    for %{"relation" => relation, "text" => text} <-
+          get_in(description, ["entities", kind, "counts"]) || [],
+        kind in (get_in(description, ["relations", relation, "to"]) || []),
+        from <- get_in(description, ["relations", relation, "from"]) || [],
+        do: {relation, from, text}
+  end
 
   @doc """
   The relations marked `component` that start at `kind` (`rela/atlas.json`): the one fact
@@ -491,8 +515,11 @@ defmodule AtlasControl.Pages do
   end
 
   # A kind the agent alone writes (`"by_hand": false`) offers no keys to make, change or
-  # delete one; its forms still answer at their paths.
-  defp by_hand?(spec), do: spec["by_hand"] != false
+  # delete one; its forms still answer at their paths. `"by_hand": "update"` offers only the
+  # key to change one (a kind made and deleted with another fact).
+  defp by_hand?(%{"by_hand" => false}, _op), do: false
+  defp by_hand?(%{"by_hand" => "update"}, op), do: op == :update
+  defp by_hand?(_spec, _op), do: true
 
   # The actions the description adds to a fact's page (`actions`: key, label, to), each
   # only while the fact's fields have one of the values its `when` names. A `to` of
@@ -618,6 +645,11 @@ defmodule AtlasControl.Pages do
   def render(:unknown, _description, _answers, _form),
     do: missing("No such page", "Control serves no page at this path.", "/")
 
+  # A page of the contract that could not be worked out, because State did not answer
+  # (`AtlasControl.Session`): said as a failed read says it, never "No such page".
+  def render({:unavailable, _path, failed}, _description, _answers, _form),
+    do: unavailable(failed, "/")
+
   def render(route, description, answers, form) do
     kind = kind_of(route)
 
@@ -649,12 +681,14 @@ defmodule AtlasControl.Pages do
     ])
   end
 
-  defp page({:list, kind}, kind, spec, description, [answer], _form) do
+  defp page({:list, kind}, kind, spec, description, [answer | count_answers], _form) do
     # The only top kind's list is the start page; there is nothing to go back to.
     start? = top_kinds(description) == [kind]
 
     case answer do
       %{"facts" => facts} ->
+        counted = counted(description, kind, count_answers)
+
         rows =
           facts
           |> sort_facts(spec)
@@ -662,7 +696,7 @@ defmodule AtlasControl.Pages do
             Blocks.row(
               id: fact["key"],
               label: label(spec, fact),
-              detail: detail(description, spec, fact),
+              detail: join_detail(detail(description, spec, fact), counted.(fact["key"])),
               to: path({:item, kind, fact["key"]}),
               links: links(description, spec, fact)
             )
@@ -673,14 +707,17 @@ defmodule AtlasControl.Pages do
             title: plural(spec, kind),
             rows: rows,
             empty:
-              if(by_hand?(spec),
+              if(by_hand?(spec, :create),
                 do:
                   "No #{String.downcase(plural(spec, kind))} yet. " <>
                     "Press #{key_of(:create)} to create one.",
                 else: "No #{String.downcase(plural(spec, kind))} yet."
               ),
             actions:
-              if(by_hand?(spec), do: [action(:create, spec, kind, path({:new, kind}))], else: []) ++
+              if(by_hand?(spec, :create),
+                do: [action(:create, spec, kind, path({:new, kind}))],
+                else: []
+              ) ++
                 if(start?, do: start_actions(description), else: [])
           )
 
@@ -730,14 +767,14 @@ defmodule AtlasControl.Pages do
             # Nothing to change when a user may set nothing but where the id comes from, and
             # there is no parent to move it to.
             actions:
-              if(by_hand?(spec),
-                do:
-                  if(changeable?(description, kind, spec),
-                    do: [action(:update, spec, kind, path({:edit, kind, key}))],
-                    else: []
-                  ) ++ [action(:delete, spec, kind, path({:delete, kind, key}))],
+              if(by_hand?(spec, :update) and changeable?(description, kind, spec),
+                do: [action(:update, spec, kind, path({:edit, kind, key}))],
                 else: []
               ) ++
+                if(by_hand?(spec, :delete),
+                  do: [action(:delete, spec, kind, path({:delete, kind, key}))],
+                  else: []
+                ) ++
                 described_actions(spec, fact) ++
                 link_actions(description, kind, fact, form) ++
                 Enum.flat_map(parts, fn {part_kind, _spec, part, _made} ->
@@ -1291,7 +1328,7 @@ defmodule AtlasControl.Pages do
 
     # A relation marked `"add": false` lists its facts without a way to add one here; so
     # does one with no create key (an association).
-    add? = create_key != nil and rel_spec["add"] != false and by_hand?(from_spec)
+    add? = create_key != nil and rel_spec["add"] != false and by_hand?(from_spec, :create)
 
     empty =
       case answer do
@@ -1385,7 +1422,12 @@ defmodule AtlasControl.Pages do
 
       # A field only a connector or the system fills shows only once it has a value.
       if name not in made and (settable?(prop) or value not in [nil, ""]),
-        do: [Blocks.pair(label: field_label(name, prop), value: show(prop, value))],
+        do: [
+          Blocks.pair(
+            label: field_label(name, prop),
+            value: show(prop, value) <> late(spec, fact, name)
+          )
+        ],
         else: []
     end)
   end
@@ -1763,6 +1805,7 @@ defmodule AtlasControl.Pages do
         is_list(prop["values"]) -> "one of " <> Enum.join(prop["values"], ", ")
         prop["type"] == "boolean" -> "true or false"
         prop["type"] == "integer" -> "a whole number"
+        prop["type"] == "datetime" -> "a date and time in UTC, e.g. 2026-11-04 17:00"
         prop["multiline"] -> "text of several lines"
         true -> "text"
       end
@@ -1799,6 +1842,26 @@ defmodule AtlasControl.Pages do
       {n, ""} -> n
       _ -> text
     end
+  end
+
+  # A date and time: `2026-11-04 17:00` (UTC), or any RFC 3339 instant; stored as RFC 3339
+  # in UTC. Anything else is passed on, for State to refuse.
+  defp typed(%{"type" => "datetime"}, text) do
+    trimmed = String.trim(text)
+
+    at =
+      case DateTime.from_iso8601(trimmed) do
+        {:ok, at, _offset} ->
+          at
+
+        _ ->
+          case NaiveDateTime.from_iso8601(String.replace(trimmed, " ", "T") <> ":00") do
+            {:ok, naive} -> DateTime.from_naive!(naive, "Etc/UTC")
+            _ -> nil
+          end
+      end
+
+    if at, do: at |> DateTime.truncate(:second) |> DateTime.to_iso8601(), else: text
   end
 
   defp typed(_prop, text), do: text
@@ -1888,11 +1951,67 @@ defmodule AtlasControl.Pages do
 
     progress = if progress?, do: progress_text(fact["progress"]), else: nil
     # The id is the row's own; the detail does not repeat it.
-    case Enum.reject(shown ++ [progress], &is_nil/1) do
+    case Enum.reject(shown ++ [progress, late_detail(spec, fact)], &is_nil/1) do
       [] -> nil
       parts -> Enum.join(parts, " · ")
     end
   end
+
+  # For a key, its row's counts as text ("3 assigned"), from the answers to the reads
+  # `counts/2` adds: the facts of each kind that point at it through the relation, added up
+  # over those kinds. A count whose read failed is left out, never shown as 0.
+  defp counted(description, kind, answers) do
+    found =
+      description
+      |> counts(kind)
+      |> Enum.zip(answers)
+      |> Enum.group_by(fn {{relation, _from, text}, _} -> {relation, text} end, &elem(&1, 1))
+      |> Enum.flat_map(fn {{relation, text}, answers} ->
+        if Enum.all?(answers, &match?(%{"facts" => _}, &1)),
+          do: [{relation, text, Enum.flat_map(answers, & &1["facts"])}],
+          else: []
+      end)
+
+    fn key ->
+      texts =
+        for {relation, text, facts} <- found do
+          n = Enum.count(facts, &(key in (get_in(&1, ["links", relation]) || [])))
+          String.replace(text, "{count}", Integer.to_string(n))
+        end
+
+      if texts == [], do: nil, else: Enum.join(texts, " · ")
+    end
+  end
+
+  defp join_detail(nil, more), do: more
+  defp join_detail(detail, nil), do: detail
+  defp join_detail(detail, more), do: detail <> " · " <> more
+
+  # A kind with a late rule (`late`: after, label) shows the time in `after`, and its label
+  # while State says the fact is late (worked out on every read).
+  defp late(%{"late" => %{"after" => name} = rule}, %{"late" => true}, name),
+    do: " · " <> (rule["label"] || "late")
+
+  defp late(_spec, _fact, _name), do: ""
+
+  # In a list, late comes first, so a narrow column never cuts it off, and the time is
+  # short: `Late · deadline 2026-11-04 17:00`.
+  defp late_detail(%{"late" => %{"after" => name} = rule} = spec, fact) do
+    case fact["values"][name] do
+      value when value in [nil, ""] ->
+        nil
+
+      value ->
+        prop = (spec["properties"] || %{})[name] || %{}
+        time = "#{field_label(name, prop)} #{String.trim_trailing(show(prop, value), " UTC")}"
+
+        if fact["late"] == true,
+          do: String.capitalize(rule["label"] || "late") <> " · " <> String.downcase(time),
+          else: time
+    end
+  end
+
+  defp late_detail(_spec, _fact), do: nil
 
   defp progress_text(%{"label" => label, "count" => count, "of" => of}),
     do: "#{label} · #{count}/#{of}"
@@ -1947,6 +2066,7 @@ defmodule AtlasControl.Pages do
 
   defp show(%{"type" => "boolean"}, value), do: if(value in [true, "true"], do: "yes", else: "no")
   defp show(_prop, value) when value in [nil, ""], do: "—"
+  defp show(%{"type" => "datetime"}, value), do: moment(value)
   defp show(%{"labels" => labels}, value) when is_map(labels), do: labels[value] || to_text(value)
   defp show(_prop, value), do: to_text(value)
 

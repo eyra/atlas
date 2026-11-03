@@ -879,6 +879,127 @@ defmodule AtlasControl.PagesTest do
     refute list["empty"] =~ "Press"
   end
 
+  # Helpers, kept off the start page and one key away from it; each row counts the widgets
+  # and logs that point at it.
+  @counted @logged
+           |> put_in(["entities", "helper"], %{
+             "label" => "Helper",
+             "plural" => "helpers",
+             "primary" => "name",
+             "top" => false,
+             "start" => %{"key" => "g", "label" => "Helpers"},
+             "counts" => [%{"relation" => "helped_by", "text" => "{count} helped"}],
+             "properties" => %{"name" => %{"type" => "string", "required" => true}}
+           })
+           |> put_in(["relations", "helped_by"], %{
+             "label" => "helped by",
+             "from" => ["widget", "log"],
+             "to" => ["helper"],
+             "max_outgoing" => 1,
+             "inverse" => %{"id" => "helps", "label" => "helps"}
+           })
+
+  test "a kind whose rows count what points at it: one plain read per kind it comes from" do
+    plain = %{"linked" => %{}, "plain" => true}
+
+    assert Pages.reads({:list, "helper"}, @counted) == [
+             {"helper", %{}},
+             {"widget", plain},
+             {"log", plain}
+           ]
+
+    assert Pages.reads({:list, "log"}, @counted) == [{"log", %{}}]
+
+    %{blocks: [%{"props" => start}]} = Pages.render(:home, @counted, [%{"facts" => []}])
+    assert %{"key" => "g", "label" => "Helpers", "to" => "/k/helper"} in start["actions"]
+
+    helpers = %{"facts" => [fact("ada", %{"name" => "Ada"}), fact("bob", %{"name" => "Bob"})]}
+
+    helped = fn key, by ->
+      Map.put(fact(key, %{"title" => key}), "links", %{"helped_by" => by})
+    end
+
+    widgets = %{"facts" => [helped.("W-1", ["ada"]), helped.("W-2", ["ada"]), helped.("W-3", [])]}
+    logs = %{"facts" => [helped.("L-01", ["ada"])]}
+
+    %{blocks: [%{"props" => list}]} =
+      Pages.render({:list, "helper"}, @counted, [helpers, widgets, logs])
+
+    assert [%{"id" => "ada", "detail" => "3 helped"}, %{"id" => "bob", "detail" => "0 helped"}] =
+             list["rows"]
+
+    # A count whose read failed is left out, never shown as 0.
+    %{blocks: [%{"props" => list}]} =
+      Pages.render({:list, "helper"}, @counted, [helpers, widgets, %{"error" => "busy"}])
+
+    assert [ada, _] = list["rows"]
+    refute Map.has_key?(ada, "detail")
+
+    # A hint of a kind it counts refreshes the list.
+    assert Pages.shows?({:list, "helper"}, @counted, "log")
+    refute Pages.shows?({:list, "log"}, @counted, "helper")
+  end
+
+  # Tasks are made and deleted with something else, changed by hand only; each has an
+  # optional time it is due, and is late (State says) once that has passed.
+  @due @d
+       |> put_in(["entities", "task"], %{
+         "label" => "Task",
+         "plural" => "tasks",
+         "primary" => "title",
+         "id_prefixes" => ["T-"],
+         "top" => false,
+         "by_hand" => "update",
+         "late" => %{"after" => "due", "while" => "todo", "label" => "overdue"},
+         "properties" => %{
+           "title" => %{"type" => "string", "required" => true},
+           "todo" => %{"type" => "string", "set_by" => "flow"},
+           "due" => %{"type" => "datetime"}
+         }
+       })
+
+  test "a kind changed by hand only, with a time it is due: shown, marked late, typed" do
+    spec = @due["entities"]["task"]
+
+    task =
+      fact("T-1", %{"title" => "Wrap", "todo" => "Wrap it", "due" => "2026-11-04T11:00:00Z"})
+      |> Map.put("late", true)
+
+    answers =
+      [
+        %{"fact" => task}
+        | for(_ <- tl(Pages.reads({:item, "task", "T-1"}, @due)), do: %{"facts" => []})
+      ]
+
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "task", "T-1"}, @due, answers)
+    assert Enum.map(item["actions"], & &1["key"]) == ["u"]
+    assert %{"label" => "Due", "value" => "2026-11-04 11:00 UTC · overdue"} in item["fields"]
+
+    # Not late (State left it out): the time alone.
+    answers = [%{"fact" => Map.delete(task, "late")} | tl(answers)]
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "task", "T-1"}, @due, answers)
+    assert %{"label" => "Due", "value" => "2026-11-04 11:00 UTC"} in item["fields"]
+
+    # A list says that it is late, first, and when it was due; nothing to make one with.
+    %{blocks: [%{"props" => list}]} =
+      Pages.render({:list, "task"}, @due, [%{"facts" => [task]}])
+
+    assert [%{"detail" => "Overdue · due 2026-11-04 11:00"}] = list["rows"]
+    assert list["actions"] == []
+
+    # A form's time is UTC, with or without the T and seconds; an offset is turned to UTC.
+    assert Pages.values_for(spec, %{"due" => "2026-11-04 17:00"}) == %{
+             "due" => "2026-11-04T17:00:00Z"
+           }
+
+    assert Pages.values_for(spec, %{"due" => "2026-11-04T18:00:00+01:00"}) == %{
+             "due" => "2026-11-04T17:00:00Z"
+           }
+
+    assert Pages.values_for(spec, %{"due" => "tomorrow"}) == %{"due" => "tomorrow"}
+    assert Pages.values_for(spec, %{"due" => ""}) == %{"due" => ""}
+  end
+
   test "a kind made by no key: its page has no actions, its entries no add" do
     answer = %{"fact" => fact("L-01", %{"title" => "First"})}
     entries = %{"facts" => [fact("E-01", %{"title" => "Made W-1", "about" => "W-1"})]}

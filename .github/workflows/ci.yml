@@ -143,9 +143,11 @@ jobs:
             e2e/artifacts
             io-samples
 
-  # A merge to develop deploys test on Fly (d-0014, IS-Atlas-26): rela first, then the core,
-  # once every check above passed; then a smoke check against the deployed test, over
-  # test's private network. Each app has its own deploy token (fly tokens create deploy).
+  # A merge deploys its environment on Fly (d-0014): develop deploys test (IS-Atlas-26),
+  # master deploys prod (IS-Atlas-79), once every check above passed. fly/deploy.sh first
+  # checks that this build's description describes the data rela holds there (else it
+  # deploys nothing), then deploys rela and the core, then runs the smoke check, which
+  # reads only. Each app has its own deploy token (fly tokens create deploy -a <app>).
   deploy-test:
     name: Deploy test on Fly, and a smoke check
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
@@ -155,8 +157,6 @@ jobs:
     concurrency:
       group: fly-deploy-test
       cancel-in-progress: false
-    env:
-      LABEL: develop-${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -165,23 +165,37 @@ jobs:
           elixir-version: "1.18"
       - uses: superfly/flyctl-actions/setup-flyctl@master
       - run: sudo apt-get update && sudo apt-get install -y lsof netcat-openbsd jq
-      - name: The deploy tokens are there
+      - name: Deploy test (rela, then the core), then the smoke check
         env:
-          RELA: ${{ secrets.FLY_API_TOKEN_TEST_RELA }}
-          CORE: ${{ secrets.FLY_API_TOKEN_TEST }}
+          ATLAS_FLY_TOKEN_RELA: ${{ secrets.FLY_API_TOKEN_TEST_RELA }}
+          ATLAS_FLY_TOKEN_CORE: ${{ secrets.FLY_API_TOKEN_TEST }}
         run: |
-          [ -n "$RELA" ] || { echo "::error::Add the secret FLY_API_TOKEN_TEST_RELA (fly tokens create deploy -a eyra-atlas-test-rela)"; exit 1; }
-          [ -n "$CORE" ] || { echo "::error::Add the secret FLY_API_TOKEN_TEST (fly tokens create deploy -a eyra-atlas-test)"; exit 1; }
-      - name: Deploy rela (eyra-atlas-test-rela)
-        run: flyctl deploy . --config fly/test/rela.toml --dockerfile fly/rela.Dockerfile --remote-only --ha=false --image-label "$LABEL"
+          [ -n "$ATLAS_FLY_TOKEN_RELA" ] || { echo "::error::Add the secret FLY_API_TOKEN_TEST_RELA (fly tokens create deploy -a eyra-atlas-test-rela)"; exit 1; }
+          [ -n "$ATLAS_FLY_TOKEN_CORE" ] || { echo "::error::Add the secret FLY_API_TOKEN_TEST (fly tokens create deploy -a eyra-atlas-test)"; exit 1; }
+          fly/deploy.sh test "develop-$GITHUB_SHA"
+
+  deploy-prod:
+    name: Deploy prod on Fly, and a smoke check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [generator, contract, beam, tui, agent, e2e]
+    runs-on: ubuntu-latest
+    # One deploy at a time; a newer merge waits for the running one.
+    concurrency:
+      group: fly-deploy-prod
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.18"
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: sudo apt-get update && sudo apt-get install -y lsof netcat-openbsd jq
+      - name: Deploy prod (rela, then the core), then the smoke check
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_TEST_RELA }}
-      - name: Deploy the core (eyra-atlas-test)
-        run: flyctl deploy . --config fly/test/core.toml --dockerfile fly/core.Dockerfile --remote-only --ha=false --image-label "$LABEL"
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_TEST }}
-      # Reads only: the deployed build, Control over WireGuard, every kind through State and rela.
-      - name: Smoke check against the deployed test
-        run: fly/smoke.sh test "$LABEL"
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_TEST }}
+          ATLAS_FLY_TOKEN_RELA: ${{ secrets.FLY_API_TOKEN_PROD_RELA }}
+          ATLAS_FLY_TOKEN_CORE: ${{ secrets.FLY_API_TOKEN_PROD }}
+        run: |
+          [ -n "$ATLAS_FLY_TOKEN_RELA" ] || { echo "::error::Add the secret FLY_API_TOKEN_PROD_RELA (fly tokens create deploy -a eyra-atlas-rela)"; exit 1; }
+          [ -n "$ATLAS_FLY_TOKEN_CORE" ] || { echo "::error::Add the secret FLY_API_TOKEN_PROD (fly tokens create deploy -a eyra-atlas)"; exit 1; }
+          fly/deploy.sh prod "master-$GITHUB_SHA"

@@ -226,6 +226,7 @@ entities:
     properties:
       of: { type: string, required: true, description: "The key of the fact it belongs to" }
       expected: { type: string, description: "What its owner is expected to do next; Flow writes it (IS-Atlas-53)" }
+      deadline: { type: datetime, description: "When it should be done by; optional, it only marks it late (IS-Atlas-14)" }
 
 relations:
   in_scene:

@@ -43,6 +43,7 @@ defmodule Mix.Tasks.Atlas.E2e do
 
         for t <- [t1, t2], do: AtlasE2E.Scenario.ready(t, 120_000)
         for t <- [t1, t2], do: AtlasE2E.Scenario.see(t, "Atlas · test")
+        settle_disk()
 
         Enum.reduce_while(scenarios, :ok, fn {file, scenario}, :ok ->
           IO.puts("\n#{scenario.title}  (#{Path.relative_to(file, Instance.root())})")
@@ -113,6 +114,16 @@ defmodule Mix.Tasks.Atlas.E2e do
 
       if status != 0, do: Mix.raise("atlas e2e: #{dir} does not compile:\n#{out}")
     end
+  end
+
+  # Write out what the machine still holds for the disk (on a CI runner: hundreds of MB from
+  # installing and compiling just before) before the first step is timed. The kernel writes
+  # it out ~30 s later otherwise, and while it does, a file write waits for the disk: rela's
+  # write of a fact, State's sync. CI measured one rela request at 836 ms in that window, and
+  # a step missed its second (IS-Atlas-80).
+  defp settle_disk do
+    {_, 0} = System.cmd("sync", [])
+    :ok
   end
 
   defp keep(artifacts, file, tuis, instance, error, stacktrace) do
