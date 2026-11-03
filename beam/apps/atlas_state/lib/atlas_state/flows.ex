@@ -24,6 +24,7 @@ defmodule AtlasState.Flows do
 
     kinds(description, flow) ++
       relation(description, flow) ++
+      writes(description, flow) ++
       cond do
         states == [] ->
           ["has no states"]
@@ -77,6 +78,36 @@ defmodule AtlasState.Flows do
   end
 
   defp relation(_description, _flow), do: []
+
+  # Flow passes over the hints of its own writes, so no state may depend on what it writes:
+  # not a condition on the owner relation, nor a progress or completion rule of its kinds
+  # that reads its field or that relation.
+  defp writes(description, flow) do
+    written = Enum.reject([flow["field"], flow["owner_relation"]], &is_nil/1)
+
+    conditions =
+      for state <- List.wrap(flow["states"]),
+          is_map(state),
+          {_condition, value} <- state["when"] || %{},
+          value in written,
+          do: "#{state["name"]} depends on #{value}, which Flow writes"
+
+    rules =
+      for kind <- List.wrap(flow["kinds"]),
+          rule <- rules(description, kind),
+          {_, value} <- rule,
+          value in written,
+          uniq: true,
+          do: "#{kind}'s progress or completion depends on #{value}, which Flow writes"
+
+    conditions ++ rules
+  end
+
+  defp rules(description, kind) do
+    progress = get_in(description, ["entities", kind, "progress"])
+    completion = get_in(description, ["entities", kind, "completion"])
+    Enum.filter([progress | List.wrap(completion)], &is_map/1)
+  end
 
   defp shape(states, by_name) do
     last = List.last(states)

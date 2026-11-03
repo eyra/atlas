@@ -181,9 +181,17 @@ defmodule AtlasState.Server do
   defp read(state, kind, content) do
     with {:ok, spec, state} <- kind_spec(state, kind) do
       case content do
-        %{"key" => key} -> {read_one(state, kind, spec, key), state}
-        %{"linked" => linked} when is_map(linked) -> {read_all(state, kind, spec, linked), state}
-        _ -> {read_all(state, kind, spec, %{}), state}
+        %{"key" => key, "plain" => true} ->
+          {read_plain(state, kind, spec, key), state}
+
+        %{"key" => key} ->
+          {read_one(state, kind, spec, key, content["incoming"] != false), state}
+
+        %{"linked" => linked} when is_map(linked) ->
+          {read_all(state, kind, spec, linked, content["plain"] != true), state}
+
+        _ ->
+          {read_all(state, kind, spec, %{}, true), state}
       end
     else
       {:error, :unavailable, state} -> {read_error(:unavailable), state}
@@ -205,20 +213,43 @@ defmodule AtlasState.Server do
 
   defp answered(text), do: %{"error" => text, "error_kind" => "answered"}
 
-  defp read_all(state, kind, spec, linked) do
+  # `progress?` false (a plain read): the facts and their links only, no progress.
+  defp read_all(state, kind, spec, linked, progress?) do
     with {:ok, facts} <- Rela.list(state.rela, spec["plural"]),
          facts =
            Enum.filter(facts, fn fact ->
              Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
            end),
-         {:ok, facts} <- with_progress(state, kind, facts) do
+         {:ok, facts} <- if(progress?, do: with_progress(state, kind, facts), else: {:ok, facts}) do
       %{"facts" => Enum.map(facts, &wire(state, kind, &1))}
     else
       {:error, reason} -> read_error(reason)
     end
   end
 
-  defp read_one(state, kind, spec, key) do
+  # Only the fact, as rela has it, with its links: one call to rela, for a reader that
+  # needs no progress, completion or what points at it (Flow walking up to the parents).
+  defp read_plain(state, kind, spec, key) do
+    case Rela.get(state.rela, spec["plural"], key) do
+      {:ok, fact} -> %{"fact" => wire(state, kind, fact)}
+      {:error, :not_found} -> %{"fact" => nil}
+      {:error, reason} -> read_error(reason)
+    end
+  end
+
+  # `full?` false (`"incoming": false`): the fact with its progress and completion, without
+  # what points at it, the kinds of its links, its history or its copy: what Flow needs.
+  defp read_one(state, kind, spec, key, false) do
+    with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
+         {:ok, [fact]} <- with_progress(state, kind, [fact]) do
+      %{"fact" => wire(state, kind, fact)}
+    else
+      {:error, :not_found} -> %{"fact" => nil}
+      {:error, reason} -> read_error(reason)
+    end
+  end
+
+  defp read_one(state, kind, spec, key, true) do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
          {:ok, [fact]} <- with_progress(state, kind, [fact]),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
