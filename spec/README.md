@@ -46,7 +46,7 @@ Change the contract, run `cd spec/contract && mix atlas.gen`, commit the contrac
 
 The DSL is plain macros, not Spark: a contract of a few blocks, models and kinds of markup needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency.
 
-## View model (spec 0.5.0)
+## View model (spec 0.6.0)
 
 Control sends a view model, not a data model: its **content**, a flat list of blocks, and its **markup**, entries that cover a stretch of those blocks. Every block has an id, stable for as long as the page shows the same thing; markup points at ids, never at positions, so inserting, deleting or moving a block (or a hint that changes one) never shifts other markup.
 
@@ -60,7 +60,9 @@ Control sends a view model, not a data model: its **content**, a flat list of bl
 | `confirm` | a question, or without `confirm_to` only why something cannot be done | confirm or go back |
 | `plan` | what an agent proposes for a request, and then does: the request, who planned, what it says, its steps; a `title` that says how far it is; `before`, what became of the previous plan after a refusal | keep, edit or drop each proposed step, run the kept ones, cancel, stop a run |
 
-Models that blocks hold: `action` (label, key, to), `link` (label, key, url), `row`, `pair`, `input`, `choice`, `step` (n, label: the title of the form it fills, state, why, detail, inputs: that form's inputs with the step's values). No block holds another block; grouping is markup.
+Models that blocks hold: `action` (label, key, to), `link` (label, key, url), `row` (id, label, detail, to, links), `pair`, `input`, `choice`, `step` (n, label: the title of the form it fills, state, why, detail, inputs: that form's inputs with the step's values). No block holds another block; grouping is markup.
+
+A row starts with its id, in a column of its own (IS-Atlas-57): a client lines the ids of a list up, as wide as the longest, then the labels, then the details. The detail does not repeat the id.
 
 An action opens a page of Control's (`to`). A link opens a web address outside the client, in a browser (`url`); an `item` has links, and so does a `row`, for while it is selected. A client opens only http and https addresses. Control gives a fact a link when the description marks the type of one of its fields as a web address (`types.<name>.format: "url"` in `rela/atlas.json`).
 
@@ -97,7 +99,7 @@ Client to Control:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"hello","env":"test","client":"tui","spec":"0.5.0"}` | First message. Control of another environment answers `bye` and closes. |
+| `{"op":"hello","env":"test","client":"tui","spec":"0.6.0"}` | First message. Control of another environment answers `bye` and closes. |
 | `{"op":"open","to":"/k/<kind>/<key>"}` | Show the page at this path. |
 | `{"op":"submit","to":"<form submit_to or confirm_to>","values":{...}}` | Submit a form or a confirm. Values travel as text. |
 | `{"op":"refresh"}` | Reconcile: read the page again from State. Clients send it on an interval. |
@@ -106,7 +108,7 @@ Control to client:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"welcome","env":"test","spec":"0.5.0"}` | Answer to hello. |
+| `{"op":"welcome","env":"test","spec":"0.6.0"}` | Answer to hello. |
 | `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. On a page without a form, a `refused` page also has `refused`: State's reasons. |
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |

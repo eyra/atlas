@@ -11,7 +11,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
   - Watch the third step
   """
 
-  row = fn title -> ~r/#{Regex.escape(title)}\s+UC-Atlas-\d+/ end
+  row = fn title -> ~r/UC-Atlas-\d+\s+#{Regex.escape(title)}/ end
 
   scene = fn title ->
     {scene, at} =

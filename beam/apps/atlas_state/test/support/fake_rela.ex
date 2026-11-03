@@ -117,7 +117,7 @@ defmodule AtlasState.FakeRela do
   defp links_of(s, key), do: if(w = s.links[key], do: %{"of_widget" => [w]}, else: %{})
 
   @impl true
-  def change(pid, _plural, key, props, version) do
+  def change(pid, _plural, key, props, version, targets) do
     call(pid, fn s ->
       case s.facts[key] do
         nil ->
@@ -126,14 +126,24 @@ defmodule AtlasState.FakeRela do
         {old, n} ->
           if stale?(version, n),
             do: {{:error, :version_mismatch}, s},
-            else: changed(s, key, old, props)
+            else: changed(s, key, old, props, targets)
       end
     end)
   end
 
-  defp changed(s, key, old, props) do
+  # A relation given replaces what the fact pointed at, as rela's PATCH does.
+  defp changed(s, key, old, props, targets) do
     new = old |> Map.merge(props) |> Map.reject(fn {_, v} -> is_nil(v) end)
-    {{:ok, warnings(new)}, %{s | facts: Map.put(s.facts, key, {new, s.n}), n: s.n + 1}}
+
+    links =
+      case targets do
+        %{"of_widget" => {_, [widget]}} -> Map.put(s.links, key, widget)
+        %{"of_widget" => {_, []}} -> Map.delete(s.links, key)
+        _ -> s.links
+      end
+
+    {{:ok, warnings(new)},
+     %{s | facts: Map.put(s.facts, key, {new, s.n}), n: s.n + 1, links: links}}
   end
 
   @impl true

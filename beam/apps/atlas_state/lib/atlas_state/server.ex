@@ -14,8 +14,11 @@ defmodule AtlasState.Server do
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
-  "links" => %{relation => [keys]} on a create, "cause" => why, optional}`. The cause is
-  kept with State's answer and goes along with the hint.
+  "links" => %{relation => [keys]}, "cause" => why, optional}`. On a create the links are
+  the fact's first; on a change each relation named is replaced by the keys given, so a
+  fact moves to another parent; the hint then reaches every listener of its kind, on
+  the old parent's page and the new one's. The cause is kept with State's answer and
+  goes along with the hint.
   """
   use GenServer
 
@@ -252,18 +255,18 @@ defmodule AtlasState.Server do
     end
   end
 
-  # Links are set on create only; moving a fact to another parent comes later.
-  defp store(rela, spec, "change", key, values, version, _targets) do
+  # The links of a change replace the relation's keys: a move to another parent.
+  defp store(rela, spec, "change", key, values, version, targets) do
     values = Map.new(values, fn {k, v} -> {k, if(v == "", do: nil, else: v)} end)
     plural = spec["plural"]
 
     with :ok <- Description.check(spec, values, :change),
-         {:ok, []} <- Rela.change(rela, plural, key, values, version) do
+         {:ok, []} <- Rela.change(rela, plural, key, values, version, targets) do
       :stored
     else
       # The current rela has already stored the change; say so instead of hiding it.
       {:ok, warnings} -> {:refused, ["rela stored it with warnings: " | warnings]}
-      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values)
+      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values, targets)
       {:error, :not_found} -> {:refused, ["#{key} does not exist (any more)"]}
       error -> failure(error)
     end
@@ -321,10 +324,10 @@ defmodule AtlasState.Server do
   end
 
   # A change on an old version: already applied (a resend) or a real conflict.
-  defp changed_meanwhile(rela, plural, key, values) do
+  defp changed_meanwhile(rela, plural, key, values, targets) do
     case Rela.get(rela, plural, key) do
       {:ok, fact} ->
-        if same?(fact, values),
+        if same?(fact, values) and same_links?(fact, targets),
           do: :stored,
           else: {:refused, ["#{key} changed meanwhile; open it again"]}
 
@@ -340,8 +343,9 @@ defmodule AtlasState.Server do
   end
 
   # The current rela answers 422 to a create that links to a missing fact, but stores the
-  # fact anyway, without the link. So State checks the targets exist before it creates.
-  defp targets_exist(state, "create", targets) do
+  # fact anyway, without the link. So State checks the targets exist before it creates,
+  # and before a change moves a fact, to say which one is missing.
+  defp targets_exist(state, op, targets) when op in ["create", "change"] do
     missing =
       for {_relation, {kind, keys}} <- targets,
           key <- keys,
