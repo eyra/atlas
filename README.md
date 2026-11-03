@@ -10,6 +10,7 @@ This repository holds everything during development: the BEAM application, the r
 
 - `docs/guides/uc-atlas-01.md`: start the test environment and two TUIs, and manage scenes (UC-Atlas-01).
 - `docs/guides/uc-atlas-02.md`: manage the use cases of a scene (UC-Atlas-02).
+- `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
 
 ```sh
 atlas tui     # starts what is needed in the background, then opens a TUI; again for a second one
