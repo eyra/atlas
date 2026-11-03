@@ -10,6 +10,7 @@ defmodule AtlasAgent.Steer do
   | Message | Meaning |
   |---|---|
   | `{"op":"ask","request","on"}` | Plan `request`, made on the page at path `on`. Writes nothing. |
+  | `{"op":"ask","request","on","intent":"overrule"}` | The plan that undoes the step at `on` (`AtlasAgent.Overrule`); it always asks. |
   | `{"op":"run","steps":[{"n","values"}]}` | Run these steps of the proposed plan, in this order, with these values (only the inputs a step has). The rest are dropped. |
   | `{"op":"cancel"}` | Drop the plan, also while it is being made. |
   | `{"op":"stop"}` | Stop a run before its next step; stored steps stay. |
@@ -19,9 +20,14 @@ defmodule AtlasAgent.Steer do
   (UC-Atlas-18). The answer is a new plan, with `before` saying what happened; like any
   plan it runs only on `run`. The agent never retries a refused step by itself.
 
+  Everything is kept as facts in State (`AtlasAgent.Record`, UC-Atlas-19): the request
+  once its plan is made, each step that ran or was dropped, with what it made or changed
+  and the values it replaced, and the request's outcome. A failure to keep the record is
+  a notice; it never makes the agent do more or less.
+
   A small plan runs without asking (UC-Atlas-18): at most `agent.ask_above` steps (1 by
   default; 0 asks always), every one of them able to run, none deleting. A plan made
-  after a refusal always asks. Such a plan shows like an accepted one, and its title says
+  after a refusal always asks, and so does an overrule. Such a plan shows like an accepted one, and its title says
   it ran without asking.
 
   To the client: `{"op":"plan","block":<a plan block>}`, the plan as it is now, after
@@ -37,14 +43,14 @@ defmodule AtlasAgent.Steer do
   step, also during that wait (UC-Atlas-18); the steps not run say so.
   """
 
-  alias AtlasAgent.{Client, Plan}
+  alias AtlasAgent.{Client, Overrule, Plan, Record}
 
   def main(env) do
     case AtlasAgent.settings(env) do
       {:ok, settings} ->
         me = self()
         spawn_link(fn -> read(me) end)
-        loop(%{env: env, settings: settings, plan: nil, task: nil, run: nil})
+        loop(%{env: env, settings: settings, plan: nil, task: nil, run: nil, roles: nil})
 
       {:error, text} ->
         emit(%{"op" => "notice", "tone" => "error", "text" => text})
@@ -90,13 +96,16 @@ defmodule AtlasAgent.Steer do
 
   # Asking
 
+  defp handle("ask", %{"intent" => "overrule", "request" => request, "on" => on}, state),
+    do: plan(drop(state), request, on, nil, &Overrule.make(&1, on))
+
   defp handle("ask", %{"request" => request, "on" => on}, state) when is_binary(request),
     do: plan(drop(state), request, on, nil)
 
   defp handle("cancel", _message, %{plan: nil} = state), do: state
 
   defp handle("cancel", _message, %{run: nil} = state) do
-    state = drop(state)
+    state = state |> drop() |> keep_outcome("cancelled")
     show(%{state | plan: %{state.plan | state: "cancelled"}}) |> Map.put(:plan, nil)
   end
 
@@ -140,7 +149,8 @@ defmodule AtlasAgent.Steer do
       {:ok, client} ->
         send(self(), :step)
         run = %{client: client, order: order, stop: false}
-        show(%{state | run: run, plan: %{plan | state: "running", steps: steps}})
+        state = %{state | run: run, plan: %{plan | state: "running", steps: steps}}
+        show(if(plan.by_itself, do: state, else: keep_outcome(state, "running", client)))
 
       {:error, text} ->
         notice(state, "error", text)
@@ -153,17 +163,20 @@ defmodule AtlasAgent.Steer do
     limit = get_in(state.settings, ["agent", "ask_above"]) || 1
 
     plan.steps != [] and length(plan.steps) <= limit and plan.before == nil and
+      plan.overrules == nil and
       Enum.all?(plan.steps, &(&1["state"] == "proposed" and &1["tool"] != "delete"))
   end
 
-  defp plan(state, request, on, before) do
+  # `make` makes the plan with a Control client: by default the planner's.
+  defp plan(state, request, on, before, make \\ nil) do
     %{env: env, settings: settings} = state
+    make = make || (&Plan.make(&1, settings, on, request, before))
 
     task =
       Task.async(fn ->
         with {:ok, client} <- AtlasAgent.connect(env) do
           try do
-            Plan.make(client, settings, on, request, before)
+            make.(client)
           after
             Client.close(client)
           end
@@ -175,6 +188,8 @@ defmodule AtlasAgent.Steer do
       on: on,
       before: before && before["text"],
       by_itself: false,
+      record: nil,
+      overrules: nil,
       state: "planning",
       summary: nil,
       by: nil,
@@ -192,16 +207,21 @@ defmodule AtlasAgent.Steer do
 
     plan = %{plan | state: "proposed", summary: made["summary"], by: made["by"], steps: steps}
 
+    # An overrule names its own request and the one it overrules.
+    plan = %{plan | request: made["request"] || plan.request, overrules: made["overrules"]}
+
     if by_itself?(state, plan) do
       plan = Map.put(plan, :by_itself, true)
-      start(%{state | plan: plan}, Enum.map(steps, & &1["n"]), %{})
+      state = keep_request(%{state | plan: plan}, "running")
+      start(state, Enum.map(steps, & &1["n"]), %{})
     else
-      show(%{state | plan: plan})
+      show(keep_request(%{state | plan: plan}, "proposed"))
     end
   end
 
   defp planned({:error, text}, %{plan: plan} = state) when plan != nil do
-    show(%{state | plan: %{plan | state: "failed", summary: text}})
+    state = %{state | plan: %{plan | state: "failed", summary: text}}
+    show(keep_request(state, "failed"))
   end
 
   defp planned(_result, state), do: state
@@ -228,20 +248,24 @@ defmodule AtlasAgent.Steer do
   defp step(%{run: %{order: [n | rest]} = run} = state) do
     state = show(put_step(state, n, %{"state" => "running"}))
     step = Enum.find(state.plan.steps, &(&1["n"] == n))
+    was = Record.was(run.client, step)
 
     case write(run.client, step) do
       {:ok, key} ->
         Process.send_after(self(), :step, pause(state))
         done = if step["tool"] == "delete", do: "Deleted #{key}.", else: "Stored as #{key}."
         state = put_step(state, n, %{"state" => "stored", "detail" => done})
+        state = keep_step(state, run.client, n, key, was)
         show(%{state | run: %{run | order: rest}})
 
       {:refused, reasons} ->
         state = put_step(state, n, %{"state" => "refused", "detail" => Enum.join(reasons, "; ")})
+        state = keep_step(state, run.client, n, nil, nil)
         state |> Map.put(:run, %{run | order: rest}) |> finish("failed") |> what_next()
 
       {:error, text} ->
         state = put_step(state, n, %{"state" => "refused", "detail" => text})
+        state = keep_step(state, run.client, n, nil, nil)
         finish(%{state | run: %{run | order: rest}}, "failed")
     end
   end
@@ -290,8 +314,6 @@ defmodule AtlasAgent.Steer do
   defp write(client, %{"tool" => "delete"} = step), do: AtlasAgent.delete(client, step["key"])
 
   defp finish(%{run: run, plan: plan} = state, outcome) do
-    Client.close(run.client)
-
     steps =
       Enum.map(
         plan.steps,
@@ -301,8 +323,90 @@ defmodule AtlasAgent.Steer do
         )
       )
 
-    show(%{state | run: nil, plan: %{plan | state: outcome, steps: steps}})
+    state = %{state | plan: %{plan | state: outcome, steps: steps}}
+
+    state =
+      Enum.reduce(steps, state, fn
+        %{"state" => s, "n" => n}, state when s in ["not_run", "dropped"] ->
+          keep_step(state, run.client, n, nil, nil)
+
+        _step, state ->
+          state
+      end)
+
+    kept =
+      cond do
+        outcome == "done" and plan.by_itself -> "done_without_asking"
+        outcome == "failed" and Enum.any?(steps, &(&1["state"] == "refused")) -> "refused"
+        true -> outcome
+      end
+
+    state = keep_outcome(state, kept, run.client)
+    Client.close(run.client)
+    show(%{state | run: nil})
   end
+
+  # The record (AtlasAgent.Record). Its kinds come from the description, once; without
+  # them nothing is kept.
+
+  defp keep_request(%{plan: plan} = state, outcome) do
+    with_record(state, nil, fn client, roles ->
+      case Record.request(client, roles, plan, outcome) do
+        {:ok, key} -> {:ok, %{state | plan: %{plan | record: key}}}
+        other -> other
+      end
+    end)
+  end
+
+  defp keep_outcome(state, outcome, client \\ nil)
+  defp keep_outcome(%{plan: %{record: nil}} = state, _outcome, _client), do: state
+
+  defp keep_outcome(%{plan: plan} = state, outcome, client) do
+    with_record(state, client, fn client, _roles ->
+      with {:ok, _} <- Record.outcome(client, plan.record, outcome), do: {:ok, state}
+    end)
+  end
+
+  defp keep_step(%{plan: %{record: nil}} = state, _client, _n, _made, _was), do: state
+
+  defp keep_step(%{plan: plan} = state, client, n, made, was) do
+    step = Enum.find(plan.steps, &(&1["n"] == n))
+
+    with_record(state, client, fn client, roles ->
+      with {:ok, _} <- Record.step(client, roles, plan.record, step, made, was), do: {:ok, state}
+    end)
+  end
+
+  # Runs `fun` with a client (the one given, or a connection of its own) and the record's
+  # kinds; a failure is a notice and leaves the state as it was.
+  defp with_record(state, client, fun) do
+    run = fn client ->
+      with {:ok, roles} <- roles(state, client) do
+        state = %{state | roles: roles || :none}
+
+        if roles do
+          case fun.(client, roles) do
+            {:ok, state} -> {:ok, %{state | roles: roles}}
+            {:refused, reasons} -> {:error, Enum.join(reasons, "; ")}
+            {:error, _} = error -> error
+          end
+        else
+          {:ok, state}
+        end
+      end
+    end
+
+    result = if client, do: run.(client), else: Record.with_client(state.env, run)
+
+    case result do
+      {:ok, state} -> state
+      {:error, text} -> notice(state, "error", "What the agent did was not kept: #{text}")
+    end
+  end
+
+  defp roles(%{roles: :none}, _client), do: {:ok, nil}
+  defp roles(%{roles: nil}, client), do: Record.kinds(client)
+  defp roles(%{roles: roles}, _client), do: {:ok, roles}
 
   defp not_run("stopped"), do: "Not run: stopped before it."
   defp not_run(_outcome), do: "Not run: an earlier step was refused."

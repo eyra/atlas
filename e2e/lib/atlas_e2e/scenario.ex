@@ -262,8 +262,14 @@ defmodule AtlasE2E.Scenario do
   @doc "Select the row of a list that shows `text`, and open it."
   def open_row(tui, text) do
     # A row that is still on its way (by hint) is waited for first: moving down before it
-    # is there could move the selection past it.
-    see(tui, text)
+    # is there could move the selection past it. On a list longer than the screen the row
+    # may be below it, out of sight; moving down brings it in.
+    wait(
+      tui,
+      @page_wait,
+      &(&1 =~ text or &1 =~ "pgup/pgdn scroll"),
+      "show #{inspect(text)}"
+    )
 
     Enum.reduce_while(1..40, nil, fn _, _ ->
       screen = settled(tui)

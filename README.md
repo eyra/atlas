@@ -18,6 +18,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-16.md`: the agent's tools, and a plan for a request that writes nothing (UC-Atlas-16).
 - `docs/guides/uc-atlas-17.md`: press `:` on any page, say what you want, and decide on the agent's plan (UC-Atlas-17).
 - `docs/guides/uc-atlas-18.md`: watch the agent's steps go one by one, and stop it with `esc` (UC-Atlas-18).
+- `docs/guides/uc-atlas-19.md`: see what the agent did: `w` on the start page lists every request, its outcome and steps (UC-Atlas-19).
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
 - `docs/guides/uc-atlas-25.md`: how far a scene and its use cases are, from the issues under them (UC-Atlas-25).
 - `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
@@ -38,7 +39,7 @@ Agents use the same Control as the TUI, from the command line: `atlas help`, `pu
 ```sh
 atlas put use_case --in SC-Atlas-05 --title "Read items from the command line" --description-file uc.md --json
 atlas set IS-Atlas-33 stage=development --json
-atlas set UC-Atlas-05 accepted_by=melle --cause "tested it" --json   # an association; empty removes it
+atlas set IS-Atlas-33 stage=design --cause "the design is not settled" --json   # why, kept with it
 atlas put pull_request --url https://github.com/eyra/atlas/pull/14 --in IS-Atlas-33 --json
 ```
 

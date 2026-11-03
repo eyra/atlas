@@ -179,6 +179,25 @@ defmodule AtlasTui.AskTest do
     assert {_, [{:agent, %{"op" => "run"}}]} = press(m, [:enter])
   end
 
+  test "an action for the agent (agent:<intent>) asks it about the page" do
+    page =
+      put_in(@page, ["blocks", Access.at(0), "props", "actions"], [
+        %{"label" => "Undo", "key" => "x", "to" => "agent:undo"}
+      ])
+
+    m = "test" |> Model.new() |> Model.message(%{"op" => "welcome"}) |> Model.message(page)
+    {m, [{:agent, ask}]} = press(m, [{:char, "x"}])
+
+    assert ask == %{
+             "op" => "ask",
+             "request" => "Undo",
+             "on" => "/k/thing/T-1",
+             "intent" => "undo"
+           }
+
+    assert screen(m) =~ "Planning…"
+  end
+
   test "when the agent stops, a plan it was making says so" do
     {m, _} = asked()
     m = Model.agent_gone(m, "it exited with 1")
