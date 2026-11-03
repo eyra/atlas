@@ -107,7 +107,9 @@ defmodule AtlasControl.Session do
           state = notice(state, "error", "State refused it; the form says why.")
           {:noreply, show(%{state | form: form}, state.route, "refused", nil)}
         else
-          {:noreply, notice(state, "error", "State refused: " <> Enum.join(reasons, "; "))}
+          # No form to say why: the page says it (`refused`), for a client without a screen.
+          state = notice(state, "error", "State refused: " <> Enum.join(reasons, "; "))
+          {:noreply, show(state, state.route, "refused", nil, reasons)}
         end
     end
   end
@@ -359,7 +361,7 @@ defmodule AtlasControl.Session do
     end
   end
 
-  defp show(state, route, reason, position) do
+  defp show(state, route, reason, position, refused \\ nil) do
     answers =
       Enum.map(Pages.reads(route, state.description), fn {kind, content} -> ask(kind, content) end)
 
@@ -377,17 +379,21 @@ defmodule AtlasControl.Session do
 
     as_of = position || Enum.find_value(answers, & &1["position"])
 
-    send_client(state, %{
-      "op" => "page",
-      "path" => current_path(route),
-      "title" => page.title,
-      "back" => page.back,
-      "blocks" => page.blocks,
-      "markup" => page.markup,
-      "reason" => reason,
-      "position" => as_of,
-      "at" => now()
-    })
+    send_client(
+      state,
+      %{
+        "op" => "page",
+        "path" => current_path(route),
+        "title" => page.title,
+        "back" => page.back,
+        "blocks" => page.blocks,
+        "markup" => page.markup,
+        "reason" => reason,
+        "position" => as_of,
+        "at" => now()
+      }
+      |> then(&if(refused, do: Map.put(&1, "refused", refused), else: &1))
+    )
 
     %{state | route: route, form: form}
   end

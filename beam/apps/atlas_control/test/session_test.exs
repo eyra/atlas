@@ -233,6 +233,22 @@ defmodule AtlasControl.SessionTest do
              next(a, "page")
   end
 
+  test "a refused delete answers with the page and State's reasons", %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    FakeStore.refuse("W-1", "W-1 is locked")
+    a = client(port)
+    next(a, "page")
+
+    put(a, %{"op" => "open", "to" => "/k/widget/W-1/delete"})
+    assert %{"blocks" => [%{"type" => "confirm"}]} = next(a, "page")
+    put(a, %{"op" => "submit", "to" => "/k/widget/W-1/delete", "values" => %{}})
+
+    assert %{"path" => "/k/widget/W-1/delete", "reason" => "refused", "refused" => reasons} =
+             next(a, "page")
+
+    assert reasons == ["W-1 is locked"]
+  end
+
   test "a fact with parts under it is not deleted", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     FakeStore.link("P-1", "W-1")

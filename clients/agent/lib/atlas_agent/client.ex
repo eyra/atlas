@@ -54,6 +54,7 @@ defmodule AtlasAgent.Client do
 
         "refused" ->
           errors = page |> blocks("form") |> Enum.flat_map(&(&1["errors"] || []))
+          errors = if errors == [], do: page["refused"] || [], else: errors
           {:refused, if(errors == [], do: ["refused"], else: errors)}
       end
     end

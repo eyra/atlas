@@ -107,7 +107,7 @@ Control to client:
 | Message | Meaning |
 |---|---|
 | `{"op":"welcome","env":"test","spec":"0.5.0"}` | Answer to hello. |
-| `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. |
+| `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. On a page without a form, a `refused` page also has `refused`: State's reasons. |
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |
 

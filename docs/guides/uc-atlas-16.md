@@ -24,12 +24,22 @@ In a second terminal, next to the TUI:
 | Nothing changed | look at the TUI | Still `No use cases yet.`, and no hint in the status line. |
 | A step that does not fit | `atlas plan --env test --on SC-Atlas-NN "give it a colour field set to red"` | Claude will likely answer that no such field exists. When a planner proposes a field a form does not ask for, the step shows `✗ … does not ask for …`, before anyone could run it. |
 
+### Delete (IS-Atlas-39)
+
+| Step | Command | What you should see |
+|---|---|---|
+| Delete | `atlas delete UC-Atlas-NN --env test`, on a use case without issues | `Deleted UC-Atlas-NN.` The TUI on its scene drops it within a second, by hint. |
+| Refused | `atlas delete SC-Atlas-NN --env test`, on a scene that still has use cases | `refused: SC-Atlas-NN still has 1 use case. Remove it first …`: the text the TUI shows on `d`. Exit status 1. |
+| As a step | in the TUI, on a use case: `:`, `delete this use case`, `enter` | A plan of one step, `Delete use case UC-Atlas-NN?`. It asks even though it is one step, because a plan with a delete always asks. `enter` deletes it: `Deleted UC-Atlas-NN.` |
+
+`atlas tools` lists `delete <key>` with the rest.
+
 `--json` prints the plan as JSON: its steps with the form's `label`, the `inputs` (the same inputs the TUI's form has, with the proposed values) and a `problem` when a step cannot run.
 
 ## How it works
 
 - **The tools** come from Control, as the TUI's pages do: `/_kinds` (what rela describes) and each kind's create form. No tool is written by hand. A kind added to rela is a new tool.
-- **The planner** gets the request, the page you are on (its blocks, as Control sends them) and the tools. It answers steps, each a `put` of a kind or a `set` of a key. Which planner runs is a setting of the environment, `agent.planner` in `env/<env>.json`. `"claude"` is a local headless Claude session (`claude -p`) whose only tools are `atlas get`, `atlas list` and `atlas help`, on the same environment. Or it is any command that reads the input as JSON on stdin and prints the plan as JSON. The Runtime of SC-Atlas-02 takes this place later.
+- **The planner** gets the request, the page you are on (its blocks, as Control sends them) and the tools. It answers steps, each a `put` of a kind, or a `set` or `delete` of a key. Which planner runs is a setting of the environment, `agent.planner` in `env/<env>.json`. `"claude"` is a local headless Claude session (`claude -p`) whose only tools are `atlas get`, `atlas list` and `atlas help`, on the same environment. Or it is any command that reads the input as JSON on stdin and prints the plan as JSON. The Runtime of SC-Atlas-02 takes this place later.
 - **The check** opens the form each step would fill, as the TUI would, and submits nothing. An unknown kind or field, a parent that is not there or is of another kind, a missing required field: the step says so.
 
 ## What changed for this

@@ -7,6 +7,7 @@
 #   per line, of the kind that goes in the page's kind.
 # - "rename to <title>": one set of the page's item.
 # - "colour it <x>": a set of a field nobody has, which the plan check must catch.
+# - "delete it": one delete of the page's item.
 # - after a refusal ("before" in the input): the steps that were not run, again, or no
 #   steps when there are none.
 # - anything else: no steps.
@@ -47,6 +48,12 @@ plan =
         end
 
       %{"summary" => "#{length(steps)} use cases, one per line of the description.", "steps" => steps}
+
+    request =~ ~r/^delete it$/i ->
+      %{
+        "summary" => "Deletes #{key}.",
+        "steps" => [%{"tool" => "delete", "key" => key, "values" => %{}, "why" => "Asked."}]
+      }
 
     match = Regex.run(~r/rename to (.+)$/i, request) ->
       [_, title] = match
