@@ -507,4 +507,83 @@ defmodule AtlasControl.SessionTest do
     assert %{"links" => %{"seen_in" => ["T-1"]}, "by" => "migration"} =
              List.last(FakeStore.sent())
   end
+
+  test "approve and withdraw: only the member at the TUI, as itself; withdraw needs a note",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    FakeStore.put("ada", %{"name" => "Ada"}, "member")
+    Application.put_env(:atlas_control, :tui_user, "ada")
+    on_exit(fn -> Application.delete_env(:atlas_control, :tui_user) end)
+
+    {:ok, tui} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
+    put(tui, %{"op" => "hello", "env" => "test", "client" => "tui"})
+    next(tui, "page")
+
+    put(tui, %{"op" => "submit", "to" => "/k/widget/W-1/set/approved_by", "values" => %{}})
+    assert %{"reason" => "stored", "path" => "/k/widget/W-1"} = next(tui, "page")
+
+    assert %{"links" => %{"approved_by" => ["ada"]}, "by" => "ada"} =
+             List.last(FakeStore.sent())
+
+    put(tui, %{"op" => "open", "to" => "/k/widget/W-1/remove/approved_by"})
+    next(tui, "page")
+
+    put(tui, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/remove/approved_by",
+      "values" => %{"note" => " "}
+    })
+
+    assert %{"reason" => "refused", "blocks" => [%{"props" => %{"errors" => [why]}}]} =
+             next(tui, "page")
+
+    assert why =~ "a note is required"
+
+    put(tui, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/remove/approved_by",
+      "values" => %{"note" => "found a bug"}
+    })
+
+    assert %{"reason" => "stored"} = next(tui, "page")
+
+    assert %{"links" => %{"approved_by" => []}, "cause" => "found a bug"} =
+             List.last(FakeStore.sent())
+
+    # An agent is refused, and nothing is sent.
+    a = client(port)
+    next(a, "page")
+    sent = FakeStore.sent()
+    put(a, %{"op" => "submit", "to" => "/k/widget/W-1/set/approved_by", "values" => %{}})
+    assert %{"text" => text} = next(a, "notice")
+    assert text =~ "only a member approves"
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/links/approved_by",
+      "values" => %{"to" => "ada"}
+    })
+
+    assert %{"reason" => "refused"} = next(a, "page")
+    assert FakeStore.sent() == sent
+  end
+
+  test "nothing new is created under an approved fact", %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"}, "widget", %{"approved_by" => ["ada"]})
+    a = client(port)
+    next(a, "page")
+    sent = FakeStore.sent()
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/part/new/of_widget/W-1",
+      "values" => %{"title" => "Wheel"}
+    })
+
+    assert %{"reason" => "refused", "blocks" => [%{"props" => %{"errors" => [why]}}]} =
+             next(a, "page")
+
+    assert why == "W-1 is approved; withdraw it first, or put this under another widget"
+    assert FakeStore.sent() == sent
+  end
 end

@@ -19,6 +19,8 @@ defmodule AtlasControl.Pages do
   | `/k/<kind>/<key>/edit`    | form to change it, and to move it to another parent |
   | `/k/<kind>/<key>/delete`  | confirm deleting it, or why it cannot be deleted  |
   | `/k/<kind>/<key>/links/<rel>` | form to set or remove its links of an association |
+  | `/k/<kind>/<key>/set/<rel>` | confirm linking it to the client itself (Accept)  |
+  | `/k/<kind>/<key>/remove/<rel>` | form, with a note, to remove that link (Reopen) |
   | `/_kinds`                 | every kind: what a create asks, its id, its parent, its fields, its actions |
 
   Relations are of two sorts, as the description marks them (`relations.<name>.parent`
@@ -33,7 +35,12 @@ defmodule AtlasControl.Pages do
     such as who accepted it. Its page shows the link together with the fact that set it:
     since when, by whom, why (State's `origins`). It is set or removed through its own
     form, never through the change form. One marked `set_by` (a migration, say) is
-    history only: shown, and set only by a client that says it is that (`by`).
+    history only: shown, and set only by a client that says it is that (`by`). One with
+    `only_target` is set and removed only by a client that is one of the facts it points
+    at, and links only that one (who accepts is who it names). Its `actions` (`set`, `remove`:
+    label and key) are offered on the page, `requires_completed_children` refuses `set`
+    while a fact under it is not completed, and `closes_parent` refuses a new fact under
+    one that has the link.
   """
 
   require AtlasControl.Blocks, as: Blocks
@@ -60,6 +67,8 @@ defmodule AtlasControl.Pages do
       ["k", kind, key, "edit"] -> {:edit, kind, key}
       ["k", kind, key, "delete"] -> {:delete, kind, key}
       ["k", kind, key, "links", relation] -> {:links, kind, key, relation}
+      ["k", kind, key, "set", relation] -> {:set, kind, key, relation}
+      ["k", kind, key, "remove", relation] -> {:remove, kind, key, relation}
       _ -> :unknown
     end
   end
@@ -90,10 +99,10 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def resolve({:links, "_", key, relation}, description) do
+  def resolve({page, "_", key, relation}, description) when page in [:links, :set, :remove] do
     case kind_of_key(description, key) do
       nil -> :unknown
-      kind -> {:links, kind, key, relation}
+      kind -> {page, kind, key, relation}
     end
   end
 
@@ -180,8 +189,8 @@ defmodule AtlasControl.Pages do
   def path({:edit, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/edit"
   def path({:delete, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/delete"
 
-  def path({:links, kind, key, relation}),
-    do: "/k/#{enc(kind)}/#{enc(key)}/links/#{enc(relation)}"
+  def path({page, kind, key, relation}) when page in [:links, :set, :remove],
+    do: "/k/#{enc(kind)}/#{enc(key)}/#{page}/#{enc(relation)}"
 
   defp enc(part), do: URI.encode(part, &URI.char_unreserved?/1)
 
@@ -273,7 +282,7 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def form?(route), do: elem_match?(route, [:new, :edit, :links])
+  def form?(route), do: elem_match?(route, [:new, :edit, :links, :remove])
 
   defp elem_match?(route, pages), do: is_tuple(route) and elem(route, 0) in pages
 
@@ -326,6 +335,10 @@ defmodule AtlasControl.Pages do
   end
 
   def reads({_, kind, key}, _), do: [{kind, %{"key" => key}}]
+
+  # Setting a link that needs the facts under it completed reads them, as the page does.
+  def reads({:set, kind, key, _relation}, description), do: reads({:item, kind, key}, description)
+  def reads({:remove, kind, key, _relation}, _description), do: [{kind, %{"key" => key}}]
 
   # The fact, and the facts it may point at: of each kind the relation points at.
   def reads({:links, kind, key, relation}, description) do
@@ -431,9 +444,16 @@ defmodule AtlasControl.Pages do
             limit = if spec["max_outgoing"] == 1, do: ", at most one", else: ""
 
             how =
-              if Map.has_key?(spec, "set_by"),
-                do: "; set by a #{spec["set_by"]}, never by hand",
-                else: "; set #{relation}=<key>, empty removes it"
+              cond do
+                Map.has_key?(spec, "set_by") ->
+                  "; set by a #{spec["set_by"]}, never by hand"
+
+                is_map(spec["only_target"]) ->
+                  "; #{spec["only_target"]["error"] || "only one of them sets it"}: in the TUI, never by an agent"
+
+                true ->
+                  "; set #{relation}=<key>, empty removes it"
+              end
 
             "#{relation}: to #{Enum.join(spec["to"] || [], " or ")}#{limit}#{how}"
           end
@@ -559,7 +579,7 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  defp page({:item, kind, key}, kind, spec, description, [answer | child_answers], _form) do
+  defp page({:item, kind, key}, kind, spec, description, [answer | child_answers], form) do
     case answer do
       %{"fact" => nil} ->
         missing(
@@ -601,7 +621,7 @@ defmodule AtlasControl.Pages do
                     else: []
                   ) ++ [action(:delete, spec, kind, path({:delete, kind, key}))],
                 else: []
-              ) ++ described_actions(spec, fact),
+              ) ++ described_actions(spec, fact) ++ link_actions(description, kind, fact, form),
             links: links(description, spec, fact)
           )
 
@@ -667,11 +687,13 @@ defmodule AtlasControl.Pages do
           kind not in (rel["from"] || []) ->
             missing(title, "#{singular(spec, kind)} has no #{name}.", back)
 
-          not settable_relation?(description, relation, form[:by]) ->
+          not may_link?(description, relation, form[:by], form[:by_kind]) ->
             why =
-              if rel["set_by"],
-                do: "only a #{rel["set_by"]} sets it",
-                else: "it says what the fact belongs under"
+              cond do
+                rel["set_by"] -> "only a #{rel["set_by"]} sets it"
+                rel["only_target"] -> rel["only_target"]["error"] || "not by this client"
+                true -> "it says what the fact belongs under"
+              end
 
             missing(title, "#{String.capitalize(name)} is not set here: #{why}.", back)
 
@@ -695,6 +717,97 @@ defmodule AtlasControl.Pages do
                 ],
                 submit_label: "Save",
                 submit_to: path({:links, kind, key, relation}),
+                cancel_to: back,
+                errors: form[:errors] || []
+              )
+
+            page(title, back, [form_block])
+        end
+
+      %{"error" => error} ->
+        unavailable(error, back)
+    end
+  end
+
+  # Link the fact to the client itself (Accept), after asking; refused, with why, while it
+  # may not: another client, already linked, or facts under it not completed.
+  defp page({:set, kind, key, relation} = route, kind, spec, description, answers, form) do
+    back = path({:item, kind, key})
+    rel = get_in(description, ["relations", relation]) || %{}
+
+    label =
+      get_in(rel, ["actions", "set", "label"]) || String.capitalize(rel["label"] || relation)
+
+    title = "#{label} #{key}"
+
+    case hd(answers) do
+      %{"fact" => nil} ->
+        missing(title, "#{key} does not exist (any more).", path({:list, kind}))
+
+      %{"fact" => fact} ->
+        case set_problem(description, route, answers, form[:by], form[:by_kind]) do
+          nil ->
+            confirm =
+              Blocks.confirm(
+                title: "#{title}?",
+                text:
+                  "#{key}: #{label(spec, fact)} will be #{rel["label"] || relation} #{form[:by]}.",
+                confirm_label: label,
+                confirm_to: path(route),
+                cancel_to: back
+              )
+
+            page(title, back, [confirm])
+
+          problem ->
+            missing(title, problem, back)
+        end
+
+      %{"error" => error} ->
+        unavailable(error, back)
+    end
+  end
+
+  # Remove the link (Reopen); a note says why, and is kept with the fact that removes it.
+  defp page({:remove, kind, key, relation} = route, kind, _spec, description, [answer], form) do
+    back = path({:item, kind, key})
+    rel = get_in(description, ["relations", relation]) || %{}
+
+    label =
+      get_in(rel, ["actions", "remove", "label"]) ||
+        "Remove #{rel["label"] || relation}"
+
+    title = "#{label} #{key}"
+
+    case answer do
+      %{"fact" => nil} ->
+        missing(title, "#{key} does not exist (any more).", path({:list, kind}))
+
+      %{"fact" => fact} ->
+        cond do
+          not may_link?(description, relation, form[:by], form[:by_kind]) ->
+            missing(title, "#{title} is not done here: #{why_not(rel)}.", back)
+
+          (get_in(fact, ["links", relation]) || []) == [] ->
+            missing(title, "#{key} has no #{rel["label"] || relation}.", back)
+
+          true ->
+            form_block =
+              Blocks.form(
+                title: title,
+                inputs: [
+                  Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key),
+                  Blocks.input(
+                    name: "note",
+                    label: "Note",
+                    kind: "multiline",
+                    value: (form[:values] || %{})["note"],
+                    required: true,
+                    hint: "Why; kept with the fact that removes it"
+                  )
+                ],
+                submit_label: label,
+                submit_to: path(route),
                 cancel_to: back,
                 errors: form[:errors] || []
               )
@@ -885,6 +998,109 @@ defmodule AtlasControl.Pages do
         value: value,
         hint: "Keys, separated by commas; empty removes them"
       )
+
+  @doc """
+  Whether a client that is `by` (a fact of kind `by_kind`, or nil) may set or remove the
+  links of `relation`: a client may set it (`settable_relation?/3`), and when the
+  description says only one of the facts it points at does (`only_target`), `by` is one of
+  that kind, or a client the rule names in `also` (a migration).
+  """
+  def may_link?(description, relation, by, by_kind) do
+    rel = get_in(description, ["relations", relation]) || %{}
+
+    settable_relation?(description, relation, by) and
+      case rel["only_target"] do
+        %{} = only -> by in (only["also"] || []) or by_kind in (rel["to"] || [])
+        _ -> true
+      end
+  end
+
+  @doc "Whether a client that is `by` may set `relation` to `keys`: only to itself, when so ruled."
+  def may_link_to?(description, relation, by, by_kind, keys) do
+    rel = get_in(description, ["relations", relation]) || %{}
+    only = rel["only_target"]
+
+    may_link?(description, relation, by, by_kind) and
+      (only == nil or by in (only["also"] || []) or Enum.all?(keys, &(&1 == by)))
+  end
+
+  defp why_not(rel),
+    do: get_in(rel, ["only_target", "error"]) || "not by this client"
+
+  @doc """
+  Why the client `by` may not link the fact of `route` (`{:set, kind, key, relation}`) to
+  itself, or nil. `answers` are State's answers to the route's reads: the fact, then the
+  facts under it.
+  """
+  def set_problem(description, {:set, kind, key, relation}, [answer | child_answers], by, by_kind) do
+    rel = get_in(description, ["relations", relation]) || %{}
+    fact = answer["fact"] || %{}
+    linked = get_in(fact, ["links", relation]) || []
+
+    open =
+      for {{_relation, _from, spec}, %{"facts" => facts}} <-
+            Enum.zip(child_relations(description, kind), child_answers),
+          parent?(spec),
+          child <- facts,
+          child["completion"] == nil,
+          do: child["key"]
+
+    cond do
+      kind not in (rel["from"] || []) ->
+        "#{key} has no #{rel["label"] || relation}"
+
+      not may_link?(description, relation, by, by_kind) ->
+        "#{String.capitalize(rel["label"] || relation)} is not set here: #{why_not(rel)}."
+
+      linked != [] ->
+        "#{key} is #{rel["label"] || relation} #{Enum.join(linked, ", ")} already."
+
+      open != [] and is_binary(rel["requires_completed_children"]) ->
+        rel["requires_completed_children"]
+        |> String.replace("{key}", key)
+        |> String.replace("{children}", Enum.join(Enum.sort(open), ", "))
+
+      true ->
+        nil
+    end
+  end
+
+  # Set or remove, as the description names them, for a client that may.
+  defp link_actions(description, kind, fact, form) do
+    for {relation, spec} <- associations(description, kind),
+        %{} = actions <- [spec["actions"]],
+        may_link?(description, relation, form[:by], form[:by_kind]),
+        {op, page} <-
+          [
+            if((get_in(fact, ["links", relation]) || []) == [],
+              do: {"set", :set},
+              else: {"remove", :remove}
+            )
+          ],
+        %{"label" => label, "key" => key} <- [actions[op]],
+        do: Blocks.action(label: label, key: key, to: path({page, kind, fact["key"], relation}))
+  end
+
+  @doc """
+  Why a fact of `kind` may not go under `parent` (a fact of `parent_kind`, as State
+  answers it) through a parent relation, or nil: an association of the parent marked
+  `closes_parent` has a link (it is accepted).
+  """
+  def closed_problem(description, kind, parent_kind, parent) do
+    Enum.find_value(associations(description, parent_kind), fn {relation, spec} ->
+      if is_binary(spec["closes_parent"]) and (get_in(parent, ["links", relation]) || []) != [] do
+        kind_spec = get_in(description, ["entities", parent_kind]) || %{}
+
+        spec["closes_parent"]
+        |> String.replace("{parent}", parent["key"])
+        |> String.replace("{kind}", singular(kind_spec, parent_kind) |> String.downcase())
+        |> String.replace(
+          "{child}",
+          singular(get_in(description, ["entities", kind]) || %{}, kind) |> String.downcase()
+        )
+      end
+    end)
+  end
 
   @doc "The keys a links form's `to` names; none removes the links."
   def link_keys(text) do
