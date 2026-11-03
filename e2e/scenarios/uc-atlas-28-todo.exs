@@ -75,7 +75,7 @@ scenario "UC-Atlas-28: What to do, for the owner of a fact", fn %{t1: t1, instan
     see(t1, "Use case #{use_case}: A use case to test")
     see(t1, "What to do: Test it")
     see(t1, ~r/Why\s+Flow test_and_accept: all under it is completed → melle/)
-    see(t1, ~r/How\s+Try the test below, then accept it\./)
+    see(t1, ~r/How\s+Try the test below, then accept it, or reject it with a note\./)
     see(t1, ~r/Melle can test\s+open it from My work, and read this line\./)
     see(t1, ~r/Answers\s+a Accept/)
     see(t1, "a Accept")
