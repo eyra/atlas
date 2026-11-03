@@ -16,6 +16,9 @@ defmodule AtlasTui.App do
 
   alias AtlasTui.{Keys, Model, View}
 
+  # How long a lone escape byte waits for the rest of a key's sequence (`\e[B` is Down)
+  # before it counts as Escape: `escape_ms` in the settings. The input is read a byte at
+  # a time, so on a busy machine the bytes of one key can come further apart than this.
   @escape_wait 30
   @reconnect 2_000
   @root Path.expand("../../../..", __DIR__)
@@ -40,6 +43,7 @@ defmodule AtlasTui.App do
       reconcile: reconcile,
       socket: nil,
       buffer: "",
+      escape_wait: settings["escape_ms"] || @escape_wait,
       agent: nil,
       agent_buffer: ""
     }
@@ -68,7 +72,7 @@ defmodule AtlasTui.App do
     receive do
       {:input, data} ->
         {keys, rest} = Keys.parse(state.buffer <> data)
-        if rest != "", do: Process.send_after(self(), {:flush, rest}, @escape_wait)
+        if rest != "", do: Process.send_after(self(), {:flush, rest}, state.escape_wait)
         keys(%{state | buffer: rest}, keys)
 
       {:flush, rest} when rest == state.buffer ->
