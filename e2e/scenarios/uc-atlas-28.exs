@@ -100,8 +100,8 @@ scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance
   end
 
   # IS-Atlas-78: what is assigned is an Assignment; the list shows the fact it belongs to,
-  # while that fact is open.
-  step "Done: an accepted use case leaves the list; its Assignment still names you", fn ->
+  # while that fact is open. Once it is done, Flow takes the owner off (IS-Atlas-75).
+  step "Done: an accepted use case leaves the list; Flow takes its owner off", fn ->
     %{scene: scene} = Process.get(:uc28)
 
     {done, _} =
@@ -122,6 +122,7 @@ scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance
     refute_see(t1, "A use case to accept")
 
     {part, _} = atlas_json(i, ["get", "AS-" <> done["key"]])
-    ["Assigned to", "melle"] in part["fields"] || raise inspect(part["fields"])
+    ["Assigned to", "—"] in part["fields"] || raise inspect(part["fields"])
+    part["origins"]["Assigned to"]["by"] == "flow" || raise inspect(part["origins"])
   end
 end

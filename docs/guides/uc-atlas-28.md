@@ -20,7 +20,9 @@ The TUI's user is `tui_user` in `env/<env>.json` (`melle`), and a person of that
 | Moved away | `atlas set UC-Atlas-NN assigned_to=coordinator --cause … --env test` | Gone, in every TUI; the count goes down. |
 | The scenes | `s` | The scenes list, with the count in the header; `esc` comes back. |
 | Open one | `↵` on a row | The fact's page (not its Assignment's), with **Assigned to** `melle` and the same since and cause. |
-| Done | accept it (`a`, `y`), or merge an issue's pull request | Gone from the list: only open facts are there, though the Assignment still names you. |
+| Done | accept it (`a`, `y`), or merge an issue's pull request | Gone from the list: only open facts are there. Flow also takes the owner off its Assignment (IS-Atlas-75). |
+
+Since IS-Atlas-75 Flow writes owners itself: a use case whose issues are all done becomes yours to test, with Flow's cause, and shows here by itself.
 
 A session that is not a person (an agent on the command line, a migration) opens on the plan, as before.
 
