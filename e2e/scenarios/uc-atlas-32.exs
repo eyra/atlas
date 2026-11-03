@@ -30,8 +30,8 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
       atlas_json(i, ["put", "issue", "--in", use_case["key"], "--title", "Its only issue"])
 
     home(t1)
-    see(t1, "A scene to accept")
     refute_see(t1, "People")
+    # open_row also reaches a row below the bottom of a long list.
     open_row(t1, "A scene to accept")
     open_row(t1, "A use case to accept")
     see(t1, "Use case #{use_case["key"]}: A use case to accept")
@@ -101,7 +101,13 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     press(t1, "Escape")
     see(t1, ~r/#{use_case}\s+A use case to accept\s+Done · 1\/1/)
     press(t1, "Escape")
-    see(t1, ~r/#{scene}\s+A scene to accept\s+To test · 1\/1/)
+    # The scenes list may be longer than the screen: the scene's own page says it.
+    see(t1, ~r/Atlas · test\s+Scenes$/m)
+    open_row(t1, "A scene to accept")
+    see(t1, "Scene #{scene}: A scene to accept")
+    see(t1, ~r/Progress\s+To test · 1\/1/)
+    press(t1, "Escape")
+    see(t1, ~r/Atlas · test\s+Scenes$/m)
   end
 
   step "Nothing new goes under an accepted use case", fn ->
