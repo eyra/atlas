@@ -24,7 +24,7 @@ defmodule AtlasControl.FakeStore do
               "labels" => %{"light" => "Light", "dark" => "Dark"}
             },
             "done" => %{"type" => "boolean", "default" => "false"},
-            "notes" => %{"type" => "string", "description" => "Free text"},
+            "notes" => %{"type" => "string", "description" => "Free text", "multiline" => true},
             # Only a connector fills it, as `rela/atlas.json` marks it.
             "ext_ref" => %{"type" => "string", "set_by" => "connector"}
           },
