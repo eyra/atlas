@@ -21,7 +21,7 @@ defmodule AtlasTuiTest do
             %{"label" => "First", "detail" => "T-1", "to" => "/k/thing/T-1"},
             %{"label" => "Second", "detail" => "T-2 · Ready", "to" => "/k/thing/T-2"}
           ],
-          "actions" => [%{"label" => "New thing", "key" => "n", "to" => "/k/thing/new"}]
+          "actions" => [%{"label" => "Create thing", "key" => "c", "to" => "/k/thing/new"}]
         }
       }
     ]
@@ -30,14 +30,14 @@ defmodule AtlasTuiTest do
   @form %{
     "op" => "page",
     "path" => "/k/thing/new",
-    "title" => "New thing",
+    "title" => "Create thing",
     "back" => "/k/thing",
     "reason" => "open",
     "blocks" => [
       %{
         "type" => "form",
         "props" => %{
-          "title" => "New thing",
+          "title" => "Create thing",
           "submit_label" => "Create",
           "submit_to" => "/k/thing/new",
           "cancel_to" => "/k/thing",
@@ -112,11 +112,11 @@ defmodule AtlasTuiTest do
     text = screen(m)
     assert text =~ "Atlas · test"
     assert text =~ "› First"
-    assert text =~ "n New thing"
+    assert text =~ "c Create thing"
     assert text =~ "opened at 11:00:00 · position 3"
 
     assert {_, [{:send, %{"op" => "open", "to" => "/k/thing/T-2"}}]} = press(m, [:down, :enter])
-    assert {_, [{:send, %{"op" => "open", "to" => "/k/thing/new"}}]} = press(m, [{:char, "n"}])
+    assert {_, [{:send, %{"op" => "open", "to" => "/k/thing/new"}}]} = press(m, [{:char, "c"}])
     assert {_, [{:send, %{"op" => "refresh"}}]} = press(m, [{:char, "r"}])
     assert {_, [:quit]} = press(m, [{:char, "q"}])
   end
@@ -133,7 +133,7 @@ defmodule AtlasTuiTest do
     assert {_, []} = press(m, [{:char, "o"}])
 
     {m, _} = press(m, [:down])
-    assert screen(m) =~ "n New thing   o Open in browser   ↑↓ move"
+    assert screen(m) =~ "c Create thing   o Open in browser   ↑↓ move"
     {m, effects} = press(m, [{:char, "o"}])
     assert effects == [{:open_url, url}]
     assert screen(m) =~ "i Opened #{url} in the browser"

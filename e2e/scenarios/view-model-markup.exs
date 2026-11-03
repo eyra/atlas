@@ -5,8 +5,8 @@ import AtlasE2E.Scenario
 scenario "Markup: a border around the scene, a section for its use cases", fn %{t1: t1, t2: t2} ->
   step "A scene's page: the scene in a border, its use cases in a section", fn ->
     home(t1)
-    press(t1, "n")
-    see(t1, ~r/^ New scene$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create scene$/m)
     type(t1, "A scene with markup")
     at = press(t1, "C-s")
     page = stored(t1, ~r/Scene SC-Atlas-\d+: A scene with markup/, at)
@@ -23,13 +23,13 @@ scenario "Markup: a border around the scene, a section for its use cases", fn %{
     page =~ ~r/^ └─+┘\n\n Use cases ─+$/mu || raise "no section after the border:\n#{page}"
 
     # The section carries the list's title; the list does not repeat it.
-    page =~ ~r/ Use cases ─+\n\n   No use cases yet\. Press a to add one\./u ||
+    page =~ ~r/ Use cases ─+\n\n   No use cases yet\. Press c to create one\./u ||
       raise "the section does not head the list:\n#{page}"
   end
 
   step "A use case added shows in the section; TUI 2 draws the same", fn ->
-    press(t1, "a")
-    see(t1, ~r/^ New use case in SC-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create use case in SC-Atlas-\d+$/m)
     type(t1, "A use case in the section")
     at = press(t1, "C-s")
     stored(t1, ~r/✓ Stored as UC-Atlas-\d+/, at)

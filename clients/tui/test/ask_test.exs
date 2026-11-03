@@ -22,7 +22,7 @@ defmodule AtlasTui.AskTest do
   defp step(n, title, state \\ "proposed") do
     %{
       "n" => n,
-      "label" => "New part in T-1",
+      "label" => "Create part in T-1",
       "state" => state,
       "why" => "Asked.",
       "inputs" => [
@@ -88,7 +88,7 @@ defmodule AtlasTui.AskTest do
     text = screen(m)
     assert text =~ "You asked       make parts"
     assert text =~ "By              a stand-in"
-    assert text =~ "› [✓] 1. New part in T-1"
+    assert text =~ "› [✓] 1. Create part in T-1"
     assert text =~ "Title"
     assert text =~ "Two"
     assert text =~ "why: Asked."
@@ -101,12 +101,12 @@ defmodule AtlasTui.AskTest do
 
     # Drop step 2; edit step 3's title in the step's form, keep it with ctrl-s.
     {m, []} = press(m, [:down, {:char, " "}, :down, {:char, "e"}])
-    assert screen(m) =~ "Step 3: New part in T-1"
+    assert screen(m) =~ "Step 3: Create part in T-1"
     assert screen(m) =~ "[ Keep ]"
     {m, []} = press(m, type("!") ++ [:ctrl_s])
     assert m.steps.editing == nil
     text = screen(m)
-    assert text =~ "[ ] 2. New part in T-1"
+    assert text =~ "[ ] 2. Create part in T-1"
     assert text =~ "Three!"
 
     {_, [{:agent, run}]} = press(m, [:enter])

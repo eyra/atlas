@@ -10,8 +10,8 @@ defmodule AtlasAgent.Plan do
   A checked step adds:
 
   - `"n"`: its number, from 1;
-  - `"label"`: the title of the form it fills, as Control sends it (`New … in <key>`,
-    `Change … <key>`);
+  - `"label"`: the title of the form it fills, as Control sends it (`Create … in <key>`,
+    `Update <key>`);
   - `"inputs"`: that form's inputs it fills, each with the value the step gives it, in
     the form's order (the contract's `input` model), so a client can show and edit them
     as it shows any form;
@@ -148,7 +148,7 @@ defmodule AtlasAgent.Plan do
   defp label(%{"tool" => "put", "kind" => kind} = step),
     do: "Put #{kind}#{if step["in"], do: " in #{step["in"]}", else: ""}"
 
-  defp label(%{"tool" => "set", "key" => key}), do: "Change #{key}"
+  defp label(%{"tool" => "set", "key" => key}), do: "Set #{key}"
   defp label(step), do: "#{step["tool"] || "?"}"
 
   defp blank?(value), do: value in [nil, ""]

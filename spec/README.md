@@ -117,7 +117,7 @@ A client without a screen, such as the agents' command line (`clients/agent`), k
 
 - `/k/_/<key>` (and `/edit`, `/delete`): the fact with that key. Its kind is the one whose id prefix the key has.
 - `/k/<kind>/new/_parent/<key>`: the create form under the fact with that key, through the kind's one at-most-one relation.
-- `/_kinds`: one `item` per kind, with what a create asks, how its id is made, what it belongs under, what hangs under it and its fields.
+- `/_kinds`: one `item` per kind, with what a create asks, how its id is made, what it belongs under, what hangs under it and its fields, and its actions as every page names them (`Create scene`, `Update scene`, `Delete scene`; `<key>` in their paths stands for a key).
 
 The page Control answers has the concrete path, such as `/k/issue/IS-Atlas-01`.
 
