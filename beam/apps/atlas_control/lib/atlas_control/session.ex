@@ -158,25 +158,31 @@ defmodule AtlasControl.Session do
 
   # Protocol
 
+  # A client says which contract version it implements. One older than Control's cannot
+  # render what Control sends now: it is told so and closed, rather than shown a page it
+  # breaks on. A newer one shows what it knows, and the rest as fallbacks.
   defp handle_op("hello", message, state) do
     environment = AtlasBus.environment()
+    version = AtlasControl.Blocks.version()
 
-    if message["env"] == environment do
-      send_client(state, %{
-        "op" => "welcome",
-        "env" => environment,
-        "spec" => AtlasControl.Blocks.version()
-      })
+    cond do
+      message["env"] != environment ->
+        bye(
+          state,
+          "This is Control #{environment}; it does not serve #{inspect(message["env"])}."
+        )
 
-      state = describe(%{state | hello: true, by: actor(message["client"])})
-      {:noreply, show(state, :home, "open", nil)}
-    else
-      send_client(state, %{
-        "op" => "bye",
-        "text" => "This is Control #{environment}; it does not serve #{inspect(message["env"])}."
-      })
+      too_old?(message["spec"], version) ->
+        bye(
+          state,
+          "This client implements contract #{message["spec"] || "(none)"}; Control " <>
+            "#{environment} speaks #{version}. It is too old: update it (atlas starts the newest build)."
+        )
 
-      {:stop, :normal, state}
+      true ->
+        send_client(state, %{"op" => "welcome", "env" => environment, "spec" => version})
+        state = describe(%{state | hello: true, by: actor(message["client"])})
+        {:noreply, show(state, :home, "open", nil)}
     end
   end
 
@@ -195,25 +201,40 @@ defmodule AtlasControl.Session do
       else: {:noreply, show(state, state.route, "reconcile", nil)}
   end
 
-  # A submit goes to one of the contract's submit endpoints (`defendpoint`, call :submit);
-  # any other `to` is refused without reading or writing anything.
-  defp handle_op("submit", %{"to" => to} = message, state) do
+  # A submit names one of the contract's submit endpoints and its params, as a form's
+  # submit_to does (or its path); anything else is refused before anything is read or
+  # written.
+  defp handle_op("submit", message, state) do
     raw = Map.new(message["values"] || %{}, fn {k, v} -> {k, to_string(v)} end)
     cause = if is_binary(message["cause"]) and message["cause"] != "", do: message["cause"]
 
-    case AtlasControl.Blocks.endpoint(:submit, to) do
+    case Pages.submit_call(message) do
       {:ok, endpoint, params} ->
         route = endpoint |> Pages.submit_route(params) |> Pages.resolve(state.description)
         state = submit(route, raw, %{state | cause: cause})
         {:noreply, %{state | cause: nil}}
 
       :error ->
-        {:noreply, notice(state, "error", "Control takes no submit at #{to}.")}
+        named = message["endpoint"] || message["to"]
+        {:noreply, notice(state, "error", "Control takes no submit at #{inspect(named)}.")}
     end
   end
 
   defp handle_op(op, _message, state),
     do: {:noreply, notice(state, "error", "Unknown op #{inspect(op)}")}
+
+  defp bye(state, text) do
+    send_client(state, %{"op" => "bye", "text" => text})
+    {:stop, :normal, state}
+  end
+
+  # Older than Control's contract, or no version at all. Versions are x.y.z.
+  defp too_old?(spec, version) do
+    case is_binary(spec) && Version.parse(spec) do
+      {:ok, theirs} -> Version.compare(theirs, Version.parse!(version)) == :lt
+      _ -> true
+    end
+  end
 
   defp route(to, state) do
     route = Pages.route(to)

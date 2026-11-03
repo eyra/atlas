@@ -175,7 +175,7 @@ defmodule AtlasTui.Model do
       title: "Step #{n}: #{step.label}",
       inputs: step.inputs || [],
       submit_label: "Keep",
-      submit_to: "",
+      submit_to: nil,
       cancel_to: ""
     }
   end
@@ -697,6 +697,19 @@ defmodule AtlasTui.Model do
          []}
   end
 
-  defp submit(model, to, values),
-    do: {%{model | waiting: true}, [{:send, %{"op" => "submit", "to" => to, "values" => values}}]}
+  # A form's submit_to (or a confirm's confirm_to) names the endpoint and its params; the
+  # submit carries them as they are. A step form being edited has none: it stays here.
+  defp submit(model, %Blocks.Call{endpoint: endpoint, params: params}, values) do
+    message = %{
+      "op" => "submit",
+      "endpoint" => endpoint,
+      "params" => params || %{},
+      "values" => values
+    }
+
+    {%{model | waiting: true}, [{:send, message}]}
+  end
+
+  defp submit(model, _to, values),
+    do: {%{model | waiting: true}, [{:send, %{"op" => "submit", "values" => values}}]}
 end
