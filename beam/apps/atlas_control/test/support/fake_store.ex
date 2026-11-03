@@ -80,7 +80,14 @@ defmodule AtlasControl.FakeStore do
           "from" => ["tag"],
           "to" => ["part"],
           "max_outgoing" => 1,
-          "inverse" => %{"id" => "tags", "label" => "tags"}
+          "inverse" => %{"id" => "tags", "label" => "tags"},
+          # As `rela/atlas.json` adds it: one live tag per part; a dropped one does not count.
+          "limit" => %{
+            "max" => 1,
+            "field" => "note",
+            "values" => ["live", "kept"],
+            "error" => "{parent} already has {child} ({value}); one tag per part"
+          }
         }
       }
     }
