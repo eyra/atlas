@@ -469,6 +469,8 @@ defmodule AtlasControl.Pages do
 
   defp input_kind(%{"values" => values}) when is_list(values), do: "choice"
   defp input_kind(%{"type" => "boolean"}), do: "boolean"
+  # Text of several lines and sections, as the description marks it.
+  defp input_kind(%{"multiline" => true}), do: "multiline"
   defp input_kind(_), do: "text"
 
   defp choices(%{"values" => values} = prop) when is_list(values) do

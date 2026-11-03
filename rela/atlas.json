@@ -1,5 +1,5 @@
 {
-  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made (prefix plus the next free number, zero-padded to digits); nobody ever types or changes an id; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value).",
+  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made (prefix plus the next free number, zero-padded to digits); nobody ever types or changes an id; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value); properties.<name>.multiline = true for text of several lines and sections (a form edits it in a multi-line editor; the line breaks are kept).",
   "entities": {
     "scene": {
       "create": {
@@ -8,6 +8,7 @@
         "defaults": { "status": "refine", "completed": false }
       },
       "properties": {
+        "description": { "multiline": true },
         "flux_id": { "set_by": "connector" }
       }
     },
@@ -18,6 +19,7 @@
         "defaults": { "status": "refine", "completed": false }
       },
       "properties": {
+        "description": { "multiline": true },
         "flux_id": { "set_by": "connector" }
       }
     },
@@ -28,6 +30,7 @@
         "defaults": { "stage": "specification", "completed": false }
       },
       "properties": {
+        "description": { "multiline": true },
         "flux_id": { "set_by": "connector" },
         "flux_ref": { "set_by": "connector" }
       }

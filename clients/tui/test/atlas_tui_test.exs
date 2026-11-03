@@ -77,6 +77,7 @@ defmodule AtlasTuiTest do
     assert Keys.flush("\e") == [:esc]
     assert Keys.parse(<<127, 19, 3>>) == {[:backspace, :ctrl_s, :ctrl_c], ""}
     assert Keys.parse("é") == {[{:char, "é"}], ""}
+    assert Keys.parse("\e[H\e[F\e[1~\e[4~") == {[:home, :end, :home, :end], ""}
   end
 
   test "an unknown or broken block becomes a fallback, and the rest still renders" do
@@ -152,12 +153,155 @@ defmodule AtlasTuiTest do
     assert {_, [{:send, %{"op" => "open", "to" => "/k/thing"}}]} = press(m, [:esc])
   end
 
-  test "a long text shows its end while typing, its start otherwise" do
-    long = String.duplicate("abcdefghij", 4)
+  test "a long text wraps in its field instead of being cut" do
+    long = String.duplicate("abcdefghij ", 12) |> String.trim()
     {m, _} = press(model(@form), Enum.map(String.graphemes(long), &{:char, &1}))
-    assert screen(m) =~ "[…" <> String.slice(long, -28..-1//1) <> "▏]"
+    text = screen(m)
+    assert text =~ "[abcdefghij abcdefghij"
+    assert text =~ "abcdefghij▏"
+    # Every word is on screen, over more than one row.
+    assert text |> String.split("abcdefghij") |> length() == 13
     {m, _} = press(m, [:down])
-    assert screen(m) =~ "[" <> String.slice(long, 0, 29) <> "…]"
+    refute screen(m) =~ "▏"
+    assert screen(m) |> String.split("abcdefghij") |> length() == 13
+  end
+
+  @notes_form update_in(@form, ["blocks", Access.at(0), "props", "inputs"], fn inputs ->
+                inputs ++
+                  [%{"name" => "notes", "label" => "Notes", "kind" => "multiline", "value" => ""}]
+              end)
+
+  defp type(text), do: Enum.map(String.graphemes(text), &{:char, &1})
+
+  test "a multi-line input: enter starts a new line, arrows move, ctrl-s saves the lines" do
+    {m, _} = press(model(@notes_form), [:down, :down])
+    assert screen(m) =~ "↵ new line"
+
+    {m, effects} =
+      press(
+        m,
+        type("## Why") ++ [:enter, :enter] ++ type("Because.") ++ [:enter] ++ type("- one")
+      )
+
+    assert effects == []
+    assert m.values["notes"] == "## Why\n\nBecause.\n- one"
+
+    # Up twice, to the end of "Because."… then a blank line before the list.
+    {m, _} = press(m, [:up, :end, :enter])
+    assert m.values["notes"] == "## Why\n\nBecause.\n\n- one"
+
+    # Backspace at the start of a line joins it to the line above.
+    {m, _} = press(m, [:down, :home, :backspace])
+    assert m.values["notes"] == "## Why\n\nBecause.\n- one"
+
+    # Typing goes where the cursor is.
+    {m, _} = press(m, [:left, :left] ++ type("!"))
+    assert m.values["notes"] == "## Why\n\nBecause!.\n- one"
+
+    assert {_, [{:send, %{"op" => "submit", "values" => %{"notes" => notes}}}]} =
+             press(m, [:ctrl_s])
+
+    assert notes == m.values["notes"]
+
+    # Past the first line, up leaves the input; tab always does.
+    {m2, _} = press(m, [:up, :up, :up])
+    assert Model.focusable(Model.form(m2)) |> Enum.at(m2.focus) |> Map.get(:name) == "state"
+    {m3, _} = press(m, [:tab])
+    assert Enum.at(Model.focusable(Model.form(m3)), m3.focus) == :submit
+  end
+
+  test "a long multi-line input scrolls to keep the cursor in sight" do
+    text = Enum.map_join(1..40, "\n", &"line #{&1}")
+
+    page =
+      put_in(
+        @notes_form,
+        ["blocks", Access.at(0), "props", "inputs", Access.at(2), "value"],
+        text
+      )
+
+    {m, _} = press(model(page), [:down, :down])
+    # Moving down into it starts at its first line.
+    assert screen(m) =~ "[line 1 "
+    assert screen(m) =~ "more below"
+    refute screen(m) =~ "line 40"
+
+    {m, _} = press(m, List.duplicate(:down, 38))
+    assert screen(m) =~ "line 39"
+    assert screen(m) =~ "more above"
+    refute screen(m) =~ "[line 1 "
+    assert screen(m) =~ "[ Create ]"
+
+    # Out of focus it shows its start, and how much more there is.
+    {m, _} = press(m, [:tab])
+    assert screen(m) =~ "[line 1 "
+    assert screen(m) =~ "↓ 32 more below"
+  end
+
+  test "an item shows text with its line breaks, blank lines and sections" do
+    notes =
+      "## Why\n\nBecause it is long enough to wrap around the edge of the screen here.\n\n- one\n- two"
+
+    item = %{
+      @list
+      | "blocks" => [
+          %{
+            "type" => "item",
+            "props" => %{
+              "title" => "Thing T-1: " <> String.duplicate("a long title ", 10),
+              "fields" => [%{"label" => "Notes", "value" => notes}]
+            }
+          }
+        ]
+    }
+
+    lines = model(item) |> View.render(60, 30, 5) |> View.plain() |> String.split("\n")
+    at = Enum.find_index(lines, &(&1 =~ "## Why"))
+    assert Enum.at(lines, at + 1) |> String.trim() == ""
+    assert Enum.at(lines, at + 2) =~ "Because it is long"
+    assert Enum.at(lines, at + 3) =~ ~r/^\s+\S/
+    assert Enum.at(lines, at + 4) |> String.trim() == ""
+    assert Enum.at(lines, at + 5) =~ "- one"
+    assert Enum.at(lines, at + 6) =~ "- two"
+    # The title wraps instead of being cut.
+    assert lines |> Enum.join() |> String.split("a long title") |> length() == 11
+  end
+
+  test "a page longer than the screen scrolls, and keeps a selected row in sight" do
+    long = Enum.map_join(1..30, "\n", &"line #{&1}")
+
+    page = fn rows ->
+      %{
+        @list
+        | "blocks" => [
+            %{
+              "type" => "item",
+              "props" => %{
+                "title" => "Thing T-1",
+                "fields" => [%{"label" => "Notes", "value" => long}]
+              }
+            },
+            %{
+              "type" => "list",
+              "props" => %{"title" => "Parts", "rows" => rows, "empty" => "No parts yet."}
+            }
+          ]
+      }
+    end
+
+    m = model(page.([]))
+    assert screen(m) =~ "pgup/pgdn scroll"
+    refute screen(m) =~ "No parts yet."
+    {m, _} = press(m, [:page_down, :page_down, :page_down])
+    assert screen(m) =~ "No parts yet."
+    {m, _} = press(m, [:page_up, :page_up, :page_up])
+    assert screen(m) =~ "line 1\n"
+
+    # The page opens at its top; moving in the list under it brings the row in sight.
+    m = model(page.([%{"label" => "Wheel", "to" => "/k/part/P-1"}]))
+    refute screen(m) =~ "› Wheel"
+    {m, _} = press(m, [:down])
+    assert screen(m) =~ "› Wheel"
   end
 
   test "a read-only input is shown but never takes focus or typing" do
