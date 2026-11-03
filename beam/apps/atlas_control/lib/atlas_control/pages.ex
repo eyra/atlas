@@ -444,8 +444,16 @@ defmodule AtlasControl.Pages do
   def children(description, kind, answer) do
     for {relation, spec} <- Enum.sort(description["relations"] || %{}),
         kind in (spec["to"] || []) do
-      label = get_in(spec, ["inverse", "label"]) || relation
-      {String.capitalize(label), get_in(answer, ["incoming", relation]) || []}
+      keys = get_in(answer, ["incoming", relation]) || []
+
+      # One of them is named by its kind's label ("1 part"), more by the inverse label ("2 parts").
+      label =
+        case {keys, spec["from"]} do
+          {[_], [from]} -> get_in(description, ["entities", from, "label"])
+          _ -> nil
+        end || get_in(spec, ["inverse", "label"]) || relation
+
+      {String.capitalize(label), keys}
     end
   end
 

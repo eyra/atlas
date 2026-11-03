@@ -174,7 +174,7 @@ defmodule AtlasControl.SessionTest do
 
     put(a, %{"op" => "submit", "to" => "/k/widget/W-1/delete", "values" => %{}})
     assert %{"blocks" => [%{"type" => "confirm", "props" => props}]} = next(a, "page")
-    assert props["text"] =~ "still has 1 parts"
+    assert props["text"] =~ "still has 1 part."
     assert next(a, "notice", 200) == nil
   end
 
