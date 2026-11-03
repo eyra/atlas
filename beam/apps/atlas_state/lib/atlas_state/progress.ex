@@ -1,0 +1,168 @@
+defmodule AtlasState.Progress do
+  @moduledoc """
+  How far a fact is, worked out from the facts under it on every read; never stored.
+  The rule is data in the description (`progress` in `rela/atlas.json`). Knows no kind
+  by name.
+
+  Per kind (`entities.<kind>.progress`):
+
+  - `over`: the relation whose facts point at this one: its children;
+  - `field`: the children's property that says how far each is, for a child kind
+    without a rule of its own (a child with a rule gives its own progress);
+  - `own`: the fact's own property, shown when it has no children.
+
+  For every kind (top-level `progress`): `order` (the values, least far first),
+  `done` (the boolean property that marks a fact finished) and `done_label`.
+
+  With children, a fact is done when every child is (or it is itself); otherwise it is
+  as far as its least far child, with how many children are that far, of all of them:
+  `%{"value", "label", "count", "of"}`, or `%{"done" => true, "label", "count", "of"}`.
+  Without children it shows its own value (no count), or done. Nil when there is none.
+  """
+
+  # Rules that point back at a kind already on the way down end here.
+  @depth 8
+
+  @doc "The progress rule of `kind`, or nil."
+  def rule(description, kind) do
+    case get_in(description, ["entities", kind, "progress"]) do
+      %{} = rule -> rule
+      _ -> nil
+    end
+  end
+
+  @doc """
+  `facts` of `kind` (as rela gives them), each with `:progress` when the kind has a rule.
+  `list` reads every fact of a kind: `list.(kind)` is `{:ok, facts}` or an error, which
+  is returned as it is.
+  """
+  def annotate(description, kind, facts, list) do
+    case rule(description, kind) do
+      nil ->
+        {:ok, facts}
+
+      _rule ->
+        with {:ok, lists} <- fetch(description, needs(description, kind, @depth), list) do
+          {:ok,
+           Enum.map(
+             facts,
+             &Map.put(&1, :progress, progress(description, lists, kind, &1, @depth))
+           )}
+        end
+    end
+  end
+
+  defp needs(_description, _kind, 0), do: MapSet.new()
+
+  defp needs(description, kind, depth) do
+    case child_kind(description, kind) do
+      nil -> MapSet.new()
+      child -> MapSet.put(needs(description, child, depth - 1), child)
+    end
+  end
+
+  defp child_kind(description, kind) do
+    with %{"over" => over} <- rule(description, kind),
+         [child] <- get_in(description, ["relations", over, "from"]) do
+      child
+    else
+      _ -> nil
+    end
+  end
+
+  defp fetch(description, kinds, list) do
+    Enum.reduce_while(kinds, {:ok, %{}}, fn kind, {:ok, lists} ->
+      plural = get_in(description, ["entities", kind, "plural"])
+
+      case plural && list.(kind) do
+        {:ok, facts} -> {:cont, {:ok, Map.put(lists, kind, facts)}}
+        nil -> {:cont, {:ok, Map.put(lists, kind, [])}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp progress(_description, _lists, _kind, _fact, 0), do: nil
+
+  defp progress(description, lists, kind, fact, depth) do
+    rule = rule(description, kind) || %{}
+    child = child_kind(description, kind)
+
+    children =
+      if child,
+        do:
+          Enum.filter(
+            lists[child] || [],
+            &(fact.key in (get_in(&1, [:links, rule["over"]]) || []))
+          ),
+        else: []
+
+    cond do
+      children != [] ->
+        values = Enum.map(children, &child_value(description, lists, child, rule, &1, depth - 1))
+        roll_up(description, values, done?(description, fact))
+
+      done?(description, fact) ->
+        done(description)
+
+      true ->
+        own(description, kind, fact, rule["own"])
+    end
+  end
+
+  # How far one child is: its own progress when its kind has a rule, else its `field`.
+  defp child_value(description, lists, kind, parent_rule, fact, depth) do
+    cond do
+      rule(description, kind) -> progress(description, lists, kind, fact, depth)
+      done?(description, fact) -> done(description)
+      true -> own(description, kind, fact, parent_rule["field"])
+    end
+  end
+
+  defp roll_up(description, values, done?) do
+    of = length(values)
+    finished = Enum.count(values, &match?(%{"done" => true}, &1))
+    open = Enum.reject(values, &(is_nil(&1) or match?(%{"done" => true}, &1)))
+
+    cond do
+      done? or finished == of ->
+        Map.merge(done(description), %{"count" => finished, "of" => of})
+
+      open == [] ->
+        nil
+
+      true ->
+        least = Enum.min_by(open, &rank(description, &1["value"]))
+        count = Enum.count(open, &(&1["value"] == least["value"]))
+        Map.merge(least, %{"count" => count, "of" => of})
+    end
+  end
+
+  defp own(_description, _kind, _fact, nil), do: nil
+
+  defp own(description, kind, fact, field) do
+    case fact.properties[field] do
+      value when value in [nil, ""] ->
+        nil
+
+      value ->
+        labels = get_in(description, ["entities", kind, "properties", field, "labels"]) || %{}
+        %{"value" => value, "label" => labels[value] || to_string(value)}
+    end
+  end
+
+  defp done?(description, fact) do
+    case get_in(description, ["progress", "done"]) do
+      nil -> false
+      field -> fact.properties[field] in [true, "true"]
+    end
+  end
+
+  defp done(description),
+    do: %{"done" => true, "label" => get_in(description, ["progress", "done_label"]) || "Done"}
+
+  # A value the order does not know counts as the least far.
+  defp rank(description, value) do
+    Enum.find_index(get_in(description, ["progress", "order"]) || [], &(&1 == value)) || -1
+  end
+end

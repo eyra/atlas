@@ -1,5 +1,10 @@
 {
-  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made: prefix plus the next free number, zero-padded to digits; or from a property (from), whose value must match pattern, with template filled from its groups ({1}, {2}, ...) after replace, and error when it does not match; the same value always makes the same id; nobody ever types or changes an id, nor the property it is made from; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value); properties.<name>.multiline = true for text of several lines and sections (a form edits it in a multi-line editor; the line breaks are kept).",
+  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made: prefix plus the next free number, zero-padded to digits; or from a property (from), whose value must match pattern, with template filled from its groups ({1}, {2}, ...) after replace, and error when it does not match; the same value always makes the same id; nobody ever types or changes an id, nor the property it is made from; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value); properties.<name>.multiline = true for text of several lines and sections (a form edits it in a multi-line editor; the line breaks are kept); properties.<name>.label = the name a page shows for the field instead of its own. progress = how far an item is, worked out from the items under it on every read, never stored, and shown in lists instead of its own field: over = the relation whose items point at it, field = the property that says how far such an item is (for a kind without a rule of its own), own = its own property, shown while nothing is under it. The top-level progress gives the order of the values (least far first; the least far child wins), done = the property that marks an item finished, done_label = what a list shows when every child is.",
+  "progress": {
+    "order": ["refine", "ready_to_pick_up", "specification", "design", "development", "testing"],
+    "done": "completed",
+    "done_label": "Done"
+  },
   "entities": {
     "scene": {
       "create": {
@@ -7,8 +12,10 @@
         "id": { "prefix": "SC-Atlas-", "digits": 2 },
         "defaults": { "status": "refine", "completed": false }
       },
+      "progress": { "over": "in_scene", "own": "status" },
       "properties": {
         "description": { "multiline": true },
+        "status": { "label": "Flux group" },
         "flux_id": { "set_by": "connector" }
       }
     },
@@ -18,8 +25,10 @@
         "id": { "prefix": "UC-Atlas-", "digits": 2 },
         "defaults": { "status": "refine", "completed": false }
       },
+      "progress": { "over": "in_use_case", "field": "stage", "own": "status" },
       "properties": {
         "description": { "multiline": true },
+        "status": { "label": "Flux group" },
         "flux_id": { "set_by": "connector" }
       }
     },

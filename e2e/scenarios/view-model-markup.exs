@@ -17,7 +17,9 @@ scenario "Markup: a border around the scene, a section for its use cases", fn %{
     page =~ ~r/^ │ Scene SC-Atlas-\d+: A scene with markup\s+│$/mu ||
       raise "the title is not in the border:\n#{page}"
 
-    page =~ ~r/^ │   Status\s+Refine\s+│$/mu || raise "the fields are not in the border:\n#{page}"
+    page =~ ~r/^ │   Flux group\s+Refine\s+│$/mu ||
+      raise "the fields are not in the border:\n#{page}"
+
     page =~ ~r/^ └─+┘\n\n Use cases ─+$/mu || raise "no section after the border:\n#{page}"
 
     # The section carries the list's title; the list does not repeat it.
