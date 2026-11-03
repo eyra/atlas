@@ -248,6 +248,11 @@
     {
       "fields": [
         {
+          "name": "id",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "label",
           "required": true,
           "type": "string"
@@ -376,7 +381,7 @@
       "name": "step"
     }
   ],
-  "version": "0.5.0",
+  "version": "0.6.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

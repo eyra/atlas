@@ -72,7 +72,7 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     see(t1, issue)
 
     for t <- [t1, t2] do
-      see(t, ~r/Repository skeleton with the layers\s+PR-eyra-atlas-e2e-2601 · Open · draft/)
+      see(t, ~r/PR-eyra-atlas-e2e-2601  Repository skeleton with the layers\s+Open · draft/)
     end
   end
 
@@ -88,7 +88,7 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     for t <- [t1, t2] do
       see(
         t,
-        ~r/Repository skeleton with the layers\s+PR-eyra-atlas-e2e-2601 · Merged\s/,
+        ~r/PR-eyra-atlas-e2e-2601  Repository skeleton with the layers\s+Merged\s/,
         connector_wait
       )
     end

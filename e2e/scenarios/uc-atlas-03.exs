@@ -55,7 +55,7 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
     at = press(t1, "C-s")
     page = stored(t1, ~r/Stage\s+Design/, at)
     page =~ ~r/Completed\s+yes/ || raise "completed is not yes"
-    by_hint(t2, ~r/IS-Atlas-\d+ · Design · completed/, at)
+    by_hint(t2, ~r/IS-Atlas-\d+  .*  Design · completed/, at)
   end
 
   step "Remove it; back in the use case; TUI 2 by hint", fn ->

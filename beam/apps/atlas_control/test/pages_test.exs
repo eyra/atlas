@@ -38,8 +38,8 @@ defmodule AtlasControl.PagesTest do
     %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @d, [answer])
 
     assert [
-             %{"label" => "One", "detail" => "W-1 · Dark", "to" => "/k/widget/W-1"},
-             %{"label" => "Two", "detail" => "W-2 · done"}
+             %{"id" => "W-1", "label" => "One", "detail" => "Dark", "to" => "/k/widget/W-1"},
+             %{"id" => "W-2", "label" => "Two", "detail" => "done"}
            ] = list["rows"]
 
     assert [%{"key" => "n", "to" => "/k/widget/new", "label" => "New widget"}] = list["actions"]
@@ -136,7 +136,8 @@ defmodule AtlasControl.PagesTest do
 
     # Among its references, to open it from.
     assert %{"id" => "parent:of_widget", "type" => "list", "props" => %{"rows" => rows}} = parent
-    assert [%{"label" => "W-1", "detail" => "Widget", "to" => "/k/widget/W-1"}] = rows
+    assert [%{"id" => "W-1", "label" => "Widget", "to" => "/k/widget/W-1"} = row] = rows
+    refute Map.has_key?(row, "detail")
 
     assert %{"kind" => "section", "props" => %{"title" => "Of widget"}} =
              Enum.find(markup, &(&1["start"] == "parent:of_widget" and &1["kind"] == "section"))
@@ -245,11 +246,11 @@ defmodule AtlasControl.PagesTest do
     %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @rolled, [answer])
 
     assert Enum.map(list["rows"], & &1["detail"]) ==
-             ["W-1 · Fine · 2/3", "W-2 · Done · 3/3", "W-3 · Dark", "W-4"]
+             ["Fine · 2/3", "Done · 3/3", "Dark", nil]
 
     # A kind without a rule shows its fields as before.
     %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @d, [answer])
-    assert hd(list["rows"])["detail"] == "W-1 · Dark"
+    assert hd(list["rows"])["detail"] == "Dark"
   end
 
   test "a field shows under the description's label for it, on the page and in its form" do
