@@ -21,5 +21,13 @@ Test ran on the MacBook: rela on 7690 and the core (Bus, State, Flow, Control) o
 ## Consequences
 
 - `atlas up/stop/restart --env test` no longer run a core on the Mac; `atlas status --env test` shows Fly's machines, `atlas logs --env test` Fly's logs. A private instance (`ATLAS_ENV_FILE` without a `fly` section, as the end-to-end test makes) still runs on the Mac.
-- The migrations (`atlas migrate-*`) read rela on the Mac and are refused for test; a future migration on Fly runs through Control or inside the rela machine.
+- The migrations (`atlas migrate-*`) read rela on the Mac and are refused for an environment on Fly. A migration runs on a copy on the Mac (IS-Atlas-79, below).
 - Every client on a machine needs flyctl logged in to organisation eyra (the Mac mini too, when it runs test's agents).
+
+## Prod, and what came with it (IS-Atlas-79)
+
+- **Prod, the same way.** Prod gets the same two apps, `eyra-atlas` and `eyra-atlas-rela`, on their own network `eyra-atlas-prod`. A merge to master deploys them (CI job `deploy-prod`). `env/prod.json` names them with `"in_use": false`: prod's clients keep using the Mac's core until its data has moved and been checked, and one edit switches them.
+- **A deploy checks the description first** (`fly/deploy.sh`). On rela's machine, on a copy of its data, it checks that the new description describes all of it, as `atlas restart` does on a Mac. When it does not, nothing is deployed and the environment keeps its build.
+- **A move is checked item by item.** `fly/apply-move.sh` writes a manifest (the SHA-256 of every file) of what arrived. `move-to-fly` compares it with the manifest of what it sent, for rela's data and State's, then compares the counts per kind and per relation.
+- **Hold.** `atlas fetch-from-fly --hold` keeps both machines up while serving nothing (`/data/hold`), for a whole copy: a backup, or a migration on the Mac. A move ends it. A held environment deploys without health checks and without a smoke check.
+- **Connectors read their secrets from the environment on Fly.** GitHub's token is the app's secret `GITHUB_TOKEN` (`token_env`); on a Mac it stays `gh auth token`.

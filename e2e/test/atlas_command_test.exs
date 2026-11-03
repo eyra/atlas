@@ -168,4 +168,70 @@ defmodule AtlasE2E.AtlasCommandTest do
 
     assert out =~ "has no rela data"
   end
+
+  test "prod has its Fly apps on a tunnel port of its own, and its clients still use this Mac" do
+    [test, prod] =
+      for env <- ["test", "prod"],
+          do: @root |> Path.join("env/#{env}.json") |> File.read!() |> JSON.decode!()
+
+    assert %{"app" => "eyra-atlas", "rela_app" => "eyra-atlas-rela", "in_use" => false} =
+             prod["fly"]
+
+    ports = [prod["rela"]["port"], prod["control"]["port"], test["control"]["port"], 7612]
+    refute prod["fly"]["tunnel_port"] in ports
+    assert prod["fly"]["move_from"] =~ "/atlas/prod"
+    refute prod["fly"]["local"] == test["fly"]["local"]
+  end
+
+  # A copy of env/prod.json on ports and folders of its own, so nothing reaches prod.
+  defp prod_file(in_use) do
+    dir = Path.join(System.tmp_dir!(), "atlas-prod-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    settings = @root |> Path.join("env/prod.json") |> File.read!() |> JSON.decode!()
+
+    settings =
+      settings
+      |> put_in(["fly", "in_use"], in_use)
+      |> put_in(["fly", "local"], Path.join(dir, "on-fly"))
+      |> put_in(["control", "port"], 3)
+      |> Map.put("rela", %{
+        "url" => "http://127.0.0.1:4/api/v1",
+        "port" => 4,
+        "data" => Path.join(dir, "rela"),
+        "bin" => Path.join(dir, "bin")
+      })
+
+    file = Path.join(dir, "prod.json")
+    File.write!(file, JSON.encode!(settings))
+    on_exit(fn -> File.rm_rf!(dir) end)
+    file
+  end
+
+  test "until \"in_use\" is true, prod's core runs on this Mac; then on Fly" do
+    assert {out, 0} = atlas(["stop", "--env", "prod"], [{"ATLAS_ENV_FILE", prod_file(false)}])
+    assert out =~ "core stopped (rela keeps running)"
+
+    assert {out, 0} = atlas(["stop", "--env", "prod"], [{"ATLAS_ENV_FILE", prod_file(true)}])
+    assert out =~ "closed this Mac's tunnel to eyra-atlas"
+    assert out =~ "a merge to master deploys it"
+  end
+
+  test "moving onto the data clients use on Fly needs --replace-live" do
+    on_fly = [{"ATLAS_ENV_FILE", fly_file()}]
+    assert {out, 1} = atlas(["move-to-fly", "--from", "/", "--env", "test"], on_fly)
+    assert out =~ "its data there is the live one"
+    assert out =~ "add --replace-live"
+  end
+
+  test "fetch-from-fly needs a folder, and an environment on Fly" do
+    on_fly = [{"ATLAS_ENV_FILE", fly_file()}]
+    assert {out, 1} = atlas(["fetch-from-fly", "--env", "test"], on_fly)
+    assert out =~ "--to <folder>"
+    assert {out, 1} = atlas(["fetch-from-fly", "--to", "/", "--env", "test"], on_fly)
+    assert out =~ "is not empty"
+
+    local = [{"ATLAS_ENV_FILE", local_file()}]
+    assert {out, 1} = atlas(["fetch-from-fly", "--to", "/tmp/x", "--env", "test"], local)
+    assert out =~ "does not run on Fly"
+  end
 end
