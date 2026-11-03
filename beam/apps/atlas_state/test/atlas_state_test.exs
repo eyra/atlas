@@ -103,6 +103,55 @@ defmodule AtlasStateTest do
     assert {%{"title" => "Two"}, _} = FakeRela.facts(rela)["W-1"]
   end
 
+  test "an old version is no conflict when only other fields changed meanwhile (was)",
+       %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One", "shade" => "light"})
+    %{"fact" => %{"version" => version}} = read("widget", %{"key" => "W-1"})
+    read_with = %{"title" => "One", "shade" => "light"}
+
+    # Someone else (Flow, a connector) changes another field meanwhile.
+    FakeRela.poke(rela, "W-1", %{"done" => true})
+
+    assert {"stored", _, _} =
+             send_and_wait(Envelope.new("fact", "widget"), %{
+               "op" => "change",
+               "key" => "W-1",
+               "values" => %{"title" => "Uno", "shade" => "light"},
+               "version" => version,
+               "was" => read_with
+             })
+
+    # The user's change and the other writer's both stay.
+    assert {%{"title" => "Uno", "shade" => "light", "done" => true}, _} =
+             FakeRela.facts(rela)["W-1"]
+  end
+
+  test "an old version is refused when a field it sets changed meanwhile, or without was",
+       %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One", "shade" => "light"})
+    %{"fact" => %{"version" => version}} = read("widget", %{"key" => "W-1"})
+    FakeRela.poke(rela, "W-1", %{"shade" => "dark"})
+
+    change = fn content ->
+      send_and_wait(
+        Envelope.new("fact", "widget"),
+        Map.merge(%{"op" => "change", "key" => "W-1", "version" => version}, content)
+      )
+    end
+
+    assert {"refused", %{"reasons" => ["W-1 changed meanwhile; open it again"]}, _} =
+             change.(%{
+               "values" => %{"title" => "Uno", "shade" => "light"},
+               "was" => %{"title" => "One", "shade" => "light"}
+             })
+
+    # Without was, any change meanwhile is a conflict, as before.
+    FakeRela.poke(rela, "W-1", %{"done" => true})
+
+    assert {"refused", _, _} = change.(%{"values" => %{"title" => "Uno"}})
+    assert {%{"title" => "One", "shade" => "dark"}, _} = FakeRela.facts(rela)["W-1"]
+  end
+
   test "an empty optional value clears it; a required one cannot be cleared", %{rela: rela} do
     fact("create", "W-1", %{"title" => "One", "shade" => "dark"})
     assert {"stored", _, _} = fact("change", "W-1", %{"shade" => ""})
