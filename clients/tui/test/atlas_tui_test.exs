@@ -154,7 +154,7 @@ defmodule AtlasTuiTest do
       |> String.split("\n")
 
     help = Enum.filter(narrow, &(&1 =~ ~r/Open in browser|esc back|q quit/))
-    assert help == [" o Open in browser   r refresh", " esc back   q quit"]
+    assert help == [" o Open in browser   r refresh   : ask", " esc back   q quit"]
     assert length(narrow) == 20
 
     # Anything but http and https is never opened.

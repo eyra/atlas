@@ -8,12 +8,17 @@ defmodule AtlasTui.App do
   - A link's key opens its web address in the browser (`AtlasTui.Browser`).
   - When the connection drops it says so, retries every 2 seconds, and on return opens
     the page it was on.
+  - The first `:` starts the agent (`atlas steer`, a Control client of its own) as a
+    child process, and keeps it while the TUI runs. They talk in JSON lines on its stdin
+    and stdout (`AtlasAgent.Steer`); its stderr goes to `steer.log` beside the
+    environment's other logs.
   """
 
   alias AtlasTui.{Keys, Model, View}
 
   @escape_wait 30
   @reconnect 2_000
+  @root Path.expand("../../../..", __DIR__)
 
   def run(env, settings) do
     with {:error, reason} <- :shell.start_interactive({:noshell, :raw}) do
@@ -33,7 +38,9 @@ defmodule AtlasTui.App do
       settings: settings,
       reconcile: reconcile,
       socket: nil,
-      buffer: ""
+      buffer: "",
+      agent: nil,
+      agent_buffer: ""
     }
 
     state = connect(state)
@@ -82,9 +89,29 @@ defmodule AtlasTui.App do
       :reconnect ->
         loop(draw(connect(state)))
 
+      {port, {:data, {:eol, line}}} when port == state.agent ->
+        line = state.agent_buffer <> line
+        state = %{state | agent_buffer: ""}
+
+        case JSON.decode(line) do
+          {:ok, message} -> loop(draw(%{state | model: Model.agent(state.model, message)}))
+          _ -> loop(state)
+        end
+
+      {port, {:data, {:noeol, part}}} when port == state.agent ->
+        loop(%{state | agent_buffer: state.agent_buffer <> part})
+
+      {port, {:exit_status, status}} when port == state.agent ->
+        why = "it exited with #{status}; see #{agent_log()}"
+
+        loop(
+          draw(%{state | agent: nil, agent_buffer: "", model: Model.agent_gone(state.model, why)})
+        )
+
       :reconcile ->
-        if state.socket && state.model.connected && !Model.form(state.model),
-          do: send_line(state, %{"op" => "refresh"})
+        if state.socket && state.model.connected && !Model.form(state.model) &&
+             !Model.step_form(state.model),
+           do: send_line(state, %{"op" => "refresh"})
 
         loop(state)
     end
@@ -98,16 +125,48 @@ defmodule AtlasTui.App do
 
     if :quit in effects do
       if state.socket, do: :gen_tcp.close(state.socket)
+      if state.agent, do: Port.close(state.agent)
       :ok
     else
-      Enum.each(effects, fn
-        {:send, message} -> send_line(state, message)
-        {:open_url, url} -> AtlasTui.Browser.open(url, state.settings)
-      end)
+      state =
+        Enum.reduce(effects, state, fn
+          {:send, message}, state ->
+            send_line(state, message)
+            state
+
+          {:open_url, url}, state ->
+            AtlasTui.Browser.open(url, state.settings)
+            state
+
+          {:agent, message}, state ->
+            to_agent(state, message)
+        end)
 
       keys(state, rest)
     end
   end
+
+  # The agent, started when it is first needed.
+  defp to_agent(state, message) do
+    state = if state.agent, do: state, else: %{state | agent: start_agent(state.model.env)}
+    Port.command(state.agent, [JSON.encode!(message), "\n"])
+    state
+  end
+
+  defp start_agent(env) do
+    atlas = Path.join(System.get_env("ATLAS_ROOT") || @root, "bin/atlas")
+
+    Port.open({:spawn_executable, "/bin/sh"}, [
+      :binary,
+      :exit_status,
+      {:line, 1_048_576},
+      args: ["-c", ~s|exec "$0" steer --env "$1" 2>>"$2"|, atlas, env, agent_log()]
+    ])
+  end
+
+  # Beside the environment's other logs (bin/atlas names their folder), else in tmp.
+  defp agent_log,
+    do: Path.join(System.get_env("ATLAS_TEST_ROOT") || System.tmp_dir!(), "steer.log")
 
   defp connect(state) do
     host = state.settings["control"]["host"] |> String.to_charlist()
