@@ -33,7 +33,27 @@ defmodule AtlasBFF.Targets.Json do
         },
         "models" => Enum.map(schema.models, entry),
         "blocks" => Enum.map(schema.blocks, entry),
-        markup => Enum.map(schema.markup, entry)
+        markup => Enum.map(schema.markup, entry),
+        "pages" =>
+          Enum.map(schema.pages, fn page ->
+            %{
+              "name" => Atom.to_string(page.name),
+              "path" => page.path,
+              "params" => Enum.map(page.params, &Atom.to_string/1),
+              "returns" => Names.view_model()
+            }
+          end),
+        "endpoints" =>
+          Enum.map(schema.endpoints, fn endpoint ->
+            %{
+              "name" => Atom.to_string(endpoint.name),
+              "call" => Atom.to_string(endpoint.call),
+              "page" => Atom.to_string(endpoint.page),
+              "path" => endpoint.path,
+              "params" => Enum.map(endpoint.params, &Atom.to_string/1),
+              "returns" => Names.view_model()
+            }
+          end)
       }
       |> pretty()
 

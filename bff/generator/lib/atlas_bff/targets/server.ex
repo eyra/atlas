@@ -18,6 +18,8 @@ defmodule AtlasBFF.Targets.Server do
     block its id, and raises when an id is used twice or the markup does not nest
     (`AtlasBFF.Markup.check/2`).
   - `version/0`: the contract's version.
+  - `pages/0`, `match/1` and `path/2`: the pages the contract lists, the page a path is,
+    and the path of a page (`AtlasBFF.Paths`). A server serves exactly these.
 
   A block is `%{"type" => name, "props" => props}`, a model a plain map, a markup entry
   `%{"kind" => name, "start" => id, "end" => id, "props" => props}`. An optional prop
@@ -81,6 +83,20 @@ defmodule AtlasBFF.Targets.Server do
 
       @doc "The contract's version."
       def version, do: unquote(schema.version)
+
+      @pages unquote(Macro.escape(schema.pages))
+
+      @doc "The pages the contract lists: `[%{name, path, params}]`, as `__schema__/0` has them."
+      def pages, do: @pages
+
+      @doc """
+      The page the contract has for `path`: `{:ok, name, %{param => value}}`, or `:error`
+      for a path that is no page (`AtlasBFF.Paths.match/2`).
+      """
+      def match(path), do: AtlasBFF.Paths.match(@pages, path)
+
+      @doc "The path of page `name` with `params` (`AtlasBFF.Paths.build/3`)."
+      def path(name, params \\ %{}), do: AtlasBFF.Paths.build(@pages, name, params)
 
       unquote_splicing(builders ++ markup)
 

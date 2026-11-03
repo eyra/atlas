@@ -14,7 +14,8 @@ defmodule AtlasBFFContract.Blocks do
 
   # 0.7.0: markup names meaning; part (main, related) replaces border and columns.
   # 0.8.0: a pair may carry its origin: the fact that set it (since, by, cause).
-  version "0.8.0"
+  # 0.9.0: the pages Control serves (defpage); a path outside them is no page.
+  version "0.9.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -162,4 +163,21 @@ defmodule AtlasBFFContract.Blocks do
   defmarkup :highlight do
     field :tone, :string, required: true
   end
+
+  # The pages Control serves, and nothing else: a path outside them is no page. Each is
+  # fetched and returns a view model. Generic: a kind is a parameter, never a name. The
+  # paths are the ones facts already store (an agent request's page), so they stay.
+  # `_` for a kind and `_parent` for a relation are values a client that knows only keys
+  # passes; Control resolves them from rela's description.
+  defpage :home, "/"
+  defpage :kinds, "/_kinds"
+  defpage :list, "/k/:kind"
+  defpage :new, "/k/:kind/new"
+  defpage :new_under, "/k/:kind/new/:relation/:parent"
+  defpage :item, "/k/:kind/:key"
+  defpage :edit, "/k/:kind/:key/edit"
+  defpage :delete, "/k/:kind/:key/delete"
+  defpage :links, "/k/:kind/:key/links/:relation"
+  defpage :set, "/k/:kind/:key/set/:relation"
+  defpage :remove, "/k/:kind/:key/remove/:relation"
 end

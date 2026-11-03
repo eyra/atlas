@@ -27,6 +27,69 @@ defmodule AtlasControl.PagesTest do
     end
   end
 
+  test "Control serves exactly the contract's pages: each one, and nothing else" do
+    for page <- AtlasControl.Blocks.pages() do
+      params = Map.new(page.params, &{&1, "x #{&1}"})
+      path = AtlasControl.Blocks.path(page.name, params)
+      route = Pages.route(path)
+
+      refute route == :unknown, "page #{page.name} (#{path}) is not served"
+      assert Pages.path(route) == path
+    end
+
+    for path <- ["/nothing", "/k", "/k/widget/W-1/sideways", "/k/widget/W-1/links", "/k/"] do
+      assert Pages.route(path) == :unknown
+
+      assert %{title: "No such page", blocks: [%{"props" => %{"text" => text}}]} =
+               Pages.render(Pages.route(path), @d, [])
+
+      assert text == "Control serves no page at this path."
+    end
+  end
+
+  test "every destination a page names is a page of the contract" do
+    widget = Map.put(fact("W-1", %{"title" => "One"}), "links", %{"checked_by" => ["ada"]})
+    part = Map.put(fact("P-1", %{"title" => "Wheel"}), "links", %{"of_widget" => ["W-1"]})
+    list = %{"facts" => [widget]}
+
+    pages = [
+      Pages.render(:home, @d, [list]),
+      Pages.render(:kinds, @d, []),
+      Pages.render({:list, "widget"}, @d, [list]),
+      Pages.render({:new, "widget"}, @d, []),
+      Pages.render({:new, "part", {"of_widget", "W-1"}}, @d, []),
+      Pages.render({:item, "widget", "W-1"}, @d, [
+        %{"fact" => widget, "incoming" => %{}},
+        %{"facts" => [part]}
+      ]),
+      Pages.render({:item, "part", "P-1"}, @d, [%{"fact" => part}, %{"facts" => []}]),
+      Pages.render({:edit, "part", "P-1"}, @d, [%{"fact" => part}, list]),
+      Pages.render({:delete, "part", "P-1"}, @d, [%{"fact" => part, "incoming" => %{}}])
+    ]
+
+    destinations =
+      for page <- pages,
+          to <- [page.back | destinations(page.blocks)],
+          is_binary(to),
+          not String.contains?(to, "<key>"),
+          do: to
+
+    assert length(destinations) > 20
+
+    for to <- destinations,
+        do: assert({:ok, _, _} = AtlasControl.Blocks.match(to), "#{to} is no page")
+  end
+
+  defp destinations(value) when is_map(value) do
+    Enum.flat_map(value, fn
+      {key, to} when key in ~w(to back cancel_to submit_to confirm_to) and is_binary(to) -> [to]
+      {_key, inner} -> destinations(inner)
+    end)
+  end
+
+  defp destinations(value) when is_list(value), do: Enum.flat_map(value, &destinations/1)
+  defp destinations(_value), do: []
+
   test "a list shows each fact's primary value, key and chosen values, sorted by key" do
     answer = %{
       "facts" => [
