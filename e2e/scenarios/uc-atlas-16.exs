@@ -119,6 +119,7 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
 
   step "A plan with a delete always asks, even of one step; enter deletes", fn ->
     open_row(t1, "One that stays")
+    see(t1, ~r/Use case UC-Atlas-\d+: One that stays/)
     key = capture(t1, ~r/Use case (UC-Atlas-\d+): One that stays/)
     press(t1, ":")
     type(t1, "delete it")
