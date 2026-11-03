@@ -6,7 +6,7 @@ What you can do: see in a list how far each use case and each scene is, worked o
 
 - A use case is as far as its least far issue: `Specification`, `Design`, `Development`. The count says how many of its issues are at that stage: `Development · 1/12` means one of twelve is still in Development and the rest are further.
 - A scene is as far as its least far use case, counted the same way.
-- `Done` when every item under it is completed: `Done · 12/12`.
+- `To test` when every item under it is completed and it is not: `To test · 12/12`. `Done` only when it is completed itself: accepted, or for an issue its pull request merged (UC-Atlas-32).
 - An item with nothing under it shows its Flux group (`Refine`, `Ready to pick up`). That comes before any stage: a scene with one use case still in Refine shows `Refine · 1/N`.
 
 Nothing is stored. State works it out from the facts on every read. The rule is data in rela's description (`progress` in `rela/atlas.json`), not code.

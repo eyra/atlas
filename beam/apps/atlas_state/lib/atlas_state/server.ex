@@ -11,8 +11,9 @@ defmodule AtlasState.Server do
     (`"copy"`, see `AtlasState.Copies`), or (kind `_description`) rela's description.
     Facts carry their outgoing `links`, with the `origins` of those links (the fact that
     set each: since, by, cause; `AtlasState.Links`), and their `progress` when the
-    description has a rule for their kind (`AtlasState.Progress`): worked out on every
-    read, never stored. One fact also carries the `history` of its links.
+    description has a rule for their kind (`AtlasState.Progress`), and why they are
+    completed (`completion`, `AtlasState.Completion`): worked out on every read, never
+    stored. One fact also carries the `history` of its links.
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
@@ -241,7 +242,8 @@ defmodule AtlasState.Server do
       "version" => fact.version
     }
 
-    if fact[:progress], do: Map.put(wired, "progress", fact.progress), else: wired
+    wired = if fact[:progress], do: Map.put(wired, "progress", fact.progress), else: wired
+    if fact[:completion], do: Map.put(wired, "completion", fact.completion), else: wired
   end
 
   # Facts

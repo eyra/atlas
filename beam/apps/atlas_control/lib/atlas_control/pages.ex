@@ -222,16 +222,40 @@ defmodule AtlasControl.Pages do
 
   @doc """
   The kinds whose facts change the progress of `kind` (its `progress` rule in the
-  description: the kind of the facts it rolls up `over`, and theirs, at any depth).
+  description: the kind of the facts it rolls up `over`, and theirs, at any depth), or
+  whether it is completed (its `completion` rule: the kinds whose facts it looks at).
   """
   def progress_from(description, kind, depth \\ 8)
   def progress_from(_description, _kind, 0), do: []
 
   def progress_from(description, kind, depth) do
-    with over when is_binary(over) <- get_in(description, ["entities", kind, "progress", "over"]),
-         [from] <- get_in(description, ["relations", over, "from"]) do
-      [from | progress_from(description, from, depth - 1)] |> Enum.uniq()
-    else
+    children =
+      with over when is_binary(over) <-
+             get_in(description, ["entities", kind, "progress", "over"]),
+           [from] <- get_in(description, ["relations", over, "from"]) do
+        [from | progress_from(description, from, depth - 1)]
+      else
+        _ -> []
+      end
+
+    Enum.uniq(completion_from(description, kind) ++ children)
+  end
+
+  defp completion_from(description, kind) do
+    for rule <- completion_rules(description, kind),
+        kind <-
+          (case rule do
+             %{"over" => relation} -> get_in(description, ["relations", relation, "from"])
+             %{"through" => relation} -> get_in(description, ["relations", relation, "to"])
+             _ -> []
+           end) || [],
+        do: kind
+  end
+
+  defp completion_rules(description, kind) do
+    case get_in(description, ["entities", kind, "completion"]) do
+      rules when is_list(rules) -> rules
+      %{} = rule -> [rule]
       _ -> []
     end
   end
@@ -482,7 +506,9 @@ defmodule AtlasControl.Pages do
             end) ++
             Enum.map(parents(description, kind, fact), fn {label, keys} ->
               Blocks.pair(label: label, value: Enum.join(keys, ", "))
-            end) ++ linked(description, kind, fact) ++ copy(answer["copy"])
+            end) ++
+            progress_pair(description, spec, kind, fact) ++
+            linked(description, kind, fact) ++ copy(answer["copy"])
 
         item =
           Blocks.item(
@@ -1289,6 +1315,44 @@ defmodule AtlasControl.Pages do
 
   defp progress_text(%{"label" => label}), do: label
   defp progress_text(_), do: nil
+
+  # How far the fact is, and why it is completed when it is (State works both out):
+  # "Done · 12/12 · accepted by melle", with the fact that accepted it; "Done ·
+  # PR-eyra-atlas-20 merged".
+  defp progress_pair(description, spec, kind, fact) do
+    text = progress_text(fact["progress"])
+
+    {why, origin} =
+      case fact["completion"] do
+        %{"by" => relation, "keys" => keys} ->
+          label = get_in(description, ["relations", relation, "label"]) || relation
+          origin = get_in(fact, ["origins", relation])
+
+          {"#{label} #{Enum.join(keys, ", ")}",
+           origin &&
+             Blocks.origin(since: origin["since"], by: origin["by"], cause: origin["cause"])}
+
+        %{"key" => key, "value" => value} ->
+          {"#{key} #{value}", nil}
+
+        _ ->
+          {nil, nil}
+      end
+
+    text =
+      cond do
+        text && why -> "#{text} · #{why}"
+        why -> "#{get_in(description, ["progress", "done_label"]) || "Done"} · #{why}"
+        true -> text
+      end
+
+    # Its own field already says how far a fact without children is, until it is done.
+    shown? = why != nil or Map.has_key?(fact["progress"] || %{}, "count")
+
+    if text && shown? && (is_map(spec["progress"]) or completion_rules(description, kind) != []),
+      do: [Blocks.pair(label: "Progress", value: text, origin: origin)],
+      else: []
+  end
 
   # A field's name on a page: the description's label for it, or its own name.
   defp field_label(name, prop), do: prop["label"] || humanize(name)

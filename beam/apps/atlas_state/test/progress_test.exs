@@ -4,26 +4,35 @@ defmodule AtlasState.ProgressTest do
   alias AtlasState.Progress
 
   # Made-up kinds, two levels: a box holds crates, a crate holds jars. A jar says how far it
-  # is in `phase`; a crate and a box in `group` while nothing is under them.
+  # is in `phase`; a crate and a box in `group` while nothing is under them. A jar is
+  # completed when a label that points at it says it is sent; a crate or a box when
+  # someone signed it (an association).
   @description %{
     "progress" => %{
-      "order" => ["draft", "agreed", "packing", "sealed"],
-      "done" => "shipped",
-      "done_label" => "Shipped"
+      "order" => ["draft", "agreed", "packing", "sealed", "check"],
+      "done_label" => "Shipped",
+      "to_test" => %{"value" => "check", "label" => "Check"}
     },
     "entities" => %{
       "box" => %{
         "plural" => "boxes",
         "progress" => %{"over" => "in_box", "own" => "group"},
+        "completion" => %{"by" => "signed_by"},
         "properties" => %{"group" => %{"labels" => %{"draft" => "Draft", "agreed" => "Agreed"}}}
       },
       "crate" => %{
         "plural" => "crates",
         "progress" => %{"over" => "in_crate", "field" => "phase", "own" => "group"},
+        "completion" => %{"by" => "signed_by"},
         "properties" => %{"group" => %{"labels" => %{"draft" => "Draft", "agreed" => "Agreed"}}}
       },
+      "label" => %{"plural" => "labels"},
       "jar" => %{
         "plural" => "jars",
+        "completion" => [
+          %{"over" => "on_jar", "field" => "state", "value" => "sent"},
+          %{"through" => "also_on", "field" => "state", "value" => "sent"}
+        ],
         "properties" => %{
           "phase" => %{"labels" => %{"packing" => "Packing", "sealed" => "Sealed"}}
         }
@@ -31,22 +40,42 @@ defmodule AtlasState.ProgressTest do
     },
     "relations" => %{
       "in_box" => %{"from" => ["crate"], "to" => ["box"]},
-      "in_crate" => %{"from" => ["jar"], "to" => ["crate"]}
+      "in_crate" => %{"from" => ["jar"], "to" => ["crate"]},
+      "signed_by" => %{"from" => ["box", "crate"], "to" => ["clerk"]},
+      "on_jar" => %{"from" => ["label"], "to" => ["jar"]},
+      "also_on" => %{"from" => ["jar"], "to" => ["label"]}
     }
   }
 
   defp fact(key, properties, links \\ %{}),
     do: %{key: key, properties: properties, links: links, version: nil}
 
-  defp progress(kind, facts, lists) do
+  defp plain_progress(kind, facts, lists) do
     {:ok, annotated} =
       Progress.annotate(@description, kind, facts, fn of -> {:ok, lists[of] || []} end)
 
     Enum.map(annotated, & &1.progress)
   end
 
-  defp jar(key, crate, phase, shipped \\ false),
-    do: fact(key, %{"phase" => phase, "shipped" => shipped}, %{"in_crate" => [crate]})
+  # A shipped jar has a label pointing at it that says it was sent.
+  defp jar(key, crate, phase, shipped \\ false) do
+    links = %{"in_crate" => [crate]}
+    jar = fact(key, %{"phase" => phase}, links)
+    if shipped, do: Map.put(jar, :shipped, true), else: jar
+  end
+
+  defp labels(jars),
+    do:
+      for(
+        %{shipped: true} = jar <- jars,
+        do: fact("L-" <> jar.key, %{"state" => "sent"}, %{"on_jar" => [jar.key]})
+      )
+
+  defp progress(kind, facts, lists) do
+    jars = lists["jar"] || []
+    lists = Map.update(lists, "label", labels(jars), &(&1 ++ labels(jars)))
+    plain_progress(kind, facts, lists)
+  end
 
   test "the least far child wins, with how many are that far, of all of them" do
     jars = [
@@ -64,11 +93,17 @@ defmodule AtlasState.ProgressTest do
              progress("crate", [fact("C-1", %{"group" => "agreed"})], %{"jar" => jars})
   end
 
-  test "done when every child is; a done child counts as further than any value" do
+  test "every child done: to test, until it is completed itself; then done" do
     jars = [jar("J-1", "C-1", "sealed", true), jar("J-2", "C-1", "packing", true)]
 
-    assert [%{"done" => true, "label" => "Shipped", "count" => 2, "of" => 2}] =
+    assert [%{"value" => "check", "label" => "Check", "count" => 2, "of" => 2} = to_test] =
              progress("crate", [fact("C-1", %{})], %{"jar" => jars})
+
+    refute Map.has_key?(to_test, "done")
+    signed = fact("C-1", %{}, %{"signed_by" => ["K-1"]})
+
+    assert [%{"done" => true, "label" => "Shipped", "count" => 2, "of" => 2}] =
+             progress("crate", [signed], %{"jar" => jars})
 
     jars = [jar("J-1", "C-1", "sealed", true), jar("J-2", "C-1", "packing")]
 
@@ -83,7 +118,7 @@ defmodule AtlasState.ProgressTest do
                [
                  fact("C-1", %{"group" => "agreed"}),
                  fact("C-2", %{}),
-                 fact("C-3", %{"shipped" => true})
+                 fact("C-3", %{}, %{"signed_by" => ["K-1"]})
                ],
                %{"jar" => [jar("J-1", "C-9", "sealed")]}
              )
@@ -108,9 +143,58 @@ defmodule AtlasState.ProgressTest do
            ] = progress("box", boxes, %{"crate" => crates, "jar" => jars})
   end
 
+  test "a parent is never completed because its children are" do
+    jars = [jar("J-1", "C-1", "sealed", true)]
+    crates = [fact("C-1", %{}, %{"in_box" => ["B-1"]})]
+
+    # The crate's jars are all shipped: the crate is to test, the box only as far as it.
+    assert [%{"value" => "check", "count" => 1, "of" => 1}] =
+             progress("box", [fact("B-1", %{})], %{"crate" => crates, "jar" => jars})
+
+    signed = [fact("C-1", %{}, %{"in_box" => ["B-1"], "signed_by" => ["K-1"]})]
+
+    assert [%{"value" => "check", "count" => 1, "of" => 1}] =
+             progress("box", [fact("B-1", %{})], %{"crate" => signed, "jar" => jars})
+  end
+
+  test "completion: why a fact is completed, by a link, a fact pointing at it, or one it points at" do
+    sent = fact("L-1", %{"state" => "sent"}, %{"on_jar" => ["J-1"]})
+    draft = fact("L-2", %{"state" => "draft"}, %{"on_jar" => ["J-2"]})
+    other = fact("L-3", %{"state" => "sent"})
+
+    jars = [
+      fact("J-1", %{}),
+      fact("J-2", %{}),
+      fact("J-3", %{}, %{"also_on" => ["L-3"]})
+    ]
+
+    {:ok, annotated} =
+      Progress.annotate(@description, "jar", jars, fn
+        "label" -> {:ok, [sent, draft, other]}
+        _ -> {:ok, []}
+      end)
+
+    assert [
+             %{"over" => "on_jar", "key" => "L-1", "value" => "sent"},
+             nil,
+             %{"through" => "also_on", "key" => "L-3"}
+           ] = Enum.map(annotated, & &1.completion)
+
+    refute Map.has_key?(hd(annotated), :progress)
+
+    {:ok, [crate]} =
+      Progress.annotate(@description, "crate", [fact("C-1", %{}, %{"signed_by" => ["K-1"]})], fn
+        _ -> {:ok, []}
+      end)
+
+    assert crate.completion == %{"done" => true, "by" => "signed_by", "keys" => ["K-1"]}
+  end
+
   test "a kind without a rule is left as it is, and nothing is read" do
-    facts = [fact("J-1", %{"phase" => "sealed"})]
-    assert {:ok, ^facts} = Progress.annotate(@description, "jar", facts, fn _ -> raise "read" end)
+    facts = [fact("L-1", %{"state" => "sent"})]
+
+    assert {:ok, ^facts} =
+             Progress.annotate(@description, "label", facts, fn _ -> raise "read" end)
   end
 
   test "when the children cannot be read, neither can the progress" do
