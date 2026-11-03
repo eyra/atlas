@@ -1,5 +1,5 @@
 # UC-Atlas-18: run, follow and stop the steps (docs/guides/uc-atlas-18.md). The instance
-# waits agent.step_pause_ms (500) between steps, so each one can be seen, and stopped.
+# waits agent.step_pause_ms (2000) between steps, so each one can be seen, and stopped.
 import AtlasE2E.Scenario
 
 scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, instance: i} ->
@@ -45,7 +45,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     by_hint(t2, row.("Watch the first step"), at)
     refute_see(t2, row.("Watch the third step"))
     see(t1, "esc stop after this step")
-    see(t1, "Done: 3 of 3 stored", 5_000)
+    see(t1, "Done: 3 of 3 stored", 10_000)
     see(t2, row.("Watch the third step"))
     press(t1, "Enter")
     for t <- [t1, t2], do: home(t)
@@ -82,7 +82,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     press(t1, "C-s")
     see(t1, "Proposed: 3 steps")
     press(t1, "Enter")
-    see(t1, "Proposed: 1 step", 5_000)
+    see(t1, "Proposed: 1 step", 10_000)
     see(t1, ~r/Before\s+Step 2 \(Create use case in #{key}\) was refused: title is required\./)
     see(t1, ~r/Stored\s+before\s+it:\s+step\s+1\./)
     see(t1, ~r/Not\s+run:\s+step\s+3\./)
@@ -94,7 +94,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
 
     # The proposal runs only on enter, like any plan.
     press(t1, "Enter")
-    see(t1, "Done: 1 of 1 stored", 5_000)
+    see(t1, "Done: 1 of 1 stored", 10_000)
     {got, _} = atlas_json(i, ["get", key])
     2 = length(hd(got["lists"])["rows"])
     press(t1, "Enter")
