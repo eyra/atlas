@@ -340,12 +340,26 @@ defmodule AtlasControl.Pages do
              child_list(description, {relation, from, rel_spec}, key, child_answer, add_key)}
           end)
 
-        # The fact in a border; each related list in a section that carries its title.
-        markup =
-          [Blocks.border("item", "item")] ++
-            for {id, {title, _list}} <- lists, do: Blocks.section(id, id, title: title)
+        # Two parts, side by side where there is room: the content (the fact itself, and
+        # later what is said about it) and its references (the related lists, then the
+        # facts it points at). Each list in a section that carries its title.
+        references = lists ++ parent_lists(description, kind, fact)
+        ids = for {id, _} <- references, do: id
 
-        content = [{"item", item} | for({id, {_title, list}} <- lists, do: {id, list})]
+        markup =
+          case ids do
+            [] ->
+              [Blocks.border("item", "item", title: "Content")]
+
+            [first | _] ->
+              [
+                Blocks.columns("item", List.last(ids), count: 2),
+                Blocks.border("item", "item", title: "Content"),
+                Blocks.border(first, List.last(ids), title: "References")
+              ] ++ for {id, {title, _list}} <- references, do: Blocks.section(id, id, title: title)
+          end
+
+        content = [{"item", item} | for({id, {_title, list}} <- references, do: {id, list})]
         page("#{singular(spec, kind)} #{key}", back, content, markup)
 
       %{"error" => error} ->
@@ -544,6 +558,24 @@ defmodule AtlasControl.Pages do
         keys = get_in(fact, ["links", relation]) || [],
         keys != [],
         do: {String.capitalize(spec["label"] || relation), keys}
+  end
+
+  # The facts this one points at, as lists to open them from: `[{id, {title, list}}]`.
+  defp parent_lists(description, kind, fact) do
+    for {relation, spec} <- Enum.sort(description["relations"] || %{}),
+        kind in (spec["from"] || []),
+        [to] <- [spec["to"]],
+        keys = get_in(fact, ["links", relation]) || [],
+        keys != [] do
+      to_spec = get_in(description, ["entities", to]) || %{}
+
+      rows =
+        for key <- Enum.sort(keys),
+            do: Blocks.row(label: key, detail: singular(to_spec, to), to: path({:item, to, key}))
+
+      {"parent:" <> relation,
+       {String.capitalize(spec["label"] || relation), Blocks.list(rows: rows)}}
+    end
   end
 
   defp parent_kind(description, {:new, _kind, {relation, _parent}}),
