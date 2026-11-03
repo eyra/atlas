@@ -131,7 +131,8 @@ defmodule AtlasControl.Pages do
     listed = Enum.map(child_relations(description, of), &elem(&1, 1))
 
     kind == kind_of(route) or kind in listed or
-      Enum.any?(listed, &(kind in progress_from(description, &1)))
+      Enum.any?(listed, &(kind in progress_from(description, &1))) or
+      kind in Enum.map(cause_fields(description), &elem(&1, 0))
   end
 
   def shows?({:list, of} = route, description, kind),
@@ -184,7 +185,9 @@ defmodule AtlasControl.Pages do
       for {relation, from, _} <- child_relations(description, kind),
           do: {from, %{"linked" => %{relation => key}}}
 
-    [{kind, %{"key" => key}} | children]
+    causes = for {from, _name, _label} <- cause_fields(description), from != kind, do: {from, %{}}
+
+    [{kind, %{"key" => key}} | children] ++ causes
   end
 
   # A change form also lists where the fact can move: every fact of each parent kind.
@@ -200,13 +203,49 @@ defmodule AtlasControl.Pages do
   def reads(:unknown, _), do: []
   def reads(:kinds, _), do: []
 
+  @doc """
+  The fields that name the fact that caused them (`"cause"` in the description, `true` or
+  the title of the list): `[{kind, field, title}]`. An item page lists the facts whose
+  such field holds its key.
+  """
+  def cause_fields(description) do
+    for {kind, spec} <- Enum.sort(description["entities"] || %{}),
+        {name, %{"cause" => cause}} <- Enum.sort(spec["properties"] || %{}),
+        cause not in [nil, false],
+        do: {kind, name, if(is_binary(cause), do: cause, else: plural(spec, kind))}
+  end
+
   def top_kinds(description) do
     children =
       for {_name, %{"max_outgoing" => 1, "from" => from}} <- description["relations"] || %{},
           kind <- from,
           do: kind
 
-    description |> Map.get("entities", %{}) |> Map.keys() |> Kernel.--(children) |> Enum.sort()
+    off_start = for {kind, %{"start" => %{}}} <- description["entities"] || %{}, do: kind
+
+    description
+    |> Map.get("entities", %{})
+    |> Map.keys()
+    |> Kernel.--(children ++ off_start)
+    |> Enum.sort()
+  end
+
+  # The start page's ways to the kinds kept off it (`start` in the description: the key and
+  # label of an action that opens the kind's list).
+  defp start_actions(description) do
+    for {kind, %{"start" => %{"key" => key, "label" => label}}} <-
+          Enum.sort(description["entities"] || %{}),
+        do: Blocks.action(label: label, key: key, to: path({:list, kind}))
+  end
+
+  # A kind the agent alone writes (`"by_hand": false`) offers no keys to make, change or
+  # delete one; its forms still answer at their paths.
+  defp by_hand?(spec), do: spec["by_hand"] != false
+
+  # `"order": "newest"` lists a kind newest first (by key, which counts up).
+  defp sort_facts(facts, spec) do
+    direction = if spec["order"] == "newest", do: :desc, else: :asc
+    Enum.sort_by(facts, & &1["key"], direction)
   end
 
   # Pages
@@ -249,22 +288,27 @@ defmodule AtlasControl.Pages do
         {"kind:#{kind}",
          Blocks.item(
            title: "#{singular(spec, kind)} (#{kind})",
-           fields: [
-             Blocks.pair(label: "Kind", value: kind),
-             Blocks.pair(label: "About", value: String.trim(spec["description"] || "")),
-             Blocks.pair(label: "Create asks", value: Enum.join(rule.ask, ", ")),
-             Blocks.pair(label: "Id", value: id_text(spec, rule)),
-             Blocks.pair(
-               label: "Belongs under",
-               value:
-                 if(parents == [], do: "nothing; a top kind", else: Enum.join(parents, " or "))
-             ),
-             Blocks.pair(
-               label: "Has under it",
-               value: if(children == [], do: "nothing", else: Enum.join(children, ", "))
-             ),
-             Blocks.pair(label: "Fields", value: Enum.join(fields, "\n"))
-           ]
+           fields:
+             [
+               Blocks.pair(label: "Kind", value: kind),
+               Blocks.pair(label: "About", value: String.trim(spec["description"] || "")),
+               Blocks.pair(label: "Create asks", value: Enum.join(rule.ask, ", ")),
+               Blocks.pair(label: "Id", value: id_text(spec, rule)),
+               Blocks.pair(
+                 label: "Belongs under",
+                 value:
+                   if(parents == [], do: "nothing; a top kind", else: Enum.join(parents, " or "))
+               ),
+               Blocks.pair(
+                 label: "Has under it",
+                 value: if(children == [], do: "nothing", else: Enum.join(children, ", "))
+               ),
+               Blocks.pair(label: "Fields", value: Enum.join(fields, "\n"))
+             ] ++
+               if(spec["agent"],
+                 do: [Blocks.pair(label: "Agent record", value: spec["agent"])],
+                 else: []
+               )
          )}
       end
 
@@ -293,16 +337,24 @@ defmodule AtlasControl.Pages do
       end
 
     page("Atlas", nil, [
-      Blocks.list(title: "Atlas", rows: rows, empty: "rela describes nothing yet")
+      Blocks.list(
+        title: "Atlas",
+        rows: rows,
+        empty: "rela describes nothing yet",
+        actions: start_actions(description)
+      )
     ])
   end
 
   defp page({:list, kind}, kind, spec, description, [answer], _form) do
+    # The only top kind's list is the start page; there is nothing to go back to.
+    start? = top_kinds(description) == [kind]
+
     case answer do
       %{"facts" => facts} ->
         rows =
           facts
-          |> Enum.sort_by(& &1["key"])
+          |> sort_facts(spec)
           |> Enum.map(fn fact ->
             Blocks.row(
               id: fact["key"],
@@ -317,18 +369,25 @@ defmodule AtlasControl.Pages do
           Blocks.list(
             title: plural(spec, kind),
             rows: rows,
-            empty: "No #{String.downcase(plural(spec, kind))} yet. Press n to make one.",
-            actions: [
-              Blocks.action(
-                label: "New #{singular(spec, kind) |> String.downcase()}",
-                key: "n",
-                to: path({:new, kind})
-              )
-            ]
+            empty:
+              if(by_hand?(spec),
+                do: "No #{String.downcase(plural(spec, kind))} yet. Press n to make one.",
+                else: "No #{String.downcase(plural(spec, kind))} yet."
+              ),
+            actions:
+              if(by_hand?(spec),
+                do: [
+                  Blocks.action(
+                    label: "New #{singular(spec, kind) |> String.downcase()}",
+                    key: "n",
+                    to: path({:new, kind})
+                  )
+                ],
+                else: []
+              ) ++ if(start?, do: start_actions(description), else: [])
           )
 
-        # The only top kind's list is the start page; there is nothing to go back to.
-        back = if top_kinds(description) == [kind], do: nil, else: "/"
+        back = if start?, do: nil, else: "/"
         page(plural(spec, kind), back, [list])
 
       %{"error" => error} ->
@@ -369,17 +428,23 @@ defmodule AtlasControl.Pages do
             # Nothing to change when a person may set nothing but where the id comes from, and
             # there is no parent to move it to.
             actions:
-              if(changeable?(description, kind, spec),
-                do: [Blocks.action(label: "Change", key: "e", to: path({:edit, kind, key}))],
+              if(by_hand?(spec),
+                do:
+                  if(changeable?(description, kind, spec),
+                    do: [Blocks.action(label: "Change", key: "e", to: path({:edit, kind, key}))],
+                    else: []
+                  ) ++
+                    [Blocks.action(label: "Delete", key: "d", to: path({:delete, kind, key}))],
                 else: []
-              ) ++
-                [Blocks.action(label: "Delete", key: "d", to: path({:delete, kind, key}))],
+              ),
             links: links(description, spec, fact)
           )
 
+        relations = child_relations(description, kind)
+        {child_answers, cause_answers} = Enum.split(child_answers, length(relations))
+
         lists =
-          description
-          |> child_relations(kind)
+          relations
           |> Enum.zip(child_answers)
           |> Enum.zip(@add_keys)
           |> Enum.map(fn {{{relation, from, rel_spec}, child_answer}, add_key} ->
@@ -390,7 +455,11 @@ defmodule AtlasControl.Pages do
         # Two parts, side by side where there is room: the content (the fact itself, and
         # later what is said about it) and its references (the related lists, then the
         # facts it points at). Each list in a section that carries its title.
-        references = lists ++ parent_lists(description, kind, fact)
+        references =
+          lists ++
+            cause_lists(description, kind, key, cause_answers) ++
+            parent_lists(description, kind, fact)
+
         ids = for {id, _} <- references, do: id
 
         markup =
@@ -550,7 +619,7 @@ defmodule AtlasControl.Pages do
       case answer do
         %{"facts" => facts} ->
           facts
-          |> Enum.sort_by(& &1["key"])
+          |> sort_facts(from_spec)
           |> Enum.map(
             &Blocks.row(
               id: &1["key"],
@@ -565,24 +634,52 @@ defmodule AtlasControl.Pages do
           []
       end
 
+    # A relation marked `"add": false` lists its facts without a way to add one here.
+    add? = rel_spec["add"] != false and by_hand?(from_spec)
+
     empty =
       case answer do
         %{"error" => error} -> "#{error}."
-        _ -> "No #{String.downcase(title)} yet. Press #{add_key} to add one."
+        _ when add? -> "No #{String.downcase(title)} yet. Press #{add_key} to add one."
+        _ -> "No #{String.downcase(title)} yet."
       end
 
-    {title,
-     Blocks.list(
-       rows: rows,
-       empty: empty,
-       actions: [
-         Blocks.action(
-           label: "Add #{name}",
-           key: add_key,
-           to: path({:new, from, {relation, key}})
-         )
-       ]
-     )}
+    actions =
+      if add?,
+        do: [
+          Blocks.action(
+            label: "Add #{name}",
+            key: add_key,
+            to: path({:new, from, {relation, key}})
+          )
+        ],
+        else: []
+
+    {title, Blocks.list(rows: rows, empty: empty, actions: actions)}
+  end
+
+  # The facts whose cause field holds this fact's key, one list per such field; only those
+  # with rows. They follow the related lists in the references part.
+  defp cause_lists(description, kind, key, answers) do
+    fields = for {from, _, _} = field <- cause_fields(description), from != kind, do: field
+
+    for {{from, name, title}, %{"facts" => facts}} <- Enum.zip(fields, answers),
+        naming = Enum.filter(facts, &(to_text(&1["values"][name]) == key)),
+        naming != [] do
+      from_spec = description["entities"][from] || %{}
+
+      rows =
+        for fact <- sort_facts(naming, from_spec),
+            do:
+              Blocks.row(
+                id: fact["key"],
+                label: label(from_spec, fact),
+                detail: detail(description, from_spec, fact),
+                to: path({:item, from, fact["key"]})
+              )
+
+      {"cause:#{from}:#{name}", {title, Blocks.list(rows: rows)}}
+    end
   end
 
   @doc "Where to go after a fact of `kind` is deleted: its parent, or the list of its kind."
