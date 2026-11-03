@@ -7,8 +7,8 @@ defmodule AtlasTui.Model do
   links; the TUI adds moving around, going back, refreshing and quitting. A link's key
   gives the effect `{:open_url, url}`, only for an http or https address.
 
-  A page whose markup puts its blocks in columns (`parts/1`) has parts, each with its own
-  room and scrolling. Tab moves the focus from part to part. In the part with the lists,
+  A page whose markup divides it into parts (`parts/1`) shows them each with its own
+  room and scrolling; how they are laid out is this client's choice (`AtlasTui.View`). Tab moves the focus from part to part. In the part with the lists,
   the arrows move the selected row; in another, they scroll it. The rows of all lists on
   a page are one selection (`rows/1`).
 
@@ -18,7 +18,7 @@ defmodule AtlasTui.Model do
   """
 
   alias AtlasTui.{Blocks, Text}
-  alias AtlasTui.Blocks.{Columns, Confirm, Form, Input, Item, Plan}
+  alias AtlasTui.Blocks.{Confirm, Form, Input, Item, Part, Plan}
   alias AtlasTui.Blocks.List, as: ListBlock
 
   @scroll_step 10
@@ -217,17 +217,24 @@ defmodule AtlasTui.Model do
   end
 
   @doc """
-  The parts of a page: the block ids of each column, when the page's markup puts all its
-  blocks in columns of two or more. `[]` for a page in one part.
+  The parts of a page: the block ids of each, when the page's markup divides all of it
+  into two or more parts (`part` markup at the top). `[]` for a page in one part.
   """
   def parts(%__MODULE__{markup: []}), do: []
 
   def parts(model) do
     case AtlasBFF.Markup.tree(model.ids, model.markup) do
-      [{:markup, %{"value" => %Columns{}}, [_, _ | _] = columns}] -> Enum.map(columns, &ids_in/1)
-      _ -> []
+      [_, _ | _] = nodes ->
+        if Enum.all?(nodes, &part?/1), do: Enum.map(nodes, &ids_in/1), else: []
+
+      _ ->
+        []
     end
   end
+
+  @doc "Whether a node of the markup tree is a part."
+  def part?({:markup, %{"value" => %Part{}}, _children}), do: true
+  def part?(_node), do: false
 
   defp ids_in({:block, id}), do: [id]
   defp ids_in({:markup, _entry, children}), do: Enum.flat_map(children, &ids_in/1)

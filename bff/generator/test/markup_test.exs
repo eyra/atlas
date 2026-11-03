@@ -10,9 +10,9 @@ defmodule AtlasBFF.MarkupTest do
 
   describe "check/2" do
     test "nested, side by side and equal stretches are well formed" do
-      assert :ok = Markup.check(@ids, [m("border", "a", "e"), m("section", "b", "c")])
+      assert :ok = Markup.check(@ids, [m("part", "a", "e"), m("section", "b", "c")])
       assert :ok = Markup.check(@ids, [m("section", "a", "b"), m("section", "c", "e")])
-      assert :ok = Markup.check(@ids, [m("section", "b", "d"), m("border", "b", "d")])
+      assert :ok = Markup.check(@ids, [m("section", "b", "d"), m("part", "b", "d")])
       assert :ok = Markup.check(@ids, [m("section", "b", "d"), m("highlight", "d", "d")])
     end
 
@@ -20,7 +20,7 @@ defmodule AtlasBFF.MarkupTest do
       assert {:error, "section a..c and highlight b..d cross; markup must nest"} =
                Markup.check(@ids, [m("section", "a", "c"), m("highlight", "b", "d")])
 
-      assert {:error, _} = Markup.check(@ids, [m("highlight", "c", "e"), m("border", "a", "c")])
+      assert {:error, _} = Markup.check(@ids, [m("highlight", "c", "e"), m("part", "a", "c")])
     end
 
     test "a stretch must point at blocks of the content, start first" do
@@ -35,10 +35,10 @@ defmodule AtlasBFF.MarkupTest do
   end
 
   test "tree/2 renders top down, outer first; equal stretches nest in list order" do
-    markup = [m("border", "a", "c"), m("section", "a", "c"), m("section", "e", "e")]
+    markup = [m("part", "a", "c"), m("section", "a", "c"), m("section", "e", "e")]
 
     assert [
-             {:markup, %{"kind" => "border"},
+             {:markup, %{"kind" => "part"},
               [{:markup, %{"kind" => "section"}, [{:block, "a"}, {:block, "b"}, {:block, "c"}]}]},
              {:block, "d"},
              {:markup, %{"kind" => "section"}, [{:block, "e"}]}
@@ -108,7 +108,7 @@ defmodule AtlasBFF.MarkupTest do
 
   test "random places, deletes and moves keep the markup one well-formed tree" do
     :rand.seed(:exsss, {1, 2, 3})
-    kinds = ~w(section border columns highlight)
+    kinds = ~w(part section highlight)
 
     for _run <- 1..200 do
       ids = for n <- 1..Enum.random(1..12), do: "b#{n}"
