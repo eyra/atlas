@@ -101,3 +101,82 @@ In prod, after the merge and a restart, every open scene and use case gets its `
 - No kind is named in BEAM, TUI or agent code; the boundary test covers `atlas_flow` too.
 
 `e2e/scenarios/uc-atlas-27.exs` follows these steps on a private instance.
+
+## IS-Atlas-78: every assignable thing has an Assignment
+
+What you can see: every scene, use case, issue and pull request page shows **Assigned to** and **Expected** as before, with since, by and why. Both are now its Assignment's (d-0022): a fact of its own, `AS-` plus the item's key, made in the same write as the item and deleted with it. In the references, **Assignment** opens it, and **Assigned to** opens the owner.
+
+### Try
+
+| Step | Where | What you should see |
+|---|---|---|
+| A new item has its Assignment | `c` a use case, or `atlas put use_case --in SC-Atlas-01 --title "…" --env test` | `atlas get AS-<key>`: **Assignment AS-UC-Atlas-…: UC-Atlas-…**. `atlas list assignment` lists one per item. |
+| Its owner, as the item's | `atlas set UC-Atlas-01 assigned_to=melle --cause "ready to test" --env test` | The use case's page and `atlas get UC-Atlas-01`: `Assigned to: melle (since …, by agent: ready to test)`, in every open TUI by hint. The link is the Assignment's: `atlas set` on the item sets it there. |
+| What is expected | the use case's page | `Expected  Build it` (or Test it, Rework): Flow writes it on the Assignment now. |
+| The Assignment's page | `enter` on **Assignment** in the references | **Assignment AS-UC-Atlas-01: UC-Atlas-01**: Of, Expected, Assigned to, and **Assignment of: Use cases** with the use case. `esc` goes back to the use case. |
+| Deleted together | `d` on the use case | The confirm says `…, with its Assignment AS-UC-Atlas-…`. Deleting the Assignment alone is refused: `AS-… goes with UC-…; delete that instead.` |
+| The owner's page | `enter` on the owner, `atlas get melle` | **Assignments**: one list, of Assignments, each named by its item. |
+
+### The prod data: `atlas migrate-assignment`
+
+The coordinator runs it after the merge, after a backup, on the old core and rela. Do not `atlas restart` first; it refuses anyway, because the old `expected` values no longer fit the new description.
+
+```sh
+atlas migrate-assignment --env prod --dry-run   # prints every step; writes nothing
+atlas migrate-assignment --env prod             # the run, below
+atlas migrate-assignment --env prod --dry-run   # again: 0 steps
+```
+
+A real run:
+1. Reads, through the old Control, who set each item's owner (since, by, cause), and keeps that in `assignment-origins.json` beside rela's data.
+2. Stops the core, restarts rela on this build's description (its data kept), and starts the core on this build.
+3. Writes, through Control as the migration, for every item:
+   - `make`: its Assignment;
+   - `link`: the item to it;
+   - `assign`: the Assignment's owner, the item's old one, with the cause `assignment introduced (IS-Atlas-78); moved from UC-Atlas-01, set 2026-11-03T17:10:00Z by migration: owner introduced`;
+   - `unlink`: the item's old `assigned_to`. This one is done in rela itself, as rela's garbage collection does, because the new description no longer describes it.
+4. Stops rela, removes the old `expected` values (`rela migrate gc`), and starts it again.
+
+`expected` is not copied: Flow alone writes it, and writes it again on each Assignment within its first round. Each step checks whether it is done already, so a run that stopped halfway can be run again.
+
+Tried on a private instance with prod's shape (prod's 169 items copied in with reads only, run on the old build first):
+- 666 steps (169 make, 169 link, 164 assign, 164 unlink) in 2 min 19 s, restarts included;
+- the old values removed from 7 scenes and 32 use cases;
+- then 0 steps;
+- within a minute Flow had written `expected` on every Assignment, equal to what each item holds in prod today.
+
+### How it works
+
+- **rela's description:**
+  - The `assignment` kind (`of`, the item's key, and `expected`) in `rela/schema.yaml`.
+  - The association `assignment`, from scene, use case, issue and pull request, one each way (inverse `assignment of`). A kind is assignable by being in its `from`.
+  - `assigned_to` now starts at the Assignment, and `expected` left the scene and use case.
+- **`rela/atlas.json`:**
+  - `relations.assignment.component` = `{key: "AS-{key}", values: {of: "{key}"}}`: the mark that makes it part of the item. It is `set_by: migration`: nobody links it by hand.
+  - The flow `test_and_accept` has `"on": "assignment"`: Flow writes on the fact that relation points at.
+- **State** (`AtlasState.Components`):
+  - A create of a fact with a component makes the component first, then the fact with its link, in one write with one cause. When the fact is refused, the component goes again.
+  - A delete deletes the component too. Deleting a component alone is refused while its fact exists.
+- **Control:**
+  - A fact's page reads its component and shows the component's fields and associations (with since, by, cause) as its own, and the component's links in the references.
+  - An association that starts at the component's kind and not at the fact's (`assigned_to`) is set on the component: `/k/_/UC-Atlas-01/links/assigned_to` is the Assignment's links page.
+  - A hint about a component refreshes its fact's page, and the component's page goes back to its fact.
+- **Flow:**
+  - A definition with `on` reads the fact that relation points at, and writes `field` (and later `owner_relation`) there.
+  - It writes `by: flow`, so the engine still passes over its own hints.
+  - State's check looks for the field and the owner relation on that kind, and refuses a rule that depends on them through `on`.
+- **No kind is named** in BEAM, the TUI or the agent. There is no new page or endpoint: the Assignment's pages are the generic ones.
+
+### What changed for this
+
+- **rela:** the `assignment` kind and association; `assigned_to` starts at it; `expected` moved there.
+- **State:** components; Flow's check with `on`.
+- **Control:** a fact's page shows its components; associations go to them; the delete confirm says so.
+- **Flow:** `on`.
+- **tools/plan:** `AtlasPlan.Assignment` and `atlas migrate-assignment`.
+- **The end-to-end test:**
+  - `e2e/scenarios/uc-atlas-27-assignment.exs` is new.
+  - `uc-atlas-27.exs` checks Flow's last move on the Assignment's page.
+  - `uc-atlas-27-owner.exs` reads the owner's list of Assignments.
+  - `uc-atlas-20.exs` gives its first TUI 4 rows more, the room the Assignment's row in the references takes.
+- **Prod:** the migration above. It restarts rela and the core itself.

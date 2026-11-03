@@ -34,7 +34,10 @@
 #                      after a real run it stops rela, removes the old completed values, starts it
 #   atlas migrate-owner [--dry-run]          IS-Atlas-52: every fact gets an owner, the coordinator
 #                      agent, one fact each with cause "owner introduced"; --dry-run first
-#                      put, set, get, list, delete, tools, plan, load-plan, migrate-completion and migrate-owner go
+#   atlas migrate-assignment [--dry-run]     IS-Atlas-78: every fact gets its Assignment, and its owner
+#                      moves there; run it on the old core and rela: it keeps who set each owner,
+#                      restarts rela and the core on this build, writes, and removes the old values
+#                      put, set, get, list, delete, tools, plan, load-plan and the migrations go
 #                      through Control like the TUI, and start nothing: Control must run (`atlas status`).
 #
 # Every command works on prod unless it gets --env test: `atlas tui --env test`. Scripts,
@@ -51,7 +54,7 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
-usage() { sed -n '2,44p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,47p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
 caller="$PWD"
 no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
@@ -67,7 +70,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|help) args+=("$1"); shift ;;
+        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-assignment|help) args+=("$1"); shift ;;
         *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
       esac ;;
   esac
@@ -293,7 +296,7 @@ case "$cmd" in
     kind_named=""
     for arg in ${args[@]+"${args[@]}"}; do case "$arg" in -*) ;; *) kind_named=1 ;; esac; done
     if [ "$cmd" = help ] && [ -z "$kind_named" ] && [[ " ${args[*]-} " != *" --json "* ]]; then
-      sed -n '2,44p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
+      sed -n '2,47p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
     fi
     clean_build
     cd "$root/clients/agent"
@@ -327,6 +330,36 @@ case "$cmd" in
     else
       echo "atlas: a real run then stops rela $env, removes the old completed values (rela migrate gc) and starts it again"
     fi
+    ;;
+  migrate-assignment)
+    # Who set each old owner shows only on the old core, so it is read first and kept; then
+    # rela and the core move to this build's description, which the data does not fit yet
+    # (the old field), and the migration writes; rela's garbage collection ends it.
+    origins="$ATLAS_TEST_ROOT/assignment-origins.json"
+    migrate() {
+      (cd "$root/tools/plan" && mix compile >&2 &&
+        ATLAS_CALLER_CWD="$caller" mix atlas.migrate_assignment --env "$env" "$@")
+    }
+    if [[ " ${args[*]-} " == *" --dry-run "* ]]; then
+      migrate --dry-run
+      echo "atlas: a real run keeps who set each owner, restarts rela $env and the core on this build, writes, and removes the old values (rela migrate gc)"
+      exit 0
+    fi
+    if ! "$root/rela/scripts/description.sh" same; then
+      migrate --keep-origins "$origins"
+      echo "atlas: restarting rela $env and the core on this build's description"
+      stop_core
+      "$root/rela/scripts/stop.sh"
+      "$root/rela/scripts/start-bg.sh" >/dev/null
+      start_core
+    fi
+    migrate --origins "$origins"
+    echo "atlas: stopping rela $env to remove the old expected values"
+    "$root/rela/scripts/stop.sh"
+    "$ATLAS_RELA_BIN/rela" --project "$ATLAS_RELA_DATA" --quiet migrate gc --scan >/dev/null
+    sleep 2
+    "$ATLAS_RELA_BIN/rela" --project "$ATLAS_RELA_DATA" --quiet migrate gc --scan --grace=1s --apply
+    "$root/rela/scripts/start-bg.sh"
     ;;
   rela-status) exec "$root/rela/scripts/status.sh" ;;
   rela-stop) exec "$root/rela/scripts/stop.sh" ;;

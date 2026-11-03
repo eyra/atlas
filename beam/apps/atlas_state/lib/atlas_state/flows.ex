@@ -23,6 +23,7 @@ defmodule AtlasState.Flows do
     by_name = Map.new(states, &{&1["name"], &1})
 
     kinds(description, flow) ++
+      on(description, flow) ++
       relation(description, flow) ++
       writes(description, flow) ++
       cond do
@@ -40,6 +41,7 @@ defmodule AtlasState.Flows do
   defp kinds(description, flow) do
     kinds = List.wrap(flow["kinds"])
     field = flow["field"]
+    written = written_kind(description, flow)
 
     cond do
       kinds == [] ->
@@ -53,8 +55,9 @@ defmodule AtlasState.Flows do
                    ["#{kind} is not described"]
 
                  is_binary(field) and
-                     get_in(description, ["entities", kind, "properties", field]) == nil ->
-                   ["#{kind} has no #{field} to write what is expected"]
+                     get_in(description, ["entities", written || kind, "properties", field]) ==
+                       nil ->
+                   ["#{written || kind} has no #{field} to write what is expected"]
 
                  true ->
                    []
@@ -71,7 +74,7 @@ defmodule AtlasState.Flows do
         ["#{relation} is not described"]
 
       spec ->
-        for kind <- List.wrap(flow["kinds"]),
+        for kind <- writes_on(description, flow),
             kind not in (spec["from"] || []),
             do: "#{relation} does not start at #{kind}"
     end
@@ -79,9 +82,49 @@ defmodule AtlasState.Flows do
 
   defp relation(_description, _flow), do: []
 
+  # `on`: Flow writes on the one fact this relation of each of its facts points at (its
+  # Assignment), not on the fact itself. It starts at every kind and points at one kind.
+  defp on(_description, %{"on" => nil}), do: []
+
+  defp on(description, %{"on" => relation} = flow) do
+    case get_in(description, ["relations", relation]) do
+      nil ->
+        ["#{relation} is not described"]
+
+      spec ->
+        for(
+          kind <- List.wrap(flow["kinds"]),
+          kind not in (spec["from"] || []),
+          do: "#{relation} does not start at #{kind}"
+        ) ++
+          if(match?([_], spec["to"]), do: [], else: ["#{relation} must point at one kind"]) ++
+          if(spec["max_outgoing"] == 1, do: [], else: ["#{relation} must allow one link"])
+    end
+  end
+
+  defp on(_description, _flow), do: []
+
+  # The kind of the facts Flow writes on: the one `on` points at, or nil for the fact's own.
+  defp written_kind(description, %{"on" => relation}) when is_binary(relation) do
+    case get_in(description, ["relations", relation, "to"]) do
+      [kind] -> kind
+      _ -> nil
+    end
+  end
+
+  defp written_kind(_description, _flow), do: nil
+
+  defp writes_on(description, flow) do
+    case written_kind(description, flow) do
+      nil -> List.wrap(flow["kinds"])
+      kind -> [kind]
+    end
+  end
+
   # Flow passes over the hints of its own writes, so no state may depend on what it writes:
-  # not a condition on the owner relation, nor a progress or completion rule of its kinds
-  # that reads its field or that relation.
+  # not a condition on the owner relation, nor a progress or completion rule that reads its
+  # field or that relation: of the kinds it writes on (its own, or what `on` points at), or
+  # of its own kinds through `on`.
   defp writes(description, flow) do
     written = Enum.reject([flow["field"], flow["owner_relation"]], &is_nil/1)
 
@@ -92,11 +135,14 @@ defmodule AtlasState.Flows do
           value in written,
           do: "#{state["name"]} depends on #{value}, which Flow writes"
 
+    on = flow["on"]
+
     rules =
-      for kind <- List.wrap(flow["kinds"]),
+      for kind <- Enum.uniq(List.wrap(flow["kinds"]) ++ writes_on(description, flow)),
           rule <- rules(description, kind),
           {_, value} <- rule,
           value in written,
+          on == nil or kind not in List.wrap(flow["kinds"]) or rule["through"] == on,
           uniq: true,
           do: "#{kind}'s progress or completion depends on #{value}, which Flow writes"
 

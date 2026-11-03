@@ -243,6 +243,56 @@ defmodule AtlasStateTest do
     refute Map.has_key?(description, "_about")
   end
 
+  # A widget has a tag, made and deleted with it (a made-up component, as the Assignment).
+  test "a fact's components are made in the same write, and deleted with it", %{
+    rela: rela,
+    dir: dir
+  } do
+    extra = Path.join(dir, "atlas.json")
+
+    File.write!(
+      extra,
+      JSON.encode!(%{
+        "entities" => %{
+          "tag" => %{"plural" => "tags", "properties" => %{"title" => %{"type" => "string"}}}
+        },
+        "relations" => %{
+          "tagged" => %{
+            "from" => ["widget"],
+            "to" => ["tag"],
+            "max_outgoing" => 1,
+            "component" => %{"key" => "T-{key}", "values" => %{"title" => "{key}"}}
+          }
+        }
+      })
+    )
+
+    stop_supervised!(AtlasState.Server)
+
+    start_supervised!(
+      {AtlasState.Server, rela: {FakeRela, rela}, data_dir: dir, description_extra: extra}
+    )
+
+    assert {"stored", _, _} = fact("create", "W-1", %{"title" => "One"}, cause: "made")
+    assert {%{"title" => "W-1"}, _} = FakeRela.facts(rela)["T-W-1"]
+    assert %{"fact" => %{"links" => %{"tagged" => ["T-W-1"]}}} = read("widget", %{"key" => "W-1"})
+
+    # Sent again after a lost answer: stored, once.
+    assert {"stored", _, _} = fact("create", "W-1", %{"title" => "One"})
+    assert map_size(FakeRela.facts(rela)) == 2
+
+    # A fact that is refused leaves no component behind.
+    assert {"refused", _, _} = fact("create", "W-2", %{"title" => "Two", "shade" => "red"})
+    refute Map.has_key?(FakeRela.facts(rela), "T-W-2")
+
+    # Never alone while its fact exists; with it, always.
+    assert {"refused", %{"reasons" => ["T-W-1 goes with W-1; delete that instead"]}, _} =
+             fact("delete", "T-W-1", %{}, kind: "tag")
+
+    assert {"stored", _, _} = fact("delete", "W-1")
+    assert FakeRela.facts(rela) == %{}
+  end
+
   test "a kind rela does not know says so, and what to do; never 'not reachable'", %{
     rela: rela,
     dir: dir

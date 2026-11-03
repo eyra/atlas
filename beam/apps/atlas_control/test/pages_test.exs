@@ -915,6 +915,114 @@ defmodule AtlasControl.PagesTest do
     assert Pages.shows?({:item, "widget", "W-1"}, @logged, "entry")
   end
 
+  # A widget has a card, made and deleted with it (a made-up component, as the Assignment).
+  @carded @d
+          |> put_in(["entities", "card"], %{
+            "label" => "Card",
+            "plural" => "cards",
+            "primary" => "of",
+            "top" => false,
+            "properties" => %{
+              "of" => %{"type" => "string", "required" => true},
+              "todo" => %{"type" => "string", "set_by" => "flow"}
+            }
+          })
+          |> put_in(["relations", "card"], %{
+            "label" => "card",
+            "from" => ["widget"],
+            "to" => ["card"],
+            "max_outgoing" => 1,
+            "set_by" => ["migration"],
+            "component" => %{"key" => "C-{key}", "values" => %{"of" => "{key}"}}
+          })
+          |> put_in(["relations", "held_by"], %{
+            "label" => "held by",
+            "from" => ["card"],
+            "to" => ["member"],
+            "max_outgoing" => 1
+          })
+
+  test "a fact's page shows its component's fields and associations as its own" do
+    reads = Pages.reads({:item, "widget", "W-1"}, @carded)
+    assert List.last(reads) == {"card", %{"key" => "C-W-1"}}
+
+    widget = fact("W-1", %{"title" => "One"}) |> Map.put("links", %{"card" => ["C-W-1"]})
+
+    card =
+      fact("C-W-1", %{"of" => "W-1", "todo" => "Paint it"})
+      |> Map.put("links", %{"held_by" => ["ada"]})
+      |> Map.put("origins", %{
+        "held_by" => %{"since" => "2026-11-03T10:00:00Z", "cause" => "hers"}
+      })
+
+    answers =
+      for read <- reads do
+        case read do
+          {"widget", _} -> %{"fact" => widget}
+          {"card", _} -> %{"fact" => card}
+          _ -> %{"facts" => []}
+        end
+      end
+
+    %{blocks: [item | references]} = Pages.render({:item, "widget", "W-1"}, @carded, answers)
+    fields = Map.new(item["props"]["fields"], &{&1["label"], &1})
+
+    assert fields["Todo"]["value"] == "Paint it"
+    assert fields["Held by"]["value"] == "ada"
+    assert fields["Held by"]["origin"]["cause"] == "hers"
+    # Not the key it is made from, nor the link to it as a field; it opens from References.
+    refute Map.has_key?(fields, "Of") or Map.has_key?(fields, "Card")
+    assert Enum.any?(references, &(&1["id"] == "parent:card"))
+    # What the component points at opens from the fact's page too.
+    held = Enum.find(references, &(&1["id"] == "parent:held_by"))
+    assert [%{"id" => "ada", "to" => "/k/member/ada"}] = held["props"]["rows"]
+
+    # Without its component yet (before a migration), the fact's own fields only.
+    answers = List.replace_at(answers, -1, %{"fact" => nil})
+    %{blocks: [item | _]} = Pages.render({:item, "widget", "W-1"}, @carded, answers)
+    refute Enum.any?(item["props"]["fields"], &(&1["label"] in ["Todo", "Held by"]))
+
+    # A hint about a card refreshes its fact's page.
+    assert Pages.shows?({:item, "widget", "W-1"}, @carded, "card")
+    refute Pages.shows?({:item, "widget", "W-1"}, @d, "card")
+  end
+
+  test "the kinds page says what a component is made with" do
+    %{blocks: blocks} = Pages.render(:kinds, @carded, [])
+    card = Enum.find(blocks, &(&1["id"] == "kind:card"))["props"]
+    assert %{"label" => "Made with", "value" => "widget"} in card["fields"]
+    widget = Enum.find(blocks, &(&1["id"] == "kind:widget"))["props"]
+    refute Enum.any?(widget["fields"], &(&1["label"] == "Made with"))
+  end
+
+  test "a component is deleted with its fact, never alone" do
+    widget = fact("W-1", %{"title" => "One"}) |> Map.put("links", %{"card" => ["C-W-1"]})
+    answer = %{"fact" => widget, "incoming" => %{}}
+    %{blocks: [confirm]} = Pages.render({:delete, "widget", "W-1"}, @carded, [answer])
+    assert confirm["props"]["text"] =~ "will be deleted, with its Card C-W-1."
+
+    card = %{"fact" => fact("C-W-1", %{"of" => "W-1"}), "incoming" => %{"card" => ["W-1"]}}
+    # Its page goes back to its fact.
+    others = List.duplicate(%{"facts" => []}, 9)
+    assert %{back: "/k/_/W-1"} = Pages.render({:item, "card", "C-W-1"}, @carded, [card | others])
+
+    %{blocks: [refused]} = Pages.render({:delete, "card", "C-W-1"}, @carded, [card])
+    assert refused["props"]["text"] == "C-W-1 goes with W-1; delete that instead."
+    refute refused["props"]["confirm_to"]
+  end
+
+  test "an association a component holds is set on the component, from the fact's key" do
+    assert Pages.resolve({:links, "widget", "W-1", "held_by"}, @carded) ==
+             {:links, "card", "C-W-1", "held_by"}
+
+    assert Pages.resolve({:links, "_", "W-1", "held_by"}, @carded) ==
+             {:links, "card", "C-W-1", "held_by"}
+
+    # The fact's own associations stay its own.
+    assert Pages.resolve({:set, "widget", "W-1", "checked_by"}, @carded) ==
+             {:set, "widget", "W-1", "checked_by"}
+  end
+
   test "actions the description adds, only while a field has one of the values in when" do
     logged =
       put_in(@logged, ["entities", "entry", "actions"], [

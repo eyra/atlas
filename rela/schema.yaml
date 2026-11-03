@@ -105,7 +105,6 @@ entities:
         description: { type: string, description: "The text (Flux: description)" }
         flux_id: { type: string, unique: true, description: "Flux (Basecamp) id, set by a later Flux sync" }
       status: { type: plan_status, description: "Flux group; empty = no group" }
-      expected: { type: string, description: "What its owner is expected to do next; Flow writes it (IS-Atlas-53)" }
 
   use_case:
     label: Use case
@@ -212,6 +211,22 @@ entities:
     properties:
       name: { type: string, required: true, description: "As it is shown" }
 
+  # What belongs to being assigned, for one fact (d-0022, IS-Atlas-78): who it is assigned
+  # to (assigned_to) and what they are expected to do (expected); later deadlines and the
+  # flow state. Its id is made from the fact's: AS-<key>.
+  assignment:
+    label: Assignment
+    plural: assignments
+    id_type: manual
+    id_prefix: "AS-"
+    description: |
+      What belongs to being assigned, for one fact: who it is assigned to and what
+      they are expected to do. Made and deleted with the fact; its id is AS- and the
+      fact's, e.g. AS-UC-Atlas-01.
+    properties:
+      of: { type: string, required: true, description: "The key of the fact it belongs to" }
+      expected: { type: string, description: "What its owner is expected to do next; Flow writes it (IS-Atlas-53)" }
+
 relations:
   in_scene:
     label: in scene
@@ -267,12 +282,23 @@ relations:
     inverse: { id: steps, label: steps }
 
   # The owner (IS-Atlas-52, UC-Atlas-27): whoever is next in line to do something with a
-  # fact, one, always. A kind is assignable when it is in this relation's `from`. The
-  # link has no attributes: when, by whom and why are the fact that set it.
+  # fact, one, always. It is part of the fact's Assignment (IS-Atlas-78). The link has no
+  # attributes: when, by whom and why are the fact that set it.
   assigned_to:
     label: assigned to
     description: Who is next in line to do something with it; one, a person or an agent.
-    from: [scene, use_case, issue, pull_request]
+    from: [assignment]
     to: [person, agent]
     max_outgoing: 1
     inverse: { id: assignments, label: assignments }
+
+  # Every assignable thing has an Assignment (d-0022, IS-Atlas-78): a kind is assignable
+  # when it is in this association's `from`. One each way; made and deleted with the
+  # fact (rela/atlas.json marks it a component).
+  assignment:
+    label: assignment
+    description: What belongs to being assigned, for one fact; made and deleted with it.
+    from: [scene, use_case, issue, pull_request]
+    to: [assignment]
+    max_outgoing: 1
+    inverse: { id: assignment_of, label: assignment of }

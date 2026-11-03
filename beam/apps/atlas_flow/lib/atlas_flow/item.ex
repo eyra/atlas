@@ -79,7 +79,7 @@ defmodule AtlasFlow.Item do
       parents = parent_relations(description, state.kind)
       children = children(parents, description, state.key)
       {current, vars} = Definition.state_of(flow, fact, children, parents)
-      move(state, name, flow, fact, current, vars)
+      move(state, description, {name, flow}, fact, current, vars)
 
       if current["done"],
         do: :stop,
@@ -96,8 +96,37 @@ defmodule AtlasFlow.Item do
   defp description(%{description: nil}), do: Talk.read("_description", %{})
   defp description(%{description: description}), do: %{"description" => description}
 
-  # Store what differs: what is expected, and the owner, in one change with its cause.
-  defp move(state, name, flow, fact, current, vars) do
+  # Store what differs: what is expected, and the owner, in one change with its cause, on
+  # the fact the definition writes on: its own, or the one its `on` relation points at.
+  defp move(state, description, {name, flow}, fact, current, vars) do
+    case written(description, flow, state.kind, fact) do
+      {:ok, kind, target} ->
+        write(state, name, flow, kind, target, current, vars)
+
+      {:missing, relation} ->
+        Logger.warning("flow #{name}: #{state.key} has no #{relation} to write on; tried again")
+
+      :unavailable ->
+        :ok
+    end
+  end
+
+  defp written(description, %{"on" => relation}, _kind, fact) when is_binary(relation) do
+    with [to] <- get_in(description, ["relations", relation, "to"]),
+         [key] <- get_in(fact, ["links", relation]) || [],
+         %{"fact" => target} when is_map(target) <-
+           Talk.read(to, %{"key" => key, "plain" => true}) do
+      {:ok, to, target}
+    else
+      %{"fact" => nil} -> {:missing, relation}
+      %{"error" => _} -> :unavailable
+      _ -> {:missing, relation}
+    end
+  end
+
+  defp written(_description, _flow, kind, fact), do: {:ok, kind, fact}
+
+  defp write(state, name, flow, kind, fact, current, vars) do
     expected = Definition.expected(current, vars)
     field = flow["field"]
 
@@ -115,9 +144,10 @@ defmodule AtlasFlow.Item do
         else: %{}
 
     if values != %{} or links != %{} do
+      # By flow: Flow passes over the hints of its own writes, on whichever fact.
       content = %{
         "op" => "change",
-        "key" => state.key,
+        "key" => fact["key"],
         "values" => values,
         "version" => nil,
         "by" => "flow",
@@ -126,7 +156,7 @@ defmodule AtlasFlow.Item do
 
       content = if links == %{}, do: content, else: Map.put(content, "links", links)
 
-      case Talk.put(state.kind, content) do
+      case Talk.put(kind, content) do
         {:stored, _} ->
           Logger.info("flow #{name}: #{state.key} #{current["name"]} (#{inspect(values)})")
 

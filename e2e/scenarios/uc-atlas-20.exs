@@ -10,6 +10,9 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
                                                                  instance: instance
                                                                } ->
   step "A long title wraps in its field", fn ->
+    # A scene's page holds its references too (its Assignment, IS-Atlas-78): a window
+    # with the room it had before that (4 rows more), so the description still folds.
+    resize(t1, 100, 34)
     press(t1, "c")
     see(t1, ~r/^ Create scene$/m)
     type(t1, title)
@@ -50,7 +53,13 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     see(t1, "No use cases yet. Press c to create one.")
     press(t1, "Tab")
     see(t1, "↑↓ scroll")
-    press(t1, ["j", "j", "j", "j", "j"])
+    # As far as the part's room needs (it shares the screen with the references).
+    scrolled =
+      Enum.find(1..10, fn _ ->
+        press(t1, "j")
+        settled(t1) =~ "1. it is stored and shown as written"
+      end) || raise "the last line of the description never came into view"
+
     page = see(t1, "1. it is stored and shown as written")
 
     page =~
@@ -58,7 +67,7 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
       raise "the sections are not shown as written:\n#{page}"
 
     page =~ "No use cases yet. Press c to create one." || raise "the use cases went out of view"
-    press(t1, ["k", "k", "k", "k", "k", "Tab"])
+    press(t1, List.duplicate("k", scrolled) ++ ["Tab"])
     see(t1, ~r/Scene SC-Atlas-\d+: Melle writes(.|\n)*↑↓ move/)
   end
 
@@ -118,5 +127,6 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     press(t1, "Escape")
     see(t1, ~r/Scene SC-Atlas-\d+:/)
     refute_see(t1, "extra line")
+    resize(t1, 100, 30)
   end
 end
