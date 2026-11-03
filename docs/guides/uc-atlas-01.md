@@ -27,9 +27,9 @@ In TUI 1:
 | Step | Keys | What you should see |
 |---|---|---|
 | List | (start) | **Scenes**, sorted by code. In the status bar: `connected · opened at …`. |
-| Create | `n`, type a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `… Sent to State; waiting until it is stored…`, then `✓ Stored as SC-Atlas-01 (position N)`, and the new scene opens. The code is made for you: the next free number. The rest takes its default (status Refine). |
+| Create | `c`, type a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `… Sent to State; waiting until it is stored…`, then `✓ Stored as SC-Atlas-01 (position N)`, and the new scene opens. The code is made for you: the next free number. The rest takes its default (status Refine). |
 | Open | `esc` back to the list, ↑/↓, `enter` | The scene with its fields. Flux id shows only once a Flux sync has filled it, so not for scenes made in Atlas. |
-| Change | `e`, ↓ to a field, edit (backspace, type; ←/→ for a choice), `ctrl-s` | The form shows the code read-only and every field you may change. `✓ Stored …` and the changed scene. |
+| Update | `u`, ↓ to a field, edit (backspace, type; ←/→ for a choice), `ctrl-s` | The form shows the code read-only and every field you may change. `✓ Stored …` and the changed scene. |
 | Delete | `d`, then `y` | `✓ Stored …` and the list without it. |
 | Quit | `q` | |
 
@@ -38,7 +38,7 @@ Watch TUI 2 while you do this: after every change in TUI 1 its list or scene cha
 Also try:
 
 - **A refusal.** Create a scene with an empty title. The form stays, with a red line saying why (`title is required`).
-- **Two at once.** Press `n` in both TUIs, give each a title, and save both. They get different codes. If both take the same number, State refuses the second, and its TUI tries the next number by itself (`… is taken; trying …`).
+- **Two at once.** Press `c` in both TUIs, give each a title, and save both. They get different codes. If both take the same number, State refuses the second, and its TUI tries the next number by itself (`… is taken; trying …`).
 - **A deleted code.** Delete the newest scene and create another right away. rela keeps a deleted code reserved for a few minutes, so the TUI says the code is taken and moves on to the next number.
 - **A scene with use cases.** Deleting a scene that still has use cases is refused, with the number of use cases (see UC-Atlas-02).
 - **Losing Control.** Run `atlas stop --env test` in a third terminal. Both TUIs say `Not connected to Control. Retrying…` and show nothing old as current. Run `atlas restart --env test`; they come back on the page they were on.

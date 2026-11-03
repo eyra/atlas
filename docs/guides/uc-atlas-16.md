@@ -19,8 +19,8 @@ In a second terminal, next to the TUI:
 | Step | Command | What you should see |
 |---|---|---|
 | The tools | `atlas tools --env test` | A `put` and a `set` per kind, then `get`, `list` and `help`. A put shows the command line, what its create form asks and the kind it goes in: `atlas put use_case --in <scene key> --title <text> --description <lines>`. A set lists the fields a person may change; fields only a connector fills (the Flux id) are not there. |
-| A scene to plan from | in the TUI, a scene (`n`) with a description that lists a few use cases, `ctrl-s` | The scene, with **Use cases**: `No use cases yet.` |
-| A plan | `atlas plan --env test --on SC-Atlas-NN "propose use cases from this scene's description"` | After a few seconds: `Plan by claude -p for …`, what the agent says, and one step per use case: `New use case in SC-Atlas-NN`, with its title and description and why. It ends with `Nothing was written.` |
+| A scene to plan from | in the TUI, a scene (`c`) with a description that lists a few use cases, `ctrl-s` | The scene, with **Use cases**: `No use cases yet.` |
+| A plan | `atlas plan --env test --on SC-Atlas-NN "propose use cases from this scene's description"` | After a few seconds: `Plan by claude -p for …`, what the agent says, and one step per use case: `Create use case in SC-Atlas-NN`, with its title and description and why. It ends with `Nothing was written.` |
 | Nothing changed | look at the TUI | Still `No use cases yet.`, and no hint in the status line. |
 | A step that does not fit | `atlas plan --env test --on SC-Atlas-NN "give it a colour field set to red"` | Claude will likely answer that no such field exists. When a planner proposes a field a form does not ask for, the step shows `✗ … does not ask for …`, before anyone could run it. |
 

@@ -19,11 +19,16 @@ defmodule AtlasAgent.ToolsTest do
         "Fields",
         "title: text; required; asked on create\nsize: one of s, m\nnotes: text of several lines; asked on create\nremote_id: text; set by a connector, never in a form"
       ]
+    ],
+    "actions" => [
+      %{"label" => "Create part", "key" => "c", "to" => "/k/part/new"},
+      %{"label" => "Update part", "key" => "u", "to" => "/k/_/<key>/edit"},
+      %{"label" => "Delete part", "key" => "d", "to" => "/k/_/<key>/delete"}
     ]
   }
 
   @form %{
-    "title" => "New part",
+    "title" => "Create part",
     "submit_to" => "/k/part/new",
     "inputs" => [
       %{"name" => "title", "label" => "Title", "kind" => "text", "required" => true},
@@ -37,7 +42,7 @@ defmodule AtlasAgent.ToolsTest do
     assert tool["tool"] == "put"
     assert tool["kind"] == "part"
     assert tool["in"] == "thing"
-    assert tool["title"] == "New part"
+    assert tool["title"] == "Create part"
     assert tool["about"] == "A part of a thing."
     assert Enum.map(tool["asks"], & &1["name"]) == ["title", "notes"]
     assert hd(tool["asks"])["required"]
@@ -58,6 +63,9 @@ defmodule AtlasAgent.ToolsTest do
 
   test "set: the fields a user may change, not those only a connector fills" do
     tool = Tools.set(@part)
+    # Named as Control names the update action on every page.
+    assert tool["title"] == "Update part"
+    assert Tools.set(Map.delete(@part, "actions"))["title"] == "Set part"
     assert Enum.map(tool["fields"], & &1["name"]) == ["title", "size", "notes"]
     assert tool["usage"] == "set <part key> <field>=<text> ..."
   end

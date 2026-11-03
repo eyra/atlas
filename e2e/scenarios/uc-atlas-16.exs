@@ -46,7 +46,7 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
     Enum.map(use_case["asks"], & &1["name"]) == ["title", "description"] ||
       raise inspect(use_case)
 
-    use_case["title"] == "New use case" || raise inspect(use_case)
+    use_case["title"] == "Create use case" || raise inspect(use_case)
     puts["scene"]["in"] == nil || raise inspect(puts["scene"])
 
     for read <- ~w(get list help),
@@ -68,7 +68,7 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
     plan["on"] == "/k/scene/#{scene}" || raise inspect(plan)
     [first, _, third] = plan["steps"] || raise inspect(plan)
 
-    first["label"] == "New use case in #{scene}" || raise inspect(first)
+    first["label"] == "Create use case in #{scene}" || raise inspect(first)
     first["problem"] == nil || raise inspect(first)
 
     Enum.map(first["inputs"], &{&1["name"], &1["value"]}) ==
@@ -87,11 +87,11 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
     scene = Process.get(:scene)
     {plan, _} = atlas_json(i, ["plan", "--on", scene, "colour it red"])
     [step] = plan["steps"]
-    step["label"] == "Change scene #{scene}" || raise inspect(step)
+    step["label"] == "Update #{scene}" || raise inspect(step)
     step["problem"] =~ "does not ask for colour" || raise inspect(step)
 
     {text, 0, _} = atlas(i, ["plan", "--on", scene, "colour it red"])
-    text =~ "✗ Change scene #{scene} does not ask for colour" || raise text
+    text =~ "✗ Update #{scene} does not ask for colour" || raise text
     text =~ "Nothing was written." || raise text
   end
 end

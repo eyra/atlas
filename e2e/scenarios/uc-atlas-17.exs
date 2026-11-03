@@ -42,17 +42,17 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
     see(t1, "Proposed: 3 steps", 10_000)
     see(t1, "You asked       propose use cases from this scene's description")
     see(t1, "By              the e2e stand-in")
-    see(t1, "› [✓] 1. New use case in #{scene}")
-    see(t1, "[✓] 3. New use case in #{scene}")
+    see(t1, "› [✓] 1. Create use case in #{scene}")
+    see(t1, "[✓] 3. Create use case in #{scene}")
     see(t1, "space keep/drop   e edit   ↵ run the kept steps")
     see(t2, "No use cases yet.")
   end
 
   step "space drops a step; e edits one in its form, ctrl-s keeps the edit", fn ->
     press(t1, ["Down", "Space"])
-    see(t1, "[ ] 2. New use case in")
+    see(t1, "[ ] 2. Create use case in")
     press(t1, ["Down", "e"])
-    see(t1, ~r/Step 3: New use case in SC-Atlas-\d+/)
+    see(t1, ~r/Step 3: Create use case in SC-Atlas-\d+/)
     see(t1, "[ Keep ]")
     type(t1, " (edited)")
     press(t1, "C-s")
@@ -83,7 +83,7 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
     press(t1, "Enter")
     see(t1, "Proposed: 3 steps", 10_000)
     press(t1, "Escape")
-    see(t1, "e Change   d Delete")
+    see(t1, "u Update scene   d Delete scene")
     {got, _} = atlas_json(i, ["get", scene])
     length(hd(got["lists"])["rows"]) == 2 || raise inspect(got["lists"])
   end
@@ -97,11 +97,11 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
     press(t1, ":")
     type(t1, "colour it red")
     press(t1, "Enter")
-    see(t1, "[!] 1. Change scene", 10_000)
+    see(t1, "[!] 1. Update SC-Atlas-", 10_000)
     see(t1, "does not ask for colour")
     press(t1, "Enter")
     see(t1, "Step 1 cannot run; drop it with space.")
     press(t1, "Escape")
-    see(t1, "e Change   d Delete")
+    see(t1, "u Update scene   d Delete scene")
   end
 end

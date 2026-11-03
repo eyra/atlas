@@ -10,11 +10,11 @@ In TUI 1:
 
 | Step | Keys | What you should see |
 |---|---|---|
-| A scene | `n`, a title, `ctrl-s` | The scene (say `SC-Atlas-01`), and under it **Use cases**: `No use cases yet. Press a to add one.` |
-| Add | `a`, a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `✓ Stored as UC-Atlas-01 …`: the code is made for you. The use case opens and shows `In scene SC-Atlas-01`. |
-| Back | `esc` | The scene, with the use case in its list. Add a second one with `a`. |
+| A scene | `c`, a title, `ctrl-s` | The scene (say `SC-Atlas-01`), and under it **Use cases**: `No use cases yet. Press c to create one.` |
+| Create | `c`, a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `✓ Stored as UC-Atlas-01 …`: the code is made for you. The use case opens and shows `In scene SC-Atlas-01`. |
+| Back | `esc` | The scene, with the use case in its list. Create a second one with `c`. |
 | Open | ↑/↓ in the list, `enter` | The use case with its fields (status Refine, by default). |
-| Change | `e`, edit, `ctrl-s` | The code is shown read-only. `✓ Stored …` and the changed use case. |
+| Update | `u`, edit, `ctrl-s` | The code is shown read-only. `✓ Stored …` and the changed use case. |
 | Remove | `d`, then `y` | `✓ Stored …`. You are back in the scene, without it. |
 
 Keep TUI 2 open on the same scene: every use case you add, change or remove in TUI 1 shows up there by itself (`updated by hint at …`).
@@ -23,7 +23,7 @@ Also try:
 
 - **No title.** Add a use case with an empty title. State refuses it (`title is required`). The form keeps what you typed.
 - **Deleting a scene that has use cases.** In the scene, press `d`. It is refused: `still has 2 use cases. Remove them first` (with one: `still has 1 use case. Remove it first`). Atlas never deletes use cases along with their scene.
-- **Issues.** A use case shows an **Issues** list, with `a` to add one (UC-Atlas-03).
+- **Issues.** A use case shows an **Issues** list, with `c` to create one (UC-Atlas-03).
 
 ## What changed for this
 
