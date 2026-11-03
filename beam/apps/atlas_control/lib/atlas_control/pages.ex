@@ -293,7 +293,7 @@ defmodule AtlasControl.Pages do
       for {relation, from, _} <- child_relations(description, kind),
           do: {from, %{"linked" => %{relation => key}}}
 
-    causes = for {from, _name, _label} <- cause_fields(description), from != kind, do: {from, %{}}
+    causes = for {from, _name, _label} <- cause_fields(description), do: {from, %{}}
 
     [{kind, %{"key" => key}} | children] ++ causes
   end
@@ -359,6 +359,17 @@ defmodule AtlasControl.Pages do
   # A kind the agent alone writes (`"by_hand": false`) offers no keys to make, change or
   # delete one; its forms still answer at their paths.
   defp by_hand?(spec), do: spec["by_hand"] != false
+
+  # The actions the description adds to a fact's page (`actions`: key, label, to), each
+  # only while the fact's fields have one of the values its `when` names. A `to` of
+  # `agent:<intent>` is for the client to ask the agent with (spec README).
+  defp described_actions(spec, fact) do
+    for %{"key" => key, "label" => label, "to" => to} = described <- spec["actions"] || [],
+        Enum.all?(described["when"] || %{}, fn {field, values} ->
+          to_text(fact["values"][field]) in values
+        end),
+        do: Blocks.action(label: label, key: key, to: to)
+  end
 
   # `"order": "newest"` lists a kind newest first (by key, which counts up).
   defp sort_facts(facts, spec) do
@@ -574,7 +585,7 @@ defmodule AtlasControl.Pages do
                     else: []
                   ) ++ [action(:delete, spec, kind, path({:delete, kind, key}))],
                 else: []
-              ),
+              ) ++ described_actions(spec, fact),
             links: links(description, spec, fact)
           )
 
@@ -600,7 +611,7 @@ defmodule AtlasControl.Pages do
         # section that carries its title. A client lays the parts out as it sees fit.
         references =
           lists ++
-            cause_lists(description, kind, key, cause_answers) ++
+            cause_lists(description, key, cause_answers) ++
             parent_lists(description, kind, fact)
 
         ids = for {id, _} <- references, do: id
@@ -906,8 +917,8 @@ defmodule AtlasControl.Pages do
 
   # The facts whose cause field holds this fact's key, one list per such field; only those
   # with rows. They follow the related lists in the references part.
-  defp cause_lists(description, kind, key, answers) do
-    fields = for {from, _, _} = field <- cause_fields(description), from != kind, do: field
+  defp cause_lists(description, key, answers) do
+    fields = cause_fields(description)
 
     for {{from, name, title}, %{"facts" => facts}} <- Enum.zip(fields, answers),
         naming = Enum.filter(facts, &(to_text(&1["values"][name]) == key)),
