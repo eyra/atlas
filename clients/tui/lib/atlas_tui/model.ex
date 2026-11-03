@@ -27,6 +27,8 @@ defmodule AtlasTui.Model do
             connected: false,
             path: nil,
             title: "",
+            # What waits for the user, as Control words it (`count` on every page), or nil.
+            count: nil,
             back: nil,
             blocks: [],
             # The view model's block ids, in order, and its markup (decoded entries).
@@ -82,6 +84,7 @@ defmodule AtlasTui.Model do
       model
       | path: msg["path"],
         title: msg["title"] || "",
+        count: msg["count"],
         back: msg["back"],
         blocks: blocks,
         ids: ids,
