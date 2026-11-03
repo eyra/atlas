@@ -18,7 +18,7 @@ defmodule AtlasFlow.FakeState do
       %{
         "name" => "again",
         "when" => %{"reopened" => "signed_by"},
-        "owner" => "bob",
+        "owner" => %{"kind" => "clerk", "key" => "bob"},
         "expected" => "Again: {note}",
         "why" => "taken back",
         "next" => ["packing", "done"]
@@ -26,14 +26,14 @@ defmodule AtlasFlow.FakeState do
       %{
         "name" => "check",
         "when" => %{"progress" => "check"},
-        "owner" => "ada",
+        "owner" => %{"kind" => "clerk", "key" => "ada"},
         "expected" => "Check it",
         "why" => "all in it is packed",
         "next" => ["done"]
       },
       %{
         "name" => "packing",
-        "owner" => "bob",
+        "owner" => %{"kind" => "clerk", "key" => "bob"},
         "expected" => "Pack it",
         "why" => "not all in it is packed",
         "next" => ["check"]
@@ -103,6 +103,9 @@ defmodule AtlasFlow.FakeState do
   def handle_call(:sent, _from, s), do: {:reply, Enum.reverse(s.sent), s}
   def handle_call({:description, d}, _from, s), do: {:reply, :ok, %{s | description: d}}
   def handle_call(:reads, _from, s), do: {:reply, s.reads, s}
+
+  def handle_call({:drop, kind, key}, _from, s),
+    do: {:reply, :ok, %{s | facts: Map.delete(s.facts, {kind, key})}}
 
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do

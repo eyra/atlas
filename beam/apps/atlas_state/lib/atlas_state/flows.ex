@@ -8,7 +8,7 @@ defmodule AtlasState.Flows do
   Knows no kind by name.
   """
 
-  @conditions ~w(completed progress reopened)
+  @conditions ~w(completed progress reopened values)
 
   @doc "The problems of every definition: `%{name => [problem]}` (empty lists when sound)."
   def check(description) do
@@ -25,6 +25,7 @@ defmodule AtlasState.Flows do
     kinds(description, flow) ++
       on(description, flow) ++
       relation(description, flow) ++
+      owner_kinds(description, flow) ++
       writes(description, flow) ++
       cond do
         states == [] ->
@@ -131,9 +132,10 @@ defmodule AtlasState.Flows do
     conditions =
       for state <- List.wrap(flow["states"]),
           is_map(state),
-          {_condition, value} <- state["when"] || %{},
-          value in written,
-          do: "#{state["name"]} depends on #{value}, which Flow writes"
+          {condition, value} <- state["when"] || %{},
+          read <- if(condition == "values" and is_map(value), do: Map.keys(value), else: [value]),
+          read in written,
+          do: "#{state["name"]} depends on #{read}, which Flow writes"
 
     on = flow["on"]
 
@@ -187,7 +189,7 @@ defmodule AtlasState.Flows do
     name = state["name"]
 
     owner =
-      if is_binary(state["owner"]) and state["owner"] != "",
+      if owner_key(state["owner"]) not in [nil, ""],
         do: [],
         else: ["#{name} has no owner"]
 
@@ -204,6 +206,33 @@ defmodule AtlasState.Flows do
 
     owner ++ next
   end
+
+  defp owner_key(%{"key" => key}) when is_binary(key), do: key
+  defp owner_key(key) when is_binary(key), do: key
+  defp owner_key(_owner), do: nil
+
+  # With an owner relation, each open state's owner names its kind, one the relation allows.
+  defp owner_kinds(description, %{"owner_relation" => relation} = flow)
+       when is_binary(relation) do
+    allowed = get_in(description, ["relations", relation, "to"]) || []
+
+    for state <- List.wrap(flow["states"]),
+        is_map(state),
+        state["done"] != true,
+        problem <-
+          (case state["owner"] do
+             %{"kind" => kind} when is_binary(kind) ->
+               if kind in allowed,
+                 do: [],
+                 else: ["#{state["name"]}: #{relation} does not allow its owner's kind, #{kind}"]
+
+             _ ->
+               ["#{state["name"]}: its owner names no kind (owner: {kind, key})"]
+           end),
+        do: problem
+  end
+
+  defp owner_kinds(_description, _flow), do: []
 
   # From every state, following next, some done state is reached.
   defp reach(states, by_name) do

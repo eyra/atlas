@@ -41,7 +41,7 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
     at = press(t1, "C-s")
     stored(t1, "✓ Stored as PR-eyra-atlas-12", at)
     page = stored(t1, "Pull request PR-eyra-atlas-12: #{url}", at)
-    page =~ ~r/In issue\s+IS-Atlas-\d+/ || raise "it is not in the issue"
+    page =~ ~r/In issue[\s─│]+IS-Atlas-\d+/u || raise "it is not in the issue"
     # Title and state come from GitHub; nothing to fill in.
     refute_see(t1, ~r/Title\s/)
     by_hint(t2, url, at)
