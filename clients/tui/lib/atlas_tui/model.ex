@@ -673,7 +673,19 @@ defmodule AtlasTui.Model do
   defp back(model), do: open(model, model.back)
 
   defp open(model, nil), do: {model, []}
-  defp open(model, to), do: {%{model | notice: nil}, [{:send, %{"op" => "open", "to" => to}}]}
+
+  # A destination is opened only when it is one of the contract's pages; navigation is the
+  # client's, and a path Control does not serve is never asked for.
+  defp open(model, to) do
+    case Blocks.match(to) do
+      {:ok, _page, _params} ->
+        {%{model | notice: nil}, [{:send, %{"op" => "open", "to" => to}}]}
+
+      :error ->
+        {%{model | notice: %{tone: "error", text: "Not opened: #{to} is no page of Control's"}},
+         []}
+    end
+  end
 
   defp open_url(model, url) do
     if openable?(url),

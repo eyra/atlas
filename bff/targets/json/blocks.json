@@ -157,6 +157,125 @@
       "name": "plan"
     }
   ],
+  "endpoints": [
+    {
+      "call": "open",
+      "name": "home",
+      "page": "home",
+      "params": [],
+      "path": "/",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "kinds",
+      "page": "kinds",
+      "params": [],
+      "path": "/_kinds",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "list",
+      "page": "list",
+      "params": [
+        "kind"
+      ],
+      "path": "/k/:kind",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "new",
+      "page": "new",
+      "params": [
+        "kind"
+      ],
+      "path": "/k/:kind/new",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "new_under",
+      "page": "new_under",
+      "params": [
+        "kind",
+        "relation",
+        "parent"
+      ],
+      "path": "/k/:kind/new/:relation/:parent",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "item",
+      "page": "item",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "edit",
+      "page": "edit",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key/edit",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "delete",
+      "page": "delete",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key/delete",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "links",
+      "page": "links",
+      "params": [
+        "kind",
+        "key",
+        "relation"
+      ],
+      "path": "/k/:kind/:key/links/:relation",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "set",
+      "page": "set",
+      "params": [
+        "kind",
+        "key",
+        "relation"
+      ],
+      "path": "/k/:kind/:key/set/:relation",
+      "returns": "view model"
+    },
+    {
+      "call": "open",
+      "name": "remove",
+      "page": "remove",
+      "params": [
+        "kind",
+        "key",
+        "relation"
+      ],
+      "path": "/k/:kind/:key/remove/:relation",
+      "returns": "view model"
+    }
+  ],
   "markup": [
     {
       "fields": [
@@ -401,7 +520,104 @@
       "name": "step"
     }
   ],
-  "version": "0.8.0",
+  "pages": [
+    {
+      "name": "home",
+      "params": [],
+      "path": "/",
+      "returns": "view model"
+    },
+    {
+      "name": "kinds",
+      "params": [],
+      "path": "/_kinds",
+      "returns": "view model"
+    },
+    {
+      "name": "list",
+      "params": [
+        "kind"
+      ],
+      "path": "/k/:kind",
+      "returns": "view model"
+    },
+    {
+      "name": "new",
+      "params": [
+        "kind"
+      ],
+      "path": "/k/:kind/new",
+      "returns": "view model"
+    },
+    {
+      "name": "new_under",
+      "params": [
+        "kind",
+        "relation",
+        "parent"
+      ],
+      "path": "/k/:kind/new/:relation/:parent",
+      "returns": "view model"
+    },
+    {
+      "name": "item",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key",
+      "returns": "view model"
+    },
+    {
+      "name": "edit",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key/edit",
+      "returns": "view model"
+    },
+    {
+      "name": "delete",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key/delete",
+      "returns": "view model"
+    },
+    {
+      "name": "links",
+      "params": [
+        "kind",
+        "key",
+        "relation"
+      ],
+      "path": "/k/:kind/:key/links/:relation",
+      "returns": "view model"
+    },
+    {
+      "name": "set",
+      "params": [
+        "kind",
+        "key",
+        "relation"
+      ],
+      "path": "/k/:kind/:key/set/:relation",
+      "returns": "view model"
+    },
+    {
+      "name": "remove",
+      "params": [
+        "kind",
+        "key",
+        "relation"
+      ],
+      "path": "/k/:kind/:key/remove/:relation",
+      "returns": "view model"
+    }
+  ],
+  "version": "0.9.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

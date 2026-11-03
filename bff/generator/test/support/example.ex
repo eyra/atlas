@@ -28,6 +28,11 @@ defmodule AtlasBFF.Example do
   defmarkup :tint do
     field :shade, :string
   end
+
+  # Written in an order that is not the one they match in: a literal wins.
+  defpage(:card, "/cards/:id")
+  defpage(:new_card, "/cards/new")
+  defpage(:home, "/")
 end
 
 defmodule AtlasBFF.Example.Server do
