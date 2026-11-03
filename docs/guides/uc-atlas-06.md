@@ -22,7 +22,7 @@ In test (`atlas tui --env test`):
 | Assign a scene to Ada | `atlas set SC-Atlas-NN assigned_to=ada --cause "handed to Ada" --env test` | Ada's row shows `1 assigned` at once, in every open TUI |
 | What is assigned | `enter` on Ada | **Agent ada: Ada**, with the scene's Assignment under **Assignments** |
 
-Hand a scene over once Flow has given it what is expected (a moment after it is made). Flow's first look on a new fact is a change of state, and a change of state moves the owner to the state's own (IS-Atlas-75). "Hand to…" (IS-Atlas-83) does this in one action.
+Since IS-Atlas-83 a fact can be handed over at once: Flow's first look on a new fact writes what is expected and leaves an owner set by hand. Hand to… (`h`) sets the owner and a deadline in one action.
 
 In prod the coordinator's count includes the facts that were done before IS-Atlas-75. They kept the owner the IS-Atlas-52 migration gave them. Flow leaves a fact that becomes done from now on with no owner.
 
@@ -57,3 +57,35 @@ In test, with the scene from IS-Atlas-17 assigned to Ada:
 | Done | accept the scene | Not late any more: nothing is expected once it is done. |
 
 A page that is open when the deadline passes shows late from its next read: `r`, a hint, or the reconcile. Hand to… (IS-Atlas-83) will set the owner and the deadline in one action.
+
+## IS-Atlas-83: Hand to…, the owner and a deadline in one action
+
+Every assignable fact (scene, use case, issue, pull request) has `h Hand to…`. It opens one form:
+- **To:** an agent or a person, `←→` to choose;
+- **Deadline:** optional, `2026-11-04 17:00`, UTC;
+- **Note:** optional.
+
+`ctrl-s` stores the owner and the deadline on the fact's Assignment in one change. The cause is "handed to ada by melle", or the note when you give one.
+
+Flow keeps that owner while the state holds (IS-Atlas-75). A brand-new fact can be handed over at once: Flow's first look writes what is expected and leaves an owner set by hand. Before IS-Atlas-83, that first look counted as a change of state and moved the owner.
+
+It is description, plus one general rule in Control. The association `assigned_to` has
+
+```json
+"actions": { "change": { "label": "Hand to…", "key": "h", "with": ["deadline"], "cause": "handed to {to} by {by}" } }
+```
+
+- **`change`:** an action shown whether a link is there or not.
+- **`with`:** the fields of the fact that holds the link (the Assignment) that the form also asks.
+- **`cause`:** used when the note is empty. A note is the cause as it is given, so `atlas set … assigned_to=… --cause …` keeps its own words.
+
+### Try
+
+| Step | Keys | What you should see |
+|---|---|---|
+| A new scene | `c` on the scenes list, a title, `ctrl-s` | the scene's page, with `h Hand to…` |
+| Hand it over at once | `h`, `→` until **To** is `ada`, `↓`, `2099-03-04 09:30`, `ctrl-s` | the Assignment's page: **Assigned to** `ada` (handed to ada by …), **Deadline** `2099-03-04 09:30 UTC` |
+| Flow leaves it | wait a moment, `r` on the scene | **Expected** `Build it`, **Assigned to** still `ada` |
+| Ada's count | `g` | `ada  Ada  N assigned`, one more |
+
+`e2e/scenarios/uc-atlas-06.exs` follows these steps.

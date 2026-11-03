@@ -3,8 +3,7 @@
 # Assignments that point at it.
 import AtlasE2E.Scenario
 
-# The facts of `key` once Flow has given it what is expected: a fact handed over before
-# that would be moved by Flow's first look, as any change of state moves its owner.
+# The facts of `key` once Flow has given it what is expected (its first look).
 expected = fn i, key ->
   Enum.reduce_while(1..50, nil, fn _, _ ->
     {got, _} = atlas_json(i, ["get", key])
@@ -84,5 +83,41 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
     see(t1, "Update AS-#{key}")
     see(t1, "Deadline")
     press(t1, "Escape")
+  end
+
+  # IS-Atlas-83: Hand to…, the owner and a deadline in one change, on any assignable fact.
+  step "h on a new scene: Hand to… Ada with a deadline, in one change; Flow keeps her", fn ->
+    {scene, _} = atlas_json(i, ["put", "scene", "--title", "A scene handed over at once"])
+    key = scene["key"]
+    home(t1)
+    open_row(t1, "A scene handed over at once")
+    see(t1, "h Hand to…")
+    press(t1, "h")
+    see(t1, "Hand to… #{key}")
+
+    # To: the choice wraps; move on until it is Ada.
+    Enum.reduce_while(1..10, nil, fn _, _ ->
+      if settled(t1) =~ "‹ ada ›",
+        do: {:halt, nil},
+        else: press(t1, "Right") && {:cont, nil}
+    end)
+
+    see(t1, "‹ ada ›")
+    press(t1, "Down")
+    type(t1, "2099-03-04 09:30")
+    at = press(t1, "C-s")
+    stored(t1, "Assignment AS-#{key}", at)
+
+    {got, _} = atlas_json(i, ["get", "AS-#{key}"])
+    got["values"]["deadline"] == "2099-03-04T09:30:00Z" || raise inspect(got["values"])
+    origin = got["origins"]["Assigned to"]
+    origin["cause"] =~ ~r/^handed to ada by \S+$/ || raise inspect(origin)
+
+    # Flow's first look on the new scene writes what is expected, and leaves Ada.
+    got = expected.(i, key)
+    ["Assigned to", "ada"] in got["fields"] || raise inspect(got["fields"])
+    Process.sleep(500)
+    {got, _} = atlas_json(i, ["get", key])
+    ["Assigned to", "ada"] in got["fields"] || raise "Flow moved it: #{inspect(got["fields"])}"
   end
 end

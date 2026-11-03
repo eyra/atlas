@@ -1000,6 +1000,62 @@ defmodule AtlasControl.PagesTest do
     assert Pages.values_for(spec, %{"due" => ""}) == %{"due" => ""}
   end
 
+  # Checked by: an action that changes it whether it is set or not, asking the widget's
+  # notes with it, in one change with its own cause.
+  @handed put_in(@d, ["relations", "checked_by", "actions"], %{
+            "change" => %{
+              "label" => "Hand to…",
+              "key" => "h",
+              "with" => ["notes"],
+              "cause" => "handed to {to} by {by}"
+            }
+          })
+
+  test "a change action: on the page with or without a link; its form asks its fields too" do
+    hand = %{"key" => "h", "label" => "Hand to…", "to" => "/k/widget/W-1/links/checked_by"}
+
+    answers = fn widget ->
+      [
+        %{"fact" => widget}
+        | for(_ <- tl(Pages.reads({:item, "widget", "W-1"}, @handed)), do: %{"facts" => []})
+      ]
+    end
+
+    for links <- [%{}, %{"checked_by" => ["ada"]}] do
+      widget = Map.put(fact("W-1", %{"title" => "One", "notes" => "Wrap it"}), "links", links)
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "widget", "W-1"}, @handed, answers.(widget))
+
+      assert hand in item["actions"]
+    end
+
+    widget =
+      Map.put(fact("W-1", %{"title" => "One", "notes" => "Wrap it"}), "links", %{
+        "checked_by" => ["ada"]
+      })
+
+    members = %{"facts" => [fact("ada", %{"name" => "Ada"}), fact("bob", %{"name" => "Bob"})]}
+
+    %{title: title, blocks: [%{"props" => form}]} =
+      Pages.render({:links, "widget", "W-1", "checked_by"}, @handed, [
+        %{"fact" => widget},
+        members
+      ])
+
+    assert title == "Hand to… One"
+    assert Enum.map(form["inputs"], & &1["name"]) == ["_key", "to", "notes", "note"]
+    assert %{"name" => "to", "value" => "ada"} = Enum.at(form["inputs"], 1)
+    assert %{"name" => "notes", "value" => "Wrap it"} = Enum.at(form["inputs"], 2)
+
+    change = Pages.change_action(@handed, "checked_by")
+    assert Pages.change_cause(change, ["bob"], "melle", "") == "handed to bob by melle"
+    assert Pages.change_cause(change, [], "melle", "") == "handed to nobody by melle"
+    # A note says why in its own words.
+    assert Pages.change_cause(change, ["bob"], "melle", "Bob builds it") == "Bob builds it"
+    assert Pages.change_action(@d, "checked_by") == nil
+  end
+
   test "a kind made by no key: its page has no actions, its entries no add" do
     answer = %{"fact" => fact("L-01", %{"title" => "First"})}
     entries = %{"facts" => [fact("E-01", %{"title" => "Made W-1", "about" => "W-1"})]}
