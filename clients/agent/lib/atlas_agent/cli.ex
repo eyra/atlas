@@ -6,6 +6,7 @@ defmodule AtlasAgent.CLI do
       atlas set  <key> <field>=<text> ...                  change; prints the item
       atlas get  <key>                                     one item, with what hangs under it
       atlas list <kind> [--in <key>]                       the items of a kind (under <key>)
+      atlas delete <key>                                   delete; refused while anything hangs under it
       atlas tools                                          the agent's tools: Control's actions
       atlas plan --on <key or path> <request ...>          what the agent proposes; writes nothing
 
@@ -64,6 +65,8 @@ defmodule AtlasAgent.CLI do
     end
   end
 
+  defp parse(["delete", key]), do: {:ok, {:delete, key}}
+
   defp parse([command | rest]) when command in ~w(put set get list) do
     if "--help" in rest or "-h" in rest,
       do:
@@ -119,6 +122,8 @@ defmodule AtlasAgent.CLI do
   defp run({:list, kind, parent}, client),
     do: client |> AtlasAgent.list(kind, parent) |> as(:list)
 
+  defp run({:delete, key}, client), do: client |> AtlasAgent.delete(key) |> as(:deleted)
+
   defp run(:tools, client), do: client |> AtlasAgent.Tools.list() |> as(:tools)
 
   defp run({:plan, on, request}, client) do
@@ -137,6 +142,8 @@ defmodule AtlasAgent.CLI do
   defp show({:item, item}, true), do: json(item, 0)
   defp show({:list, rows}, true), do: json(rows, 0)
   defp show({:help, kinds, _usage?}, true), do: json(kinds, 0)
+  defp show({:deleted, key}, true), do: json(%{"deleted" => key}, 0)
+  defp show({:deleted, key}, false), do: IO.puts("Deleted #{key}.") && 0
   defp show({:tools, tools}, true), do: json(tools, 0)
   defp show({:plan, plan}, true), do: json(plan, 0)
   defp show({:tools, tools}, false), do: IO.puts(tools_text(tools)) && 0
