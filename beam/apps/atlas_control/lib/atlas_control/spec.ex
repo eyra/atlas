@@ -26,7 +26,7 @@ defmodule AtlasControl.Spec do
 
   A mistake fails at compile time and points at its line. Generators read `__spec__/0`,
   never the source. The catalogue is `spec/control/blocks.ex`. A new kind of entry (such
-  as a region) is one more `def…` macro that calls `entry/4` with its own type.
+  as markup) is one more `def…` macro that calls `entry/4` with its own type.
   """
 
   @primitives [:string, :integer, :boolean]

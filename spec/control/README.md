@@ -37,7 +37,7 @@ Types are `:string`, `:integer`, `:boolean`, a model (`defmodel`), or `{:list, t
 
 Change the catalogue, run `cd beam && mix atlas.gen`, commit the catalogue and the three generated files. A test fails when they are out of date, and CI runs `mix atlas.gen --check`.
 
-The DSL is plain macros (`AtlasControl.Spec`, about 170 lines), not Spark: a catalogue of a few blocks and models needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency. Another kind of entry, such as the regions planned for sections and layouts, is one more `def…` macro beside `defblock` and `defmodel`.
+The DSL is plain macros (`AtlasControl.Spec`, about 170 lines), not Spark: a catalogue of a few blocks and models needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency. Another kind of entry, such as the markup planned for sections and layouts, is one more `def…` macro beside `defblock` and `defmodel`.
 
 ## Blocks (spec 0.1.0)
 
