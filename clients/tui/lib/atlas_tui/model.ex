@@ -11,6 +11,8 @@ defmodule AtlasTui.Model do
   alias AtlasTui.Blocks.{Confirm, Form, Input, Item}
   alias AtlasTui.Blocks.List, as: ListBlock
 
+  @scroll_step 10
+
   defstruct env: nil,
             connected: false,
             path: nil,
@@ -18,6 +20,9 @@ defmodule AtlasTui.Model do
             back: nil,
             blocks: [],
             selected: 0,
+            # A page longer than the screen: nil follows the selected row or the focus;
+            # a number of lines is scrolled to by page up and page down.
+            scroll: nil,
             focus: 0,
             # Where typing goes in a multi-line input: `{line, column}`, nil for the end.
             cursor: nil,
@@ -61,7 +66,8 @@ defmodule AtlasTui.Model do
       model
       | selected: keep_selection(model, same),
         focus: if(same, do: model.focus, else: 0),
-        cursor: if(same, do: model.cursor, else: nil)
+        cursor: if(same, do: model.cursor, else: nil),
+        scroll: if(same, do: model.scroll, else: first_scroll(blocks))
     }
 
     model = if msg["reason"] == "hint", do: %{model | last_hint: updated}, else: model
@@ -73,6 +79,9 @@ defmodule AtlasTui.Model do
   end
 
   def message(model, _other), do: model
+
+  # A page about one fact opens at its top, even when a list under it has a selected row.
+  defp first_scroll(blocks), do: if(Enum.any?(blocks, &match?(%Item{}, &1)), do: 0, else: nil)
 
   def disconnected(model), do: %{model | connected: false}
 
@@ -125,11 +134,18 @@ defmodule AtlasTui.Model do
       _ when action != nil ->
         open(model, action.to)
 
+      # Moving in a list brings its selected row back in sight.
       k when k in [:up, {:char, "k"}] ->
-        {%{model | selected: max(model.selected - 1, 0)}, []}
+        {%{model | selected: max(model.selected - 1, 0), scroll: nil}, []}
 
       k when k in [:down, {:char, "j"}] ->
-        {%{model | selected: min(model.selected + 1, max(length(rows) - 1, 0))}, []}
+        {%{model | selected: min(model.selected + 1, max(length(rows) - 1, 0)), scroll: nil}, []}
+
+      :page_down ->
+        {%{model | scroll: (model.scroll || 0) + @scroll_step}, []}
+
+      :page_up ->
+        {%{model | scroll: max((model.scroll || 0) - @scroll_step, 0)}, []}
 
       k when k in [:enter, :right] and rows != [] ->
         open(model, Enum.at(rows, model.selected).to)

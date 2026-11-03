@@ -267,6 +267,43 @@ defmodule AtlasTuiTest do
     assert lines |> Enum.join() |> String.split("a long title") |> length() == 11
   end
 
+  test "a page longer than the screen scrolls, and keeps a selected row in sight" do
+    long = Enum.map_join(1..30, "\n", &"line #{&1}")
+
+    page = fn rows ->
+      %{
+        @list
+        | "blocks" => [
+            %{
+              "type" => "item",
+              "props" => %{
+                "title" => "Thing T-1",
+                "fields" => [%{"label" => "Notes", "value" => long}]
+              }
+            },
+            %{
+              "type" => "list",
+              "props" => %{"title" => "Parts", "rows" => rows, "empty" => "No parts yet."}
+            }
+          ]
+      }
+    end
+
+    m = model(page.([]))
+    assert screen(m) =~ "pgup/pgdn scroll"
+    refute screen(m) =~ "No parts yet."
+    {m, _} = press(m, [:page_down, :page_down, :page_down])
+    assert screen(m) =~ "No parts yet."
+    {m, _} = press(m, [:page_up, :page_up, :page_up])
+    assert screen(m) =~ "line 1\n"
+
+    # The page opens at its top; moving in the list under it brings the row in sight.
+    m = model(page.([%{"label" => "Wheel", "to" => "/k/part/P-1"}]))
+    refute screen(m) =~ "› Wheel"
+    {m, _} = press(m, [:down])
+    assert screen(m) =~ "› Wheel"
+  end
+
   test "a read-only input is shown but never takes focus or typing" do
     page =
       update_in(@form, ["blocks", Access.at(0), "props", "inputs"], fn inputs ->

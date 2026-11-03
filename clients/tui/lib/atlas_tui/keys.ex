@@ -31,6 +31,8 @@ defmodule AtlasTui.Keys do
   defp parse("\eOF" <> rest, acc), do: parse(rest, [:end | acc])
   defp parse("\e[1~" <> rest, acc), do: parse(rest, [:home | acc])
   defp parse("\e[4~" <> rest, acc), do: parse(rest, [:end | acc])
+  defp parse("\e[5~" <> rest, acc), do: parse(rest, [:page_up | acc])
+  defp parse("\e[6~" <> rest, acc), do: parse(rest, [:page_down | acc])
 
   # Other CSI sequences (Delete, Page up, …) are ignored whole.
   defp parse("\e[" <> rest = buffer, acc) do

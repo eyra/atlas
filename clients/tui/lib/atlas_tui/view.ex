@@ -24,16 +24,18 @@ defmodule AtlasTui.View do
       [{:dim, String.duplicate("─", width)}]
     ]
 
+    # The footer: help, a rule, the notice and the status line.
+    room = max(height - length(header) - 4, 1)
+    lines = body(model, width, room)
+    body = window(lines, model, room)
+    body = body ++ Elixir.List.duplicate([], room - length(body))
+
     footer = [
-      [{:dim, " " <> help(model)}],
+      [{:dim, " " <> help(model, length(lines) > room)}],
       [{:dim, String.duplicate("─", width)}],
       notice(model),
       status(model, reconcile_seconds)
     ]
-
-    room = max(height - length(header) - length(footer), 1)
-    body = model |> body(width, room) |> window(model, room)
-    body = body ++ Elixir.List.duplicate([], room - length(body))
 
     Enum.map(header ++ body ++ footer, &fit(&1, width))
   end
@@ -310,27 +312,24 @@ defmodule AtlasTui.View do
       else: rows ++ [[{:dim, String.duplicate(" ", @label_width + 4) <> Enum.join(more, " · ")}]]
   end
 
-  # Keep the selected row of a long list, or the focus of a long form, on screen.
+  # A page longer than the screen: the focus of a form, or the selected row of a list,
+  # stays in sight until the page is scrolled by hand (a page about one fact starts at
+  # its top); arrows follow the selection again.
   defp window(lines, model, room) when length(lines) > room do
-    target =
-      case Model.list(model) do
-        %ListBlock{} ->
-          model.selected + 2
+    last = length(lines) - room
 
-        nil ->
-          Enum.find_index(lines, &cursor_line?/1) || Enum.find_index(lines, &selected_line?/1) ||
-            0
-      end
+    focus = Enum.find_index(lines, &cursor_line?/1) || Enum.find_index(lines, &selected_line?/1)
+    follow = focus != nil and (model.scroll == nil or Model.form(model) != nil)
+    start = if follow, do: focus - div(room, 2), else: model.scroll || 0
 
-    start = min(max(target - div(room, 2), 0), length(lines) - room)
-    Enum.slice(lines, start, room)
+    Enum.slice(lines, start |> min(last) |> max(0), room)
   end
 
   defp window(lines, _model, _room), do: lines
 
   # Footer
 
-  defp help(model) do
+  defp help(model, long) do
     cond do
       not model.connected ->
         "q quit"
@@ -345,7 +344,7 @@ defmodule AtlasTui.View do
         if confirm.confirm_to, do: "y confirm   n cancel", else: "↵ back"
 
       true ->
-        Enum.map_join(Model.actions(model), "   ", &"#{&1.key} #{&1.label}") <> nav(model)
+        Enum.map_join(Model.actions(model), "   ", &"#{&1.key} #{&1.label}") <> nav(model, long)
     end
   end
 
@@ -357,8 +356,9 @@ defmodule AtlasTui.View do
   defp cursor_line?(line), do: Enum.any?(line, &match?({:cursor, _}, &1))
   defp selected_line?(line), do: Enum.any?(line, &match?({:selected, _}, &1))
 
-  defp nav(model) do
+  defp nav(model, long) do
     move = if Model.list(model), do: "   ↑↓ move   ↵ open", else: ""
+    move = if long, do: move <> "   pgup/pgdn scroll", else: move
     back = if model.back, do: "   esc back", else: ""
     move <> "   r refresh" <> back <> "   q quit"
   end
