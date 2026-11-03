@@ -3,6 +3,7 @@
 # expected to do, as a change with its cause: Build it while not all under it is
 # completed; Test it once all is; nothing once it is accepted; Rework, with the note,
 # once it is reopened. Flow never completes anything itself. GitHub is the stand-in.
+# IS-Atlas-76: a save is refused only when a field it sets changed meanwhile.
 import AtlasE2E.Scenario
 
 alias AtlasE2E.GitHub
@@ -91,6 +92,36 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
 
     by_hint(t1, ~r/Expected\s+Build it/, at)
     Process.put(:uc27_fix, fix["key"])
+    # Back to the use case: esc on its Assignment's page.
+    press(t1, "Escape")
+    see(t1, "Use case #{use_case}: A use case Flow moves")
+  end
+
+  # IS-Atlas-76: a save is refused only when a field it sets changed meanwhile.
+  step "Update form open while another field changes: the save is stored", fn ->
+    %{use_case: use_case} = Process.get(:uc27)
+    press(t1, "u")
+    see(t1, ~r/^ Update #{use_case}$/m)
+    # Meanwhile someone else changes another field (as Flow changes Expected).
+    atlas_json(i, ["set", use_case, "status=ready_to_pick_up"])
+    type(t1, " (changed)")
+    at = press(t1, "C-s")
+    stored(t1, "Use case #{use_case}: A use case Flow moves (changed)", at)
+    # The form left the Flux group alone, so the shell's change stays.
+    {got, _} = atlas_json(i, ["get", use_case])
+    got["values"]["status"] == "ready_to_pick_up" || raise inspect(got["values"])
+  end
+
+  step "Update form open while the same field changes: refused, changed meanwhile", fn ->
+    %{use_case: use_case} = Process.get(:uc27)
+    press(t1, "u")
+    see(t1, ~r/^ Update #{use_case}$/m)
+    atlas_json(i, ["set", use_case, "title=Renamed from the shell"])
+    type(t1, " again")
+    at = press(t1, "C-s")
+    stored(t1, "#{use_case} changed meanwhile; open it again", at)
+    press(t1, "Escape")
+    see(t1, "Use case #{use_case}: Renamed from the shell")
   end
 
   # The scenes list stays short enough for the scenarios after this one.
