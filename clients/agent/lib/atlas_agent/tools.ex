@@ -7,6 +7,7 @@ defmodule AtlasAgent.Tools do
   - `put`, one per kind: the inputs of its create form (as Control sends them) and the
     kind it goes in, when it belongs under one.
   - `set`, one per kind: the fields a person may change.
+  - `delete`: one fact by its key, refused while anything hangs under it.
   - `get`, `list` and `help`: reading.
 
   A tool is a map, so it travels as JSON to whatever plans: `"tool"`, `"kind"`,
@@ -28,7 +29,7 @@ defmodule AtlasAgent.Tools do
           end
         end)
 
-      with {:ok, writes} <- writes, do: {:ok, writes ++ reads()}
+      with {:ok, writes} <- writes, do: {:ok, writes ++ [delete()] ++ reads()}
     end
   end
 
@@ -85,6 +86,14 @@ defmodule AtlasAgent.Tools do
     }
   end
 
+  defp delete do
+    %{
+      "tool" => "delete",
+      "title" => "Delete an item; refused while anything hangs under it",
+      "usage" => "delete <key>"
+    }
+  end
+
   # The update action as Control names it on every page ("Update <kind>"); the command's
   # own verb when Control names none.
   defp update_label(kind) do
@@ -118,7 +127,7 @@ defmodule AtlasAgent.Tools do
   def find(tools, tool, _kind), do: Enum.find(tools, &(&1["tool"] == tool))
 
   @doc "Whether a tool writes."
-  def write?(%{"tool" => tool}), do: tool in ["put", "set"]
+  def write?(%{"tool" => tool}), do: tool in ["put", "set", "delete"]
 
   # "Belongs under": a kind (the first, when there are several), or nothing.
   defp parent(kind) do

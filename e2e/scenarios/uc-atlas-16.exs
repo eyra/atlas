@@ -94,4 +94,42 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
     text =~ "✗ Update #{scene} does not ask for colour" || raise text
     text =~ "Nothing was written." || raise text
   end
+
+  step "atlas delete: gone at once in the TUI; refused while something hangs under it", fn ->
+    scene = Process.get(:scene)
+
+    {use_case, at} =
+      atlas_json(i, ["put", "use_case", "--in", scene, "--title", "A use case to delete"])
+
+    by_hint(t1, "A use case to delete", at)
+
+    {%{"deleted" => key}, at} = atlas_json(i, ["delete", use_case["key"]])
+    key == use_case["key"] || raise key
+    by_hint(t1, "A use case to delete", at, gone: true)
+
+    {_, at} = atlas_json(i, ["put", "use_case", "--in", scene, "--title", "One that stays"])
+    by_hint(t1, "One that stays", at)
+    {%{"refused" => [why]}, _} = atlas_json(i, ["delete", scene], 1)
+    why =~ "#{scene} still has 1 use case. Remove it first" || raise why
+    see(t1, "One that stays")
+
+    {tools, _} = atlas_json(i, ["tools"])
+    Enum.any?(tools, &(&1["tool"] == "delete")) || raise "no delete tool"
+  end
+
+  step "A plan with a delete always asks, even of one step; enter deletes", fn ->
+    open_row(t1, "One that stays")
+    see(t1, ~r/Use case UC-Atlas-\d+: One that stays/)
+    key = capture(t1, ~r/Use case (UC-Atlas-\d+): One that stays/)
+    press(t1, ":")
+    type(t1, "delete it")
+    press(t1, "Enter")
+    see(t1, "Proposed: 1 step", 10_000)
+    see(t1, "[✓] 1. Delete use case #{key}?")
+    press(t1, "Enter")
+    see(t1, "Deleted #{key}.", 5_000)
+    see(t1, "Done: 1 of 1 stored")
+    press(t1, "Enter")
+    see(t1, "#{key} does not exist (any more).")
+  end
 end

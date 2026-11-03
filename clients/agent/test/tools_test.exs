@@ -75,6 +75,7 @@ defmodule AtlasAgent.ToolsTest do
     assert Tools.find(tools, "put", "part")["kind"] == "part"
     assert Tools.find(tools, "put", "other") == nil
     assert Tools.write?(Tools.set(@part))
+    assert Tools.write?(%{"tool" => "delete"})
     refute Tools.write?(%{"tool" => "get"})
   end
 
