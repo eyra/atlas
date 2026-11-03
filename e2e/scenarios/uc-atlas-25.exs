@@ -1,0 +1,72 @@
+# UC-Atlas-25: see how far a scene and its use cases are (docs/guides/uc-atlas-25.md).
+import AtlasE2E.Scenario
+
+scenario "UC-Atlas-25: See how far a scene and its use cases are", fn %{
+                                                                        t1: t1,
+                                                                        t2: t2,
+                                                                        instance: i
+                                                                      } ->
+  key = fn args -> atlas_json(i, args) |> elem(0) |> Map.fetch!("key") end
+  keys = fn -> Process.get(:uc25) end
+
+  step "Lists show progress from the children: TUI 1 on a scene, TUI 2 on the scenes", fn ->
+    scene = key.(["put", "scene", "--title", "A scene to follow"])
+    built = key.(["put", "use_case", "--in", scene, "--title", "A use case with issues"])
+    empty = key.(["put", "use_case", "--in", scene, "--title", "A use case without issues"])
+    one = key.(["put", "issue", "--in", built, "--title", "The first issue"])
+    two = key.(["put", "issue", "--in", built, "--title", "The second issue"])
+    Process.put(:uc25, %{scene: scene, built: built, empty: empty, one: one, two: two})
+
+    open_row(t1, "A scene to follow")
+    see(t1, "Scene #{scene}: A scene to follow")
+    # Both issues are new, so in Specification; a use case without issues shows its group.
+    see(t1, "#{built} · Specification · 2/2")
+    see(t1, "#{empty} · Refine")
+    refute_see(t1, "#{empty} · Refine ·")
+    # The least far use case wins: the one still in Refine.
+    see(t2, "#{scene} · Refine · 1/2")
+  end
+
+  step "An issue's stage changes its use case's row in both TUIs within 1 s", fn ->
+    %{built: built, one: one, two: two} = keys.()
+    {_, at} = atlas_json(i, ["set", one, "stage=testing"])
+    by_hint(t1, "#{built} · Specification · 1/2", at)
+
+    {_, at} = atlas_json(i, ["set", two, "stage=testing"])
+    by_hint(t1, "#{built} · Testing · 2/2", at)
+
+    {_, at} = atlas_json(i, ["set", one, "stage=development"])
+    by_hint(t1, "#{built} · Development · 1/2", at)
+  end
+
+  step "Two levels up: an issue changes its scene's row", fn ->
+    %{scene: scene, built: built, empty: empty, one: one} = keys.()
+    {_, at} = atlas_json(i, ["set", one, "stage=testing"])
+    by_hint(t1, "#{built} · Testing · 2/2", at)
+
+    {third, at} = atlas_json(i, ["put", "issue", "--in", empty, "--title", "The third issue"])
+    by_hint(t1, "#{empty} · Specification · 1/1", at)
+    by_hint(t2, "#{scene} · Specification · 1/2", at)
+
+    {_, at} = atlas_json(i, ["set", third["key"], "stage=testing"])
+    by_hint(t2, "#{scene} · Testing · 2/2", at)
+    Process.put(:uc25, Map.put(keys.(), :third, third["key"]))
+  end
+
+  step "Done when every issue under it is completed", fn ->
+    %{scene: scene, built: built, empty: empty, one: one, two: two, third: third} = keys.()
+    for issue <- [one, two], do: atlas_json(i, ["set", issue, "completed=true"])
+    see(t1, "#{built} · Done · 2/2")
+
+    {_, at} = atlas_json(i, ["set", third, "completed=true"])
+    by_hint(t1, "#{empty} · Done · 1/1", at)
+    by_hint(t2, "#{scene} · Done · 2/2", at)
+  end
+
+  step "The item page shows Flux's status as its Flux group", fn ->
+    open_row(t1, "A use case without issues")
+    see(t1, ~r/Use case UC-Atlas-\d+: A use case without issues/)
+    see(t1, ~r/Flux group\s+Refine/)
+    refute_see(t1, ~r/Status\s+Refine/)
+  end
+end

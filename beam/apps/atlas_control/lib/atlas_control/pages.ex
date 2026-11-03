@@ -117,13 +117,39 @@ defmodule AtlasControl.Pages do
   def kind_of(:kinds), do: nil
   def kind_of(route), do: elem(route, 1)
 
-  @doc "Whether a hint of `kind` can change what `route` shows."
+  @doc """
+  Whether a hint of `kind` can change what `route` shows: a fact of the kind on screen,
+  of a kind listed under it, or of a kind whose facts change their progress.
+  """
   def shows?(:home, _description, _kind), do: true
 
-  def shows?({page, of, _key} = route, description, kind) when page in [:item, :delete],
-    do: kind == kind_of(route) or kind in Enum.map(child_relations(description, of), &elem(&1, 1))
+  def shows?({page, of, _key} = route, description, kind) when page in [:item, :delete] do
+    listed = Enum.map(child_relations(description, of), &elem(&1, 1))
+
+    kind == kind_of(route) or kind in listed or
+      Enum.any?(listed, &(kind in progress_from(description, &1)))
+  end
+
+  def shows?({:list, of} = route, description, kind),
+    do: kind == kind_of(route) or kind in progress_from(description, of)
 
   def shows?(route, _description, kind), do: kind == kind_of(route)
+
+  @doc """
+  The kinds whose facts change the progress of `kind` (its `progress` rule in the
+  description: the kind of the facts it rolls up `over`, and theirs, at any depth).
+  """
+  def progress_from(description, kind, depth \\ 8)
+  def progress_from(_description, _kind, 0), do: []
+
+  def progress_from(description, kind, depth) do
+    with over when is_binary(over) <- get_in(description, ["entities", kind, "progress", "over"]),
+         [from] <- get_in(description, ["relations", over, "from"]) do
+      [from | progress_from(description, from, depth - 1)] |> Enum.uniq()
+    else
+      _ -> []
+    end
+  end
 
   def form?(route), do: elem_match?(route, [:new, :edit])
 
@@ -263,7 +289,7 @@ defmodule AtlasControl.Pages do
           |> Enum.map(fn fact ->
             Blocks.row(
               label: label(spec, fact),
-              detail: detail(spec, fact),
+              detail: detail(description, spec, fact),
               to: path({:item, kind, fact["key"]}),
               links: links(description, spec, fact)
             )
@@ -311,7 +337,7 @@ defmodule AtlasControl.Pages do
 
               # A field only a connector or the system fills shows only once it has a value.
               if settable?(prop) or value not in [nil, ""],
-                do: [Blocks.pair(label: humanize(name), value: show(prop, value))],
+                do: [Blocks.pair(label: field_label(name, prop), value: show(prop, value))],
                 else: []
             end) ++
             Enum.map(parents(description, kind, fact), fn {label, keys} ->
@@ -488,7 +514,7 @@ defmodule AtlasControl.Pages do
           |> Enum.map(
             &Blocks.row(
               label: label(from_spec, &1),
-              detail: detail(from_spec, &1),
+              detail: detail(description, from_spec, &1),
               to: path({:item, from, &1["key"]}),
               links: links(description, from_spec, &1)
             )
@@ -620,7 +646,7 @@ defmodule AtlasControl.Pages do
     for {name, prop} <- properties, settable?(prop) do
       Blocks.input(
         name: name,
-        label: humanize(name),
+        label: field_label(name, prop),
         kind: input_kind(prop),
         value: values[name],
         required: prop["required"] == true,
@@ -829,10 +855,20 @@ defmodule AtlasControl.Pages do
 
   defp label(spec, fact), do: to_text(fact["values"][primary(spec)]) |> blank(fact["key"])
 
-  defp detail(spec, fact) do
+  # A kind with a progress rule shows how far a fact is (State works it out from the facts
+  # under it) in place of its own field and the field that marks it done.
+  defp detail(description, spec, fact) do
+    progress? = is_map(spec["progress"])
+
+    hidden =
+      if progress?,
+        do: [spec["progress"]["own"], get_in(description, ["progress", "done"])],
+        else: []
+
     shown =
       for {name, prop} <- ordered(spec),
           name != primary(spec),
+          name not in hidden,
           v = fact["values"][name],
           v not in [nil, "", false] do
         cond do
@@ -842,8 +878,18 @@ defmodule AtlasControl.Pages do
         end
       end
 
-    Enum.join([fact["key"] | Enum.reject(shown, &is_nil/1)], " · ")
+    progress = if progress?, do: progress_text(fact["progress"]), else: nil
+    Enum.join([fact["key"] | Enum.reject(shown ++ [progress], &is_nil/1)], " · ")
   end
+
+  defp progress_text(%{"label" => label, "count" => count, "of" => of}),
+    do: "#{label} · #{count}/#{of}"
+
+  defp progress_text(%{"label" => label}), do: label
+  defp progress_text(_), do: nil
+
+  # A field's name on a page: the description's label for it, or its own name.
+  defp field_label(name, prop), do: prop["label"] || humanize(name)
 
   defp show(%{"type" => "boolean"}, value), do: if(value in [true, "true"], do: "yes", else: "no")
   defp show(_prop, value) when value in [nil, ""], do: "—"
