@@ -39,7 +39,7 @@ Agents use the same Control as the TUI, from the command line: `atlas help`, `pu
 ```sh
 atlas put use_case --in SC-Atlas-05 --title "Read items from the command line" --description-file uc.md --json
 atlas set IS-Atlas-33 stage=development --json
-atlas set UC-Atlas-05 accepted_by=melle --cause "tested it" --json   # an association; empty removes it
+atlas set IS-Atlas-33 stage=design --cause "the design is not settled" --json   # why, kept with it
 atlas put pull_request --url https://github.com/eyra/atlas/pull/14 --in IS-Atlas-33 --json
 ```
 
