@@ -22,7 +22,9 @@ defmodule AtlasTui.CLI do
         env = opts[:env]
         root = System.get_env("ATLAS_ROOT") || @root
 
-        case File.read(Path.join(root, "env/#{env}.json")) do
+        file = System.get_env("ATLAS_ENV_FILE") || Path.join(root, "env/#{env}.json")
+
+        case File.read(file) do
           {:ok, json} -> AtlasTui.App.run(env, JSON.decode!(json))
           {:error, _} -> fail("Atlas has no environment #{inspect(env)} (no env/#{env}.json).")
         end

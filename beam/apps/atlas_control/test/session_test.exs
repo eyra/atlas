@@ -61,12 +61,12 @@ defmodule AtlasControl.SessionTest do
     put(a, %{
       "op" => "submit",
       "to" => "/k/widget/new",
-      "values" => %{"_key" => "W-1", "title" => "One", "done" => "true"}
+      "values" => %{"title" => "One"}
     })
 
     assert %{"tone" => "pending"} = next(a, "notice")
-    assert %{"tone" => "ok", "text" => "Stored by State (position 1)."} = next(a, "notice")
-    assert %{"path" => "/k/widget/W-1", "reason" => "stored", "position" => 1} = next(a, "page")
+    assert %{"tone" => "ok", "text" => "Stored as W-01 (position 1)."} = next(a, "notice")
+    assert %{"path" => "/k/widget/W-01", "reason" => "stored", "position" => 1} = next(a, "page")
 
     assert %{"reason" => "hint", "position" => 1} = page = next(b, "page")
     assert rows(page) == ["One"]
@@ -82,7 +82,7 @@ defmodule AtlasControl.SessionTest do
     put(a, %{
       "op" => "submit",
       "to" => "/k/widget/new",
-      "values" => %{"_key" => "W-1", "title" => "One"}
+      "values" => %{"title" => "One"}
     })
 
     assert %{"reason" => "stored"} = next(a, "page")
@@ -102,7 +102,7 @@ defmodule AtlasControl.SessionTest do
     put(a, %{
       "op" => "submit",
       "to" => "/k/widget/new",
-      "values" => %{"_key" => "W-1", "title" => ""}
+      "values" => %{"title" => ""}
     })
 
     assert %{"tone" => "pending"} = next(a, "notice")
@@ -112,7 +112,7 @@ defmodule AtlasControl.SessionTest do
              next(a, "page")
 
     assert form["errors"] == ["title is required"]
-    assert Enum.find(form["inputs"], &(&1["name"] == "_key"))["value"] == "W-1"
+    assert form["errors"] != []
   end
 
   test "change and delete name the version they were made from", %{port: port} do
@@ -150,10 +150,10 @@ defmodule AtlasControl.SessionTest do
     put(a, %{
       "op" => "submit",
       "to" => "/k/part/new/of_widget/W-1",
-      "values" => %{"_key" => "P-1", "title" => "Wheel"}
+      "values" => %{"title" => "Wheel"}
     })
 
-    assert %{"path" => "/k/part/P-1", "back" => "/k/widget/W-1", "reason" => "stored"} =
+    assert %{"path" => "/k/part/P-01", "back" => "/k/widget/W-1", "reason" => "stored"} =
              next(a, "page")
 
     assert %{
@@ -161,7 +161,7 @@ defmodule AtlasControl.SessionTest do
              "blocks" => [_, %{"props" => %{"rows" => [%{"label" => "Wheel"}]}}]
            } = next(b, "page")
 
-    put(a, %{"op" => "submit", "to" => "/k/part/P-1/delete", "values" => %{}})
+    put(a, %{"op" => "submit", "to" => "/k/part/P-01/delete", "values" => %{}})
     assert %{"path" => "/k/widget/W-1", "reason" => "stored"} = next(a, "page")
     assert %{"reason" => "hint", "blocks" => [_, %{"props" => %{"rows" => []}}]} = next(b, "page")
   end
@@ -176,6 +176,24 @@ defmodule AtlasControl.SessionTest do
     assert %{"blocks" => [%{"type" => "confirm", "props" => props}]} = next(a, "page")
     assert props["text"] =~ "still has 1 part."
     assert next(a, "notice", 200) == nil
+  end
+
+  test "a key taken meanwhile: State refuses it, and Control tries the next number", %{port: port} do
+    FakeStore.put("W-01", %{"title" => "One"})
+    FakeStore.reserve("W-02")
+    FakeStore.reserve("W-03")
+    a = client(port)
+    next(a, "page")
+
+    put(a, %{"op" => "submit", "to" => "/k/widget/new", "values" => %{"title" => "Two"}})
+    assert %{"text" => "Sent to State; waiting until it is stored…"} = next(a, "notice")
+    assert %{"text" => "W-02 is taken; trying W-03…"} = next(a, "notice")
+    assert %{"text" => "W-03 is taken; trying W-04…"} = next(a, "notice")
+
+    assert %{"tone" => "ok", "text" => "Stored as W-04 (position 1); W-02, W-03 were taken."} =
+             next(a, "notice")
+
+    assert %{"path" => "/k/widget/W-04", "reason" => "stored"} = next(a, "page")
   end
 
   test "a client of the other environment is sent away", %{port: port} do
@@ -194,7 +212,7 @@ defmodule AtlasControl.SessionTest do
     put(a, %{
       "op" => "submit",
       "to" => "/k/widget/new",
-      "values" => %{"_key" => "W-1", "title" => "One"}
+      "values" => %{"title" => "One"}
     })
 
     assert %{"tone" => "pending"} = next(a, "notice")

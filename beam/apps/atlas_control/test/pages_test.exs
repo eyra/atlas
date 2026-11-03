@@ -120,33 +120,75 @@ defmodule AtlasControl.PagesTest do
     refute Pages.shows?({:item, "part", "P-1"}, @d, "gadget")
   end
 
-  test "a create form has an id input and an input per property, typed by the description" do
+  test "a create form asks only what the kind's create rule asks; no id" do
     %{blocks: [%{"type" => "form", "props" => form}]} = Pages.render({:new, "widget"}, @d, [])
-    inputs = Map.new(form["inputs"], &{&1["name"], &1})
+    assert Enum.map(form["inputs"], & &1["name"]) == ["title", "notes"]
+    assert %{"required" => true} = hd(form["inputs"])
+    # The description marks notes as text of several lines.
+    assert Enum.map(form["inputs"], & &1["kind"]) == ["text", "multiline"]
+    assert form["submit_to"] == "/k/widget/new"
 
-    assert inputs["_key"]["hint"] == "starts with W-"
-    assert inputs["title"]["required"] == true
+    # Without a rule: every field a person may set, still no id.
+    %{blocks: [%{"props" => plain}]} = Pages.render({:new, "part"}, @d, [])
+    assert Enum.map(plain["inputs"], & &1["name"]) == ["title"]
+  end
+
+  test "a form shown again keeps what was typed and shows why it was refused" do
+    page = Pages.render({:new, "widget"}, @d, [], %{values: %{"title" => "Mine"}, errors: ["no"]})
+    %{blocks: [%{"props" => form}]} = page
+    assert form["errors"] == ["no"]
+    assert Enum.find(form["inputs"], &(&1["name"] == "title"))["value"] == "Mine"
+  end
+
+  test "a change form shows the id read-only and every field a person may set" do
+    answer = %{"fact" => fact("W-01", %{"title" => "One", "ext_ref" => "X-9"})}
+    %{blocks: [%{"props" => form}]} = Pages.render({:edit, "widget", "W-01"}, @d, [answer])
+    inputs = Enum.map(form["inputs"], &{&1["name"], &1["kind"]})
+    assert hd(inputs) == {"_key", "readonly"}
+    assert Enum.map(inputs, &elem(&1, 0)) == ["_key", "title", "shade", "done", "notes"]
 
     assert %{
              "kind" => "choice",
              "choices" => [%{"value" => ""}, %{"value" => "light", "label" => "Light"}, _]
-           } = inputs["shade"]
-
-    assert %{"kind" => "boolean", "value" => "false"} = inputs["done"]
-    assert %{"kind" => "text", "hint" => "Free text"} = inputs["notes"]
-    assert form["submit_to"] == "/k/widget/new"
+           } =
+             Enum.find(form["inputs"], &(&1["name"] == "shade"))
   end
 
-  test "a form shown again keeps what was typed and shows why it was refused" do
-    page =
-      Pages.render({:new, "widget"}, @d, [], %{
-        values: %{"_key" => "W-9", "title" => ""},
-        errors: ["title is required"]
-      })
+  test "text of several lines keeps its line breaks, on the page and in a change form" do
+    notes = "## Why\n\nBecause.\n\n- one\n- two"
+    answer = %{"fact" => fact("W-01", %{"title" => "One", "notes" => notes})}
 
-    %{blocks: [%{"props" => form}]} = page
-    assert form["errors"] == ["title is required"]
-    assert Enum.find(form["inputs"], &(&1["name"] == "_key"))["value"] == "W-9"
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "widget", "W-01"}, @d, [answer])
+    assert Enum.find(item["fields"], &(&1["label"] == "Notes"))["value"] == notes
+
+    %{blocks: [%{"props" => form}]} = Pages.render({:edit, "widget", "W-01"}, @d, [answer])
+
+    assert %{"kind" => "multiline", "value" => ^notes} =
+             Enum.find(form["inputs"], &(&1["name"] == "notes"))
+
+    assert Pages.values_for(@d["entities"]["widget"], %{"notes" => notes}) == %{"notes" => notes}
+  end
+
+  test "a field only a connector fills shows on the page only when it has a value" do
+    labels = fn values ->
+      %{blocks: [%{"props" => item}]} =
+        Pages.render({:item, "widget", "W-01"}, @d, [%{"fact" => fact("W-01", values)}])
+
+      Enum.map(item["fields"], & &1["label"])
+    end
+
+    refute "Ext ref" in labels.(%{"title" => "One"})
+    assert "Ext ref" in labels.(%{"title" => "One", "ext_ref" => "X-9"})
+  end
+
+  test "the next free key, and the values of a new fact" do
+    spec = @d["entities"]["widget"]
+    assert Pages.next_key(spec, []) == {"W-01", 1}
+    assert Pages.next_key(spec, ["W-01", "W-07", "W-x", "Z-99"]) == {"W-08", 8}
+    assert Pages.next_key(spec, ["W-01"], 4) == {"W-05", 5}
+
+    assert Pages.create_values(spec, %{"title" => "One", "notes" => "", "shade" => "dark"}) ==
+             %{"title" => "One", "notes" => "", "shade" => "light", "done" => false}
   end
 
   test "deleting asks first, and is refused while facts still hang under it" do
@@ -161,11 +203,12 @@ defmodule AtlasControl.PagesTest do
 
     %{blocks: [%{"props" => refusal}]} = Pages.render({:delete, "widget", "W-1"}, @d, [held])
     refute Map.has_key?(refusal, "confirm_to")
-    assert refusal["text"] =~ "still has 2 parts"
+    assert refusal["text"] =~ "still has 2 parts. Remove them first"
 
     one = %{"fact" => fact("W-1", %{"title" => "One"}), "incoming" => %{"of_widget" => ["P-1"]}}
     %{blocks: [%{"props" => refusal}]} = Pages.render({:delete, "widget", "W-1"}, @d, [one])
-    assert refusal["text"] =~ "still has 1 part."
+    assert refusal["text"] =~ "still has 1 part. Remove it first"
+    assert refusal["text"] =~ "never deletes it along with its parent"
   end
 
   test "form text becomes the described types" do

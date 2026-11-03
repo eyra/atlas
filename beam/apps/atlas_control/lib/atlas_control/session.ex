@@ -23,6 +23,8 @@ defmodule AtlasControl.Session do
   @read_attempts 3
   @first_resend 5_000
   @last_resend 60_000
+  # How often a create tries the next number when its key turns out to be taken.
+  @key_tries 10
 
   def start_link(socket), do: GenServer.start_link(__MODULE__, socket)
 
@@ -69,11 +71,33 @@ defmodule AtlasControl.Session do
     Process.cancel_timer(pending.timer)
     state = %{state | pending: rest}
 
+    # A key this client made up was taken by someone else: try the next one.
+    retry? =
+      content["code"] in ["exists", "reserved"] and pending.retry != nil and
+        pending.retry.tries < @key_tries
+
     case class do
       "stored" ->
         state = %{state | form: %{}}
-        state = notice(state, "ok", "Stored by State (position #{envelope.position}).")
+
+        text =
+          case pending do
+            %{content: %{"op" => "create", "key" => key}, retry: %{skipped: [_ | _] = skipped}} ->
+              "Stored as #{key} (position #{envelope.position}); " <>
+                "#{Enum.join(skipped, ", ")} #{if length(skipped) == 1, do: "was", else: "were"} taken."
+
+            %{content: %{"op" => "create", "key" => key}} ->
+              "Stored as #{key} (position #{envelope.position})."
+
+            _ ->
+              "Stored by State (position #{envelope.position})."
+          end
+
+        state = notice(state, "ok", text)
         {:noreply, show(state, pending.after, "stored", envelope.position)}
+
+      "refused" when retry? ->
+        {:noreply, retry_create(state, pending)}
 
       "refused" ->
         reasons = content["reasons"] || ["refused"]
@@ -171,27 +195,10 @@ defmodule AtlasControl.Session do
 
   # Writes
 
-  defp submit({:new, kind} = route, raw, state) do
-    key = String.trim(raw["_key"] || "")
-    values = Pages.values_for(spec(state, kind), raw)
-    content = %{"op" => "create", "key" => key, "values" => values, "version" => nil}
-    put_fact(%{state | route: route, form: %{values: raw}}, kind, content, {:item, kind, key})
-  end
+  defp submit({:new, kind} = route, raw, state), do: create(route, kind, raw, %{}, state)
 
-  defp submit({:new, kind, {relation, parent}} = route, raw, state) do
-    key = String.trim(raw["_key"] || "")
-    values = Pages.values_for(spec(state, kind), raw)
-
-    content = %{
-      "op" => "create",
-      "key" => key,
-      "values" => values,
-      "version" => nil,
-      "links" => %{relation => [parent]}
-    }
-
-    put_fact(%{state | route: route, form: %{values: raw}}, kind, content, {:item, kind, key})
-  end
+  defp submit({:new, kind, {relation, parent}} = route, raw, state),
+    do: create(route, kind, raw, %{relation => [parent]}, state)
 
   defp submit({:edit, kind, key} = route, raw, state) do
     values = Pages.values_for(spec(state, kind), raw)
@@ -236,7 +243,42 @@ defmodule AtlasControl.Session do
 
   defp submit(_route, _raw, state), do: notice(state, "error", "Nothing to submit here.")
 
-  defp put_fact(state, kind, content, after_route) do
+  # A new fact gets the next free key of its kind; nobody types one. When two clients make
+  # the same key at once, State refuses the second ("exists"), and it tries the next number.
+  defp create(route, kind, raw, links, state) do
+    spec = spec(state, kind)
+
+    keys =
+      case ask(kind, %{}) do
+        %{"facts" => facts} -> Enum.map(facts, & &1["key"])
+        _ -> []
+      end
+
+    {key, number} = Pages.next_key(spec, keys)
+
+    content = %{
+      "op" => "create",
+      "key" => key,
+      "values" => Pages.create_values(spec, raw),
+      "version" => nil
+    }
+
+    content = if links == %{}, do: content, else: Map.put(content, "links", links)
+    state = %{state | route: route, form: %{values: raw}}
+    put_fact(state, kind, content, {:item, kind, key}, %{number: number, tries: 1, skipped: []})
+  end
+
+  defp retry_create(state, pending) do
+    kind = pending.envelope.kind
+    {key, number} = Pages.next_key(spec(state, kind), [], pending.retry.number)
+    content = %{pending.content | "key" => key}
+    skipped = pending.retry.skipped ++ [pending.content["key"]]
+    retry = %{number: number, tries: pending.retry.tries + 1, skipped: skipped}
+    note = "#{pending.content["key"]} is taken; trying #{key}…"
+    put_fact(state, kind, content, {:item, kind, key}, retry, note)
+  end
+
+  defp put_fact(state, kind, content, after_route, retry \\ nil, note \\ nil) do
     envelope = Envelope.new("fact", kind)
     :ok = AtlasBus.send(envelope, content)
     timer = Process.send_after(self(), {:resend, envelope.id}, @first_resend)
@@ -245,12 +287,13 @@ defmodule AtlasControl.Session do
       envelope: envelope,
       content: content,
       after: after_route,
+      retry: retry,
       wait: @first_resend,
       timer: timer
     }
 
     state = put_in(state.pending[envelope.id], pending)
-    notice(state, "pending", "Sent to State; waiting until it is stored…")
+    notice(state, "pending", note || "Sent to State; waiting until it is stored…")
   end
 
   # Reads

@@ -6,9 +6,13 @@ defmodule AtlasTui.View do
 
   alias AtlasTui.Blocks.{Confirm, Fallback, Form, Input, Item}
   alias AtlasTui.Blocks.List, as: ListBlock
-  alias AtlasTui.Model
+  alias AtlasTui.{Model, Text}
 
   @label_width 16
+  # A multi-line input that does not have the focus shows at most this many rows.
+  @resting_rows 8
+  # A focused one never shows fewer than this, however small the screen.
+  @least_rows 3
 
   @doc "The screen: exactly `height` lines of plain segments."
   def render(%Model{} = model, width, height, reconcile_seconds) do
@@ -20,16 +24,18 @@ defmodule AtlasTui.View do
       [{:dim, String.duplicate("─", width)}]
     ]
 
+    # The footer: help, a rule, the notice and the status line.
+    room = max(height - length(header) - 4, 1)
+    lines = body(model, width, room)
+    body = window(lines, model, room)
+    body = body ++ Elixir.List.duplicate([], room - length(body))
+
     footer = [
-      [{:dim, " " <> help(model)}],
+      [{:dim, " " <> help(model, length(lines) > room)}],
       [{:dim, String.duplicate("─", width)}],
       notice(model),
       status(model, reconcile_seconds)
     ]
-
-    room = max(height - length(header) - length(footer), 1)
-    body = model |> body(width) |> window(model, room)
-    body = body ++ Elixir.List.duplicate([], room - length(body))
 
     Enum.map(header ++ body ++ footer, &fit(&1, width))
   end
@@ -51,6 +57,7 @@ defmodule AtlasTui.View do
   defp segment({:bold, text}), do: ["\e[0;1m", text]
   defp segment({:dim, text}), do: ["\e[0;2m", text]
   defp segment({:selected, text}), do: ["\e[0;7m", text]
+  defp segment({:cursor, text}), do: ["\e[0;7m", text]
   defp segment({:ok, text}), do: ["\e[0;32m", text]
   defp segment({:error, text}), do: ["\e[0;31m", text]
   defp segment({:pending, text}), do: ["\e[0;33m", text]
@@ -58,7 +65,7 @@ defmodule AtlasTui.View do
 
   # Body
 
-  defp body(%Model{connected: false, closed: false}, _width) do
+  defp body(%Model{connected: false, closed: false}, _width, _room) do
     [
       [],
       [{:error, " Not connected to Control. Retrying…"}],
@@ -66,13 +73,16 @@ defmodule AtlasTui.View do
     ]
   end
 
-  defp body(%Model{blocks: []}, _width), do: [[], [{:dim, " Waiting for Control…"}]]
+  defp body(%Model{blocks: []}, _width, _room), do: [[], [{:dim, " Waiting for Control…"}]]
 
-  defp body(model, width) do
-    model.blocks |> Enum.map(&block(&1, model, width)) |> Enum.intersperse([[]]) |> Enum.concat()
+  defp body(model, width, room) do
+    model.blocks
+    |> Enum.map(&block(&1, model, width, room))
+    |> Enum.intersperse([[]])
+    |> Enum.concat()
   end
 
-  defp block(%ListBlock{} = list, model, _width) do
+  defp block(%ListBlock{} = list, model, _width, _room) do
     rows =
       case list.rows do
         [] ->
@@ -95,35 +105,83 @@ defmodule AtlasTui.View do
     [[{:bold, " " <> list.title}], []] ++ rows
   end
 
-  defp block(%Item{} = item, _model, width) do
+  # Values keep their line breaks and blank lines; a heading line (`#`) is bold.
+  defp block(%Item{} = item, _model, width, _room) do
     fields =
       Enum.flat_map(item.fields, fn pair ->
-        [first | rest] = wrap(pair.value || "—", width - @label_width - 4)
+        [first | rest] = Text.wrap(pair.value || "—", width - @label_width - 4)
 
         [
-          [{:dim, "   " <> pad(pair.label, @label_width)}, {:plain, first}]
-          | Enum.map(rest, &[{:plain, String.duplicate(" ", @label_width + 3) <> &1}])
+          [{:dim, "   " <> pad(pair.label, @label_width)}, text_row(first)]
+          | Enum.map(rest, &[{:plain, String.duplicate(" ", @label_width + 3)}, text_row(&1)])
         ]
       end)
 
-    [[{:bold, " " <> item.title}], []] ++ fields
+    title(item.title, width) ++ [[]] ++ fields
   end
 
-  defp block(%Form{} = form, model, width) do
+  # A form that does not fit gives its focused multi-line input fewer rows, down to a few.
+  defp block(%Form{} = form, model, width, room) do
+    lines = form_lines(form, model, width, :all)
+    over = length(lines) - room
+
+    case focused_rows(form, model, width) do
+      rows when over > 0 and rows > @least_rows ->
+        form_lines(form, model, width, max(rows - over, @least_rows))
+
+      _ ->
+        lines
+    end
+  end
+
+  defp block(%Confirm{} = confirm, _model, width, _room) do
+    choices =
+      if confirm.confirm_to,
+        do: [
+          [
+            {:plain, "   "},
+            {:error, "[y] #{confirm.confirm_label || "Yes"}"},
+            {:plain, "   [n] Cancel"}
+          ]
+        ],
+        else: [[{:plain, "   [enter] Back"}]]
+
+    title(confirm.title, width) ++
+      [[]] ++
+      Enum.map(Text.wrap(confirm.text, width - 4), &[{:plain, "   " <> &1}]) ++ [[]] ++ choices
+  end
+
+  defp block(%Fallback{type: type}, _model, _width, _room),
+    do: [[{:dim, "   (a #{type || "?"} block this TUI cannot show)"}]]
+
+  defp title(text, width), do: Enum.map(Text.wrap(text, width - 2), &[{:bold, " " <> &1}])
+
+  defp text_row("#" <> _ = row), do: {:bold, row}
+  defp text_row(row), do: {:plain, row}
+
+  defp form_lines(%Form{} = form, model, width, rows) do
     items = Model.focusable(form)
     focus = min(model.focus, length(items) - 1)
 
     errors =
       Enum.flat_map(form.errors || [], fn error ->
-        [first | rest] = wrap(error, width - 7)
+        [first | rest] = Text.wrap(error, width - 7)
         [[{:error, "   ! " <> first}] | Enum.map(rest, &[{:error, "     " <> &1}])]
       end)
 
     inputs =
-      form.inputs
-      |> Enum.with_index()
-      |> Enum.map(fn {input, i} ->
-        input_line(input, model.values[input.name] || "", i == focus)
+      Enum.flat_map(form.inputs, fn input ->
+        focused = Enum.at(items, focus) == input
+        value = model.values[input.name] || ""
+
+        input_lines(
+          input,
+          value,
+          if(focused, do: model.cursor),
+          focused,
+          field_width(width),
+          rows
+        )
       end)
 
     buttons = [
@@ -139,83 +197,145 @@ defmodule AtlasTui.View do
     hint =
       case Enum.at(items, focus) do
         %Input{hint: hint} when is_binary(hint) ->
-          Enum.map(wrap(hint, width - 6), &[{:dim, "   " <> &1}])
+          Enum.map(Text.wrap(hint, width - 6), &[{:dim, "   " <> &1}])
 
         _ ->
           []
       end
 
-    [[{:bold, " " <> form.title}], []] ++
+    title(form.title, width) ++
+      [[]] ++
       errors ++ if(errors == [], do: [], else: [[]]) ++ inputs ++ [[]] ++ buttons ++ [[]] ++ hint
   end
 
-  defp block(%Confirm{} = confirm, _model, width) do
-    choices =
-      if confirm.confirm_to,
-        do: [
-          [
-            {:plain, "   "},
-            {:error, "[y] #{confirm.confirm_label || "Yes"}"},
-            {:plain, "   [n] Cancel"}
-          ]
-        ],
-        else: [[{:plain, "   [enter] Back"}]]
+  # The width inside a text field's brackets.
+  defp field_width(width), do: max(width - @label_width - 6, 12)
 
-    [[{:bold, " " <> confirm.title}], []] ++
-      Enum.map(wrap(confirm.text, width - 4), &[{:plain, "   " <> &1}]) ++ [[]] ++ choices
+  # How many rows the focused multi-line input has, all of it shown.
+  defp focused_rows(form, model, width) do
+    case Enum.at(Model.focusable(form), min(model.focus, length(Model.focusable(form)) - 1)) do
+      %Input{kind: "multiline", name: name} ->
+        length(visual_rows(model.values[name] || "", field_width(width)))
+
+      _ ->
+        0
+    end
   end
 
-  defp block(%Fallback{type: type}, _model, _width),
-    do: [[{:dim, "   (a #{type || "?"} block this TUI cannot show)"}]]
-
-  defp input_line(input, value, focused) do
+  defp input_lines(input, value, cursor, focused, inner, rows) do
     label = "   " <> pad(input.label <> if(input.required, do: " *", else: ""), @label_width)
+    indent = String.duplicate(" ", String.length(label))
 
-    field =
+    lines =
       case input.kind do
+        # Shown, never changed (an id).
+        "readonly" ->
+          Enum.map(Text.wrap(value, inner), &[{:plain, &1}])
+
         kind when kind in ["choice", "boolean"] ->
           shown = Enum.find_value(input.choices || [], value, &(&1.value == value && &1.label))
-          "‹ #{shown} ›"
+          [[{if(focused, do: :selected, else: :plain), "‹ #{shown} ›"}]]
 
+        "multiline" ->
+          editor(value, cursor, focused, inner, if(focused, do: rows, else: @resting_rows))
+
+        # One line of text, wrapped when it is longer than the field; typing goes at its end.
         _ ->
-          "[" <> pad(visible(value, focused, 30), 30) <> "]"
+          style = if focused, do: :selected, else: :plain
+          rows = for {at, len} <- Text.rows(value, inner - 1), do: String.slice(value, at, len)
+          rows = if focused, do: List.update_at(rows, -1, &(&1 <> "▏")), else: rows
+          Enum.map(rows, &[{style, "[" <> pad(&1, inner) <> "]"}])
       end
 
-    [{:dim, label}, {if(focused, do: :selected, else: :plain), field}]
+    lines
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {line, 0} -> [{:dim, label} | line]
+      {[{:dim, _} | _] = line, _} -> line
+      {line, _} -> [{:plain, indent} | line]
+    end)
   end
 
-  # A focused input shows its end, where typing happens; others show their start.
-  defp visible(value, true, room) do
-    if String.length(value) < room,
-      do: value <> "▏",
-      else: "…" <> String.slice(value, -(room - 2)..-1//1) <> "▏"
+  # Every row the text takes in the field: `{line, start, length}`.
+  defp visual_rows(value, inner) do
+    value
+    |> Text.lines()
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {line, l} ->
+      for {at, len} <- Text.rows(line, inner - 1), do: {l, at, len}
+    end)
   end
 
-  defp visible(value, false, room) do
-    if String.length(value) <= room, do: value, else: String.slice(value, 0, room - 1) <> "…"
+  # A text area: the rows around the cursor when it has the focus (the cursor is the
+  # reversed cell), else the first rows; a line under it says what is out of sight.
+  defp editor(value, cursor, focused, inner, room) do
+    lines = Text.lines(value)
+    all = visual_rows(value, inner)
+    {cl, cc} = Text.cursor(value, cursor)
+
+    at =
+      Enum.find_index(all, fn {l, start, len} -> l == cl and cc < start + len end) ||
+        Enum.find_index(all, fn {l, start, len} -> l == cl and cc == start + len end) || 0
+
+    room = if room == :all, do: length(all), else: room
+    start = if focused, do: at - div(room, 2), else: 0
+    start = start |> min(length(all) - room) |> max(0)
+    shown = Enum.slice(all, start, room)
+
+    edge = if focused, do: :selected, else: :plain
+
+    rows =
+      Enum.map(shown, fn {l, from, len} = row ->
+        text = lines |> Enum.at(l) |> String.slice(from, len)
+
+        if focused and row == Enum.at(all, at) do
+          {before, rest} = String.split_at(text, cc - from)
+          {under, after_} = if rest == "", do: {" ", ""}, else: String.split_at(rest, 1)
+          tail = pad(after_, inner - String.length(before) - 1)
+          [{edge, "["}, {:plain, before}, {:cursor, under}, {:plain, tail}, {edge, "]"}]
+        else
+          [{edge, "["}, {:plain, pad(text, inner)}, {edge, "]"}]
+        end
+      end)
+
+    empty = [{edge, "["}, {:plain, pad("", inner)}, {edge, "]"}]
+    rows = rows ++ List.duplicate(empty, max(@least_rows - length(rows), 0))
+    above = start
+    below = length(all) - start - length(shown)
+
+    more =
+      [above > 0 && "↑ #{above} more above", below > 0 && "↓ #{below} more below"]
+      |> Enum.filter(& &1)
+
+    if more == [],
+      do: rows,
+      else: rows ++ [[{:dim, String.duplicate(" ", @label_width + 4) <> Enum.join(more, " · ")}]]
   end
 
-  # Keep the selected row of a long list on screen.
+  # A page longer than the screen: the focus of a form, or the selected row of a list,
+  # stays in sight until the page is scrolled by hand (a page about one fact starts at
+  # its top); arrows follow the selection again.
   defp window(lines, model, room) when length(lines) > room do
-    case Model.list(model) do
-      %ListBlock{} ->
-        target = model.selected + 2
-        start = min(max(target - div(room, 2), 0), length(lines) - room)
-        Enum.slice(lines, start, room)
+    last = length(lines) - room
 
-      nil ->
-        Enum.take(lines, room)
-    end
+    focus = Enum.find_index(lines, &cursor_line?/1) || Enum.find_index(lines, &selected_line?/1)
+    follow = focus != nil and (model.scroll == nil or Model.form(model) != nil)
+    start = if follow, do: focus - div(room, 2), else: model.scroll || 0
+
+    Enum.slice(lines, start |> min(last) |> max(0), room)
   end
 
   defp window(lines, _model, _room), do: lines
 
   # Footer
 
-  defp help(model) do
+  defp help(model, long) do
     cond do
       not model.connected ->
         "q quit"
+
+      Model.form(model) && multiline_focused?(model) ->
+        "↵ new line   ↑↓←→ move   tab next field   ctrl-s save   esc cancel"
 
       Model.form(model) ->
         "↑↓ move   ←→ choose   type to edit   ↵ next   ctrl-s save   esc cancel"
@@ -224,12 +344,21 @@ defmodule AtlasTui.View do
         if confirm.confirm_to, do: "y confirm   n cancel", else: "↵ back"
 
       true ->
-        Enum.map_join(Model.actions(model), "   ", &"#{&1.key} #{&1.label}") <> nav(model)
+        Enum.map_join(Model.actions(model), "   ", &"#{&1.key} #{&1.label}") <> nav(model, long)
     end
   end
 
-  defp nav(model) do
+  defp multiline_focused?(model) do
+    items = Model.focusable(Model.form(model))
+    match?(%Input{kind: "multiline"}, Enum.at(items, min(model.focus, length(items) - 1)))
+  end
+
+  defp cursor_line?(line), do: Enum.any?(line, &match?({:cursor, _}, &1))
+  defp selected_line?(line), do: Enum.any?(line, &match?({:selected, _}, &1))
+
+  defp nav(model, long) do
     move = if Model.list(model), do: "   ↑↓ move   ↵ open", else: ""
+    move = if long, do: move <> "   pgup/pgdn scroll", else: move
     back = if model.back, do: "   esc back", else: ""
     move <> "   r refresh" <> back <> "   q quit"
   end
@@ -289,23 +418,4 @@ defmodule AtlasTui.View do
 
   defp pad(text, n), do: String.pad_trailing(String.slice(text, 0, n), n)
   defp pad_left(text, n), do: String.pad_leading(text, max(n, 0))
-
-  defp wrap(text, width) do
-    width = max(width, 10)
-
-    text
-    |> String.split("\n")
-    |> Enum.flat_map(fn paragraph ->
-      paragraph
-      |> String.split(" ")
-      |> Enum.reduce([""], fn word, [line | done] ->
-        cond do
-          line == "" -> [word | done]
-          String.length(line) + 1 + String.length(word) <= width -> [line <> " " <> word | done]
-          true -> [word, line | done]
-        end
-      end)
-      |> Enum.reverse()
-    end)
-  end
 end

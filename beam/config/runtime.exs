@@ -11,13 +11,17 @@ if config_env() != :test do
   end
 
   root = System.get_env("ATLAS_ROOT") || Path.expand("../..", __DIR__)
-  settings = root |> Path.join("env/#{env}.json") |> File.read!() |> JSON.decode!()
+  # ATLAS_ENV_FILE runs a second, private instance of an environment (other ports, other
+  # data), so an agent's test run never meets the one Melle is using.
+  file = System.get_env("ATLAS_ENV_FILE") || Path.join(root, "env/#{env}.json")
+  settings = file |> File.read!() |> JSON.decode!()
   expand = &Path.expand(String.replace_prefix(&1, "~", System.user_home!()))
 
   config :atlas_bus, environment: env
 
   config :atlas_state,
     rela_url: settings["rela"]["url"],
+    description_extra: settings["rela"]["extra"] && Path.join(root, settings["rela"]["extra"]),
     data_dir: expand.(settings["state"]["data"])
 
   config :atlas_control,

@@ -29,7 +29,14 @@ defmodule AtlasState.Server do
   def init(opts) do
     :ok = AtlasBus.attach(AtlasBus.store())
     ledger = Ledger.open(Keyword.fetch!(opts, :data_dir))
-    {:ok, %{rela: Keyword.fetch!(opts, :rela), ledger: ledger, description: nil}}
+
+    {:ok,
+     %{
+       rela: Keyword.fetch!(opts, :rela),
+       ledger: ledger,
+       description: nil,
+       extra: Keyword.get(opts, :description_extra)
+     }}
   end
 
   @impl true
@@ -66,7 +73,13 @@ defmodule AtlasState.Server do
         reply(envelope, "stored", about, position)
 
       {:refused, reasons} ->
+        answer(state, envelope, content, {:refused, reasons, nil})
+
+      # A code says why in a way a sender can act on: "exists" or "reserved" (the id is
+      # taken), so a sender that made the id up can try the next one.
+      {:refused, reasons, code} ->
         refusal = Map.put(about, "reasons", reasons)
+        refusal = if code, do: Map.put(refusal, "code", code), else: refusal
         Ledger.refused(state.ledger, envelope.id, refusal)
         reply(envelope, "refused", refusal, nil)
 
@@ -83,10 +96,34 @@ defmodule AtlasState.Server do
     end
   end
 
+  # rela's description, with Atlas's additions (`rela/atlas.json`) merged in, key by key.
+  # The file is read every time, so a change to it needs no restart.
+  defp describe(state) do
+    with {:ok, description} <- Rela.description(state.rela) do
+      {:ok, Description.merge(description, extra(state.extra))}
+    end
+  end
+
+  defp extra(nil), do: %{}
+
+  defp extra(path) do
+    with {:ok, json} <- File.read(path),
+         {:ok, extra} <- JSON.decode(json) do
+      Map.drop(extra, ["_about"])
+    else
+      error ->
+        Logger.warning(
+          "State could not read #{path}: #{inspect(error)}; using rela's description alone"
+        )
+
+        %{}
+    end
+  end
+
   # Reads
 
   defp read(state, @description, _content) do
-    case Rela.description(state.rela) do
+    case describe(state) do
       {:ok, description} -> {%{"description" => description}, %{state | description: description}}
       {:error, _} -> {%{"error" => "rela is not reachable"}, state}
     end
@@ -246,14 +283,14 @@ defmodule AtlasState.Server do
       {:ok, fact} ->
         if same?(fact, values) and same_links?(fact, targets),
           do: :stored,
-          else: {:refused, ["#{key} already exists"]}
+          else: {:refused, ["#{key} already exists"], "exists"}
 
       {:error, :not_found} ->
         {:refused,
          [
            "#{key} was deleted a moment ago; rela keeps a deleted id reserved for a few " <>
              "minutes. Try again later, or use another id."
-         ]}
+         ], "reserved"}
 
       error ->
         failure(error)
@@ -309,7 +346,7 @@ defmodule AtlasState.Server do
   defp kind_spec(state, kind) do
     case state.description && Description.kind(state.description, kind) do
       nil ->
-        case Rela.description(state.rela) do
+        case describe(state) do
           {:ok, description} ->
             state = %{state | description: description}
 

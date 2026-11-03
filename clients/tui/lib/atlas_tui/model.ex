@@ -7,9 +7,11 @@ defmodule AtlasTui.Model do
   TUI adds moving around, going back, refreshing and quitting.
   """
 
-  alias AtlasTui.Blocks
+  alias AtlasTui.{Blocks, Text}
   alias AtlasTui.Blocks.{Confirm, Form, Input, Item}
   alias AtlasTui.Blocks.List, as: ListBlock
+
+  @scroll_step 10
 
   defstruct env: nil,
             connected: false,
@@ -18,7 +20,12 @@ defmodule AtlasTui.Model do
             back: nil,
             blocks: [],
             selected: 0,
+            # A page longer than the screen: nil follows the selected row or the focus;
+            # a number of lines is scrolled to by page up and page down.
+            scroll: nil,
             focus: 0,
+            # Where typing goes in a multi-line input: `{line, column}`, nil for the end.
+            cursor: nil,
             values: %{},
             notice: nil,
             updated: nil,
@@ -58,7 +65,9 @@ defmodule AtlasTui.Model do
     model = %{
       model
       | selected: keep_selection(model, same),
-        focus: if(same, do: model.focus, else: 0)
+        focus: if(same, do: model.focus, else: 0),
+        cursor: if(same, do: model.cursor, else: nil),
+        scroll: if(same, do: model.scroll, else: first_scroll(blocks))
     }
 
     model = if msg["reason"] == "hint", do: %{model | last_hint: updated}, else: model
@@ -70,6 +79,9 @@ defmodule AtlasTui.Model do
   end
 
   def message(model, _other), do: model
+
+  # A page about one fact opens at its top, even when a list under it has a selected row.
+  defp first_scroll(blocks), do: if(Enum.any?(blocks, &match?(%Item{}, &1)), do: 0, else: nil)
 
   def disconnected(model), do: %{model | connected: false}
 
@@ -97,8 +109,9 @@ defmodule AtlasTui.Model do
     end)
   end
 
-  @doc "What can take focus in a form: its inputs, then the submit and cancel buttons."
-  def focusable(%Form{inputs: inputs}), do: inputs ++ [:submit, :cancel]
+  @doc "What can take focus in a form: its inputs (not the read-only ones), then the buttons."
+  def focusable(%Form{inputs: inputs}),
+    do: Enum.reject(inputs, &(&1.kind == "readonly")) ++ [:submit, :cancel]
 
   # Keys
 
@@ -121,11 +134,18 @@ defmodule AtlasTui.Model do
       _ when action != nil ->
         open(model, action.to)
 
+      # Moving in a list brings its selected row back in sight.
       k when k in [:up, {:char, "k"}] ->
-        {%{model | selected: max(model.selected - 1, 0)}, []}
+        {%{model | selected: max(model.selected - 1, 0), scroll: nil}, []}
 
       k when k in [:down, {:char, "j"}] ->
-        {%{model | selected: min(model.selected + 1, max(length(rows) - 1, 0))}, []}
+        {%{model | selected: min(model.selected + 1, max(length(rows) - 1, 0)), scroll: nil}, []}
+
+      :page_down ->
+        {%{model | scroll: (model.scroll || 0) + @scroll_step}, []}
+
+      :page_up ->
+        {%{model | scroll: max((model.scroll || 0) - @scroll_step, 0)}, []}
 
       k when k in [:enter, :right] and rows != [] ->
         open(model, Enum.at(rows, model.selected).to)
@@ -172,11 +192,21 @@ defmodule AtlasTui.Model do
       {:esc, _} ->
         open(model, form.cancel_to || model.back)
 
+      # Text of several lines: enter starts a new line, the arrows move in the text, and
+      # leave it past its first or last line; tab always goes on.
+      {k, %Input{kind: "multiline", name: name}} when k not in [:tab, :shift_tab] ->
+        case Text.key(model.values[name] || "", model.cursor, k) do
+          {:ok, text, cursor} -> {%{put_in(model.values[name], text) | cursor: cursor}, []}
+          {:leave, :up} -> {focus_to(model, focus - 1), []}
+          {:leave, :down} -> {focus_to(model, focus + 1), []}
+          :ignore -> {model, []}
+        end
+
       {k, _} when k in [:up, :shift_tab] ->
-        {%{model | focus: max(focus - 1, 0)}, []}
+        {focus_to(model, focus - 1), []}
 
       {k, _} when k in [:down, :tab] ->
-        {%{model | focus: min(focus + 1, length(items) - 1)}, []}
+        {focus_to(model, focus + 1), []}
 
       {:enter, :submit} ->
         submit(model, form.submit_to, model.values)
@@ -185,13 +215,13 @@ defmodule AtlasTui.Model do
         open(model, form.cancel_to || model.back)
 
       {:enter, %Input{}} ->
-        {%{model | focus: min(focus + 1, length(items) - 1)}, []}
+        {focus_to(model, focus + 1), []}
 
       {k, :submit} when k in [:left, :right] ->
-        {%{model | focus: focus + 1}, []}
+        {focus_to(model, focus + 1), []}
 
       {k, :cancel} when k in [:left, :right] ->
-        {%{model | focus: focus - 1}, []}
+        {focus_to(model, focus - 1), []}
 
       {k, %Input{kind: kind} = input} when kind in ["choice", "boolean"] ->
         choose(model, input, k)
@@ -204,6 +234,18 @@ defmodule AtlasTui.Model do
 
       _ ->
         {model, []}
+    end
+  end
+
+  # Moving down into a multi-line input starts at its beginning; moving up, at its end.
+  defp focus_to(model, to) do
+    last = length(focusable(form(model))) - 1
+    to = to |> max(0) |> min(last)
+
+    cond do
+      to > model.focus -> %{model | focus: to, cursor: {0, 0}}
+      to < model.focus -> %{model | focus: to, cursor: nil}
+      true -> model
     end
   end
 

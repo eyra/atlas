@@ -6,25 +6,19 @@ Test environment only, on this MacBook. Nothing touches prod, Fly or the live re
 
 ## Start
 
-You need three terminals, all in the Atlas repository.
+In any terminal, from any folder:
 
-1. **The core** (rela, Bus, State, Control):
+```sh
+atlas tui
+```
 
-   ```sh
-   bin/atlas up --env test
-   ```
+That is all. It starts rela test and the core (Bus, State, Control) in the background when they are not answering, also after a reboot, and opens the TUI. A first start compiles for about half a minute. When the running core is from an older build, `atlas tui` restarts it, so you never try an old build by accident. It also updates `~/projects/eyra/atlas` to the newest develop first.
 
-   It starts rela test in the background if it is not answering (also after a reboot), then runs the Bus, State and Control in the foreground. It prints `Control test listens on 127.0.0.1:7691` when ready. The first start compiles for about half a minute. Ctrl-C twice stops the core; rela keeps running (`bin/atlas rela-stop --env test` stops it, `bin/atlas rela-status --env test` shows it).
+For TUI 2, run `atlas tui` again in a second terminal, beside the first.
 
-2. **TUI 1**:
+More: `atlas status` shows what runs and which build; `atlas logs` follows the core's log; `atlas stop` stops the core (rela keeps running); `atlas restart` restarts it.
 
-   ```sh
-   bin/atlas tui --env test
-   ```
-
-3. **TUI 2**: the same command in a third terminal. Put it beside the first.
-
-Without `--env test` both commands refuse: prod is the default and is not built yet.
+Once, to get the `atlas` command: `~/projects/eyra/atlas/bin/atlas install` (it links `~/.local/bin/atlas` to the main clone).
 
 ## Try
 
@@ -33,9 +27,9 @@ In TUI 1:
 | Step | Keys | What you should see |
 |---|---|---|
 | List | (start) | **Scenes**, sorted by code. In the status bar: `connected · opened at …`. |
-| Create | `n`, type a code such as `SC-Try-01`, ↓, a title, ↓ and ←/→ for the status, `ctrl-s` | `… Sent to State; waiting until it is stored…`, then `✓ Stored by State (position N)` and the new scene opens. |
-| Open | `esc` back to the list, ↑/↓, `enter` | The scene with all its fields, and how many use cases it has. |
-| Change | `e`, ↓ to a field, edit (backspace, type), `ctrl-s` | `✓ Stored …` and the changed scene. |
+| Create | `n`, type a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `… Sent to State; waiting until it is stored…`, then `✓ Stored as SC-Atlas-01 (position N)`, and the new scene opens. The code is made for you: the next free number. The rest takes its default (status Refine, completed no). |
+| Open | `esc` back to the list, ↑/↓, `enter` | The scene with its fields. Flux id shows only once a Flux sync has filled it, so not for scenes made in Atlas. |
+| Change | `e`, ↓ to a field, edit (backspace, type; ←/→ for a choice), `ctrl-s` | The form shows the code read-only and every field you may change. `✓ Stored …` and the changed scene. |
 | Delete | `d`, then `y` | `✓ Stored …` and the list without it. |
 | Quit | `q` | |
 
@@ -43,10 +37,11 @@ Watch TUI 2 while you do this: after every change in TUI 1 its list or scene cha
 
 Also try:
 
-- **A refusal.** Create a scene with code `XY-1`, or with an empty title. The form stays, with what you typed and a red line saying why (`id must start with SC-`, `title is required`).
-- **A deleted code.** Delete a scene and create one with the same code right away. State refuses: rela keeps a deleted code reserved for a few minutes.
-- **A scene with use cases.** None exist yet (UC-Atlas-02 adds them). Once one does, deleting its scene is refused with the number of use cases.
-- **Losing Control.** Stop the core with Ctrl-C twice. Both TUIs say `Not connected to Control. Retrying…` and show nothing old as current. Start the core again; they come back on the page they were on.
+- **A refusal.** Create a scene with an empty title. The form stays, with a red line saying why (`title is required`).
+- **Two at once.** Press `n` in both TUIs, give each a title, and save both. They get different codes. If both take the same number, State refuses the second, and its TUI tries the next number by itself (`… is taken; trying …`).
+- **A deleted code.** Delete the newest scene and create another right away. rela keeps a deleted code reserved for a few minutes, so the TUI says the code is taken and moves on to the next number.
+- **A scene with use cases.** Deleting a scene that still has use cases is refused, with the number of use cases (see UC-Atlas-02).
+- **Losing Control.** Run `atlas stop` in a third terminal. Both TUIs say `Not connected to Control. Retrying…` and show nothing old as current. Run `atlas restart`; they come back on the page they were on.
 
 ## What is underneath
 
@@ -62,4 +57,4 @@ Also try:
    rela test               http://127.0.0.1:7690, data in ~/.local/share/atlas/test/rela
 ```
 
-Nothing on the BEAM side or in the TUI knows what a scene is. The word does not occur in their code; a test checks that. Scene comes from `rela/schema.yaml`.
+Nothing on the BEAM side or in the TUI knows what a scene is. The word does not occur in their code; a test checks that. Scene comes from `rela/schema.yaml`. How a scene is created (title and description only, codes `SC-Atlas-NN`, the defaults, Flux id filled only by a connector) is data in `rela/atlas.json`.

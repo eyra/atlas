@@ -2,7 +2,13 @@
 
 What you can do: in a use case, add, open, change and remove issues. A second TUI shows each change without refreshing.
 
-Start everything as in `docs/guides/uc-atlas-01.md`: `bin/atlas up --env test` in one terminal, `bin/atlas tui --env test` in two more.
+## Start
+
+```sh
+atlas tui
+```
+
+Run it again in a second terminal for TUI 2 (see `docs/guides/uc-atlas-01.md` for what it starts).
 
 ## Try
 
@@ -10,20 +16,21 @@ In TUI 1:
 
 | Step | Keys | What you should see |
 |---|---|---|
-| A use case | `n` for a scene (`SC-Try-01`), then `a` in it for a use case (`UC-Try-01`) | The use case, and under it **Issues**: `No issues yet. Press a to add one.` |
-| Add | `a`, a code such as `IS-Try-01`, ↓, a title, ↓ and ←/→ for the stage, `ctrl-s` | `✓ Stored …`. The issue opens and shows `In use case UC-Try-01`. |
-| Open | `esc` back to the use case, ↑/↓, `enter` | The issue with all its fields: stage, completed, Flux ref. An issue has no status. |
-| Change | `e`, change the stage, set completed to yes, type a Flux ref such as `NEXT-240`, `ctrl-s` | `✓ Stored …` and the changed issue. |
+| A use case | `n` and a title for a scene, `ctrl-s`; then `a` and a title for a use case in it, `ctrl-s` | The use case, and under it **Issues**: `No issues yet. Press a to add one.` |
+| Add | `a`, a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `✓ Stored as IS-Atlas-01 …`: the code is made for you. The issue opens with `In use case UC-Atlas-NN`, stage Specification and completed no by default, and an empty **Pull requests** list. |
+| Open | `esc` back to the use case, ↑/↓, `enter` | The issue with its fields. An issue has a stage, not a status. Flux ref and Flux id show only once a Flux sync has filled them, so not for issues made in Atlas. |
+| Change | `e`; ↓ to **Stage** and ←/→ to choose; ↓ to **Completed**, → for yes; `ctrl-s` | The code is shown read-only, and there are no Flux fields to fill in. `✓ Stored …` and the changed issue. In the use case its row reads `IS-Atlas-01 · Design · completed`. |
 | Remove | `d`, then `y` | `✓ Stored …`. You are back in the use case, without it. |
 
-Keep TUI 2 open on the same use case or issue: each change shows up there by itself (`updated by hint at …`).
+Keep TUI 2 open on the same use case: each change shows up there by itself (`updated by hint at …`).
 
 Also try:
 
-- **A wrong code.** Add an issue with a code that does not start with `IS-`. State refuses it, and the form keeps what you typed.
-- **Deleting a use case that has issues.** In the use case, press `d`. It is refused: `still has 1 issue`.
-- **Pull requests.** An issue already shows an empty **Pull requests** list. UC-Atlas-04 is about linking them.
+- **Deleting a use case that has an issue.** In the use case, press `d`. It is refused: `still has 1 issue. Remove it first; Atlas never deletes it along with its parent.` With two or more it says `2 issues. Remove them first`.
+- **Pull requests.** An issue shows an empty **Pull requests** list; UC-Atlas-04 is about linking them.
 
 ## What changed for this
 
-Nothing on the BEAM side or in the TUI, apart from one wording fix: a count of one now uses the kind's own label ("1 issue"). Issue, its fields and its `in_use_case` relation are in rela's description. Control builds the issue's form, its page and the related list from that description, with the same code as for scenes and use cases.
+- **rela's description:** Issue, its fields and its `in_use_case` relation were already in `rela/schema.yaml`. `rela/atlas.json` says how one is made (title and description only, codes `IS-Atlas-NN`, stage Specification) and that Flux ref and Flux id are only filled by a connector.
+- **Control:** a refused delete now counts in the right number ("1 issue", "2 issues") and says "it" or "them". There is nothing else on the BEAM side or in the TUI: Control builds the issue's form, its page and the related lists from the description, with the same code as for scenes and use cases.
+- **The end-to-end test:** `e2e/scenarios/uc-atlas-03.exs` follows this guide.
