@@ -25,6 +25,8 @@ mica-bff's spec format (`~/projects/nova/mica-bff/docs/adr/0001-spec-format.md`)
 
 2. **Page and endpoint stay separate concepts** (as in mica). A page is a fetch of a view model; an endpoint is any call. The DSL expands each page into the endpoint that fetches it (`call: :open`), so `__schema__/0` and `blocks.json` have one list of endpoints. Form submits (IS-Atlas-71) and the session's other calls (IS-Atlas-72) join that list as their own `defendpoint`s.
 
+   **`defendpoint name, path, call:, takes:, replies:`** (IS-Atlas-71). `call` is the message an endpoint travels in; names and paths are unique per call, and `:open` is the pages'. The form submits are endpoints of call `:submit`: `create`, `create_under`, `update`, `delete`, `link`, `accept` and `reopen`, on the paths of the pages whose form or confirm they come from. Each takes `:values`, the form's inputs by name (what they hold comes from rela's description, at run time, so no kind is named), and replies `stored` (the page to go to next) or `refused` (the form again, with its errors). Control dispatches a submit by its endpoint (`endpoint(:submit, to)` in the targets); a `to` that is no submit endpoint is refused before anything is read or written. On the wire `submit_to` and `confirm_to` stay a path, so every client keeps working: a path that a contract endpoint matches names that endpoint and its parameters, and a test fails when a form submits anywhere else.
+
 3. **The rules are the generator's** (`AtlasBFF.Paths`): parse a path, match a path to a page, build a page's path. Where two pages could match one path, a literal beats a parameter at the first segment where they differ (`/k/:kind/new` over `/k/:kind/:key`), so the order pages are written in does not matter; two pages with the same literals in the same places are refused at compile time. Values are percent-encoded in a path and decoded when matched.
 
 4. **The targets give every consumer the pages.** The server and client targets define `pages/0`, `match/1` and `path/2`; the JSON target lists `pages` and `endpoints`. Control's router is the contract: `Pages.route/1` and `Pages.path/1` go through `match/1` and `path/2`, and a path outside the contract gets a "No such page" page. The TUI asks only for destinations that are pages of the contract. A test fails when a page Control renders names a destination that matches no page.
@@ -50,4 +52,4 @@ mica-bff's spec format (`~/projects/nova/mica-bff/docs/adr/0001-spec-format.md`)
 
 - A new page is a `defpage` in the contract and a clause in Control's `route/1`; the test that every contract page is served fails until both are there.
 - Clients in other languages read the pages from `blocks.json` and implement `AtlasBFF.Paths`'s rules.
-- The contract is 0.9.0. Its pages add to it; nothing a client renders changed.
+- The contract is 0.9.0 with its pages, and 0.10.0 with its submit endpoints. Both add to it; nothing a client renders or sends changed.

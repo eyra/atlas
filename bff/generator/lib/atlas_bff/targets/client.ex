@@ -68,6 +68,21 @@ defmodule AtlasBFF.Targets.Client do
       @doc "The path of page `name` with `params` (`AtlasBFF.Paths.build/3`)."
       def path(name, params \\ %{}), do: AtlasBFF.Paths.build(@pages, name, params)
 
+      @endpoints unquote(Macro.escape(schema.endpoints))
+
+      @doc """
+      The calls the contract lists, pages' fetches (`call: :open`) included:
+      `[%{name, call, page, path, params, takes, replies}]`, as `__schema__/0` has them.
+      """
+      def endpoints, do: @endpoints
+
+      @doc """
+      The endpoint of `call` (such as `:submit`) that `path` is: `{:ok, name, params}`, or
+      `:error` for a path that is no such endpoint (`AtlasBFF.Paths.match/2`).
+      """
+      def endpoint(call, path),
+        do: AtlasBFF.Paths.match(Enum.filter(@endpoints, &(&1.call == call)), path)
+
       defmodule Fallback do
         @moduledoc false
         defstruct [:type, :reason]

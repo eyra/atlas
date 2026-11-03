@@ -22,6 +22,11 @@ defmodule AtlasBFF.Schema do
         end
 
         defpage :item, "/k/:kind/:key"
+
+        defendpoint :update, "/k/:kind/:key/edit",
+          call: :submit,
+          takes: :values,
+          replies: [stored: :view_model, refused: :view_model]
       end
 
   - `defblock`: a block Control sends and clients render. A page is a flat, ordered list
@@ -38,6 +43,10 @@ defmodule AtlasBFF.Schema do
     literal segment first wins (`/k/:kind/new` over `/k/:kind/:key`), so the order they are
     written in does not matter (`AtlasBFF.Paths`). Each page is also an endpoint: the call
     that fetches it, so a client has one list of what it can call.
+  - `defendpoint`: any other call, by name, path and options: `call:` (the message it
+    travels in, such as `:submit`; required), `takes:` (what it is sent, such as
+    `:values`) and `replies:` (`[reply: what it returns]`). Names and paths are unique per
+    call; `:open` is the pages' own.
 
   A mistake fails at compile time and points at its line.
 
@@ -53,14 +62,15 @@ defmodule AtlasBFF.Schema do
         blocks: [entry],
         markup: [entry],
         pages: [%{name: atom, path: "/k/:kind/:key", params: [:kind, :key]}],
-        endpoints: [%{name: atom, call: :open, page: atom, path: path, params: [atom],
-                      returns: :view_model}]
+        endpoints: [%{name: atom, call: atom, page: atom | nil, path: path, params: [atom],
+                      takes: atom | nil, replies: [%{name: atom, returns: atom}]}]
       }
 
   where an entry is `%{name: atom, fields: [%{name: atom, type: type, required: boolean}]}`
   in the order written, and a type is `:string`, `:integer`, `:boolean`, a model's name,
-  or `{:list, type}`. Pages and endpoints are in the order written; an endpoint `:open` is
-  the fetch of the page it names.
+  or `{:list, type}`. Pages and endpoints are in the order written: first the pages' own
+  (call `:open`, the fetch of the page it names, replying a view model), then those of
+  `defendpoint`.
   """
 
   @primitives [:string, :integer, :boolean]
@@ -74,6 +84,7 @@ defmodule AtlasBFF.Schema do
           defmodel: 2,
           defmarkup: 2,
           defpage: 2,
+          defendpoint: 3,
           field: 2,
           field: 3
         ]
@@ -104,6 +115,28 @@ defmodule AtlasBFF.Schema do
       end
 
       @spec_entries %{type: :page, name: unquote(name), path: unquote(path), line: unquote(line)}
+    end
+  end
+
+  defmacro defendpoint(name, path, opts) do
+    line = __CALLER__.line
+
+    quote do
+      if open = Module.get_attribute(__MODULE__, :spec_open) do
+        AtlasBFF.Schema.__fail__(
+          __ENV__.file,
+          unquote(line),
+          "endpoint #{inspect(unquote(name))} inside #{inspect(open)}"
+        )
+      end
+
+      @spec_entries %{
+        type: :endpoint,
+        name: unquote(name),
+        path: unquote(path),
+        opts: unquote(opts),
+        line: unquote(line)
+      }
     end
   end
 
@@ -175,8 +208,10 @@ defmodule AtlasBFF.Schema do
         __fail__(env.file, 1, "the spec needs a version")
 
     {pages, entries} = Enum.split_with(entries, &(&1.type == :page))
+    {endpoints, entries} = Enum.split_with(entries, &(&1.type == :endpoint))
     validate!(entries, env.file)
     pages = validate_pages!(pages, env.file)
+    endpoints = validate_endpoints!(endpoints, env.file)
 
     strip = fn entry ->
       %{name: entry.name, fields: Enum.map(entry.fields, &Map.delete(&1, :line))}
@@ -198,9 +233,10 @@ defmodule AtlasBFF.Schema do
             page: page.name,
             path: page.path,
             params: page.params,
-            returns: :view_model
+            takes: nil,
+            replies: [%{name: :page, returns: :view_model}]
           }
-        )
+        ) ++ endpoints
     }
 
     quote do
@@ -236,6 +272,79 @@ defmodule AtlasBFF.Schema do
 
       MapSet.put(seen, entry.name)
     end)
+  end
+
+  # Endpoints are unique per call, by name and by the paths they match; `:open` is the
+  # pages' call.
+  defp validate_endpoints!(endpoints, file) do
+    {endpoints, _seen} =
+      Enum.map_reduce(endpoints, %{}, fn endpoint, seen ->
+        fail = &__fail__(file, endpoint.line, &1)
+        opts = endpoint.opts
+        name = endpoint.name
+
+        unless snake?(name), do: fail.("endpoint #{inspect(name)} is not a snake_case atom")
+
+        unless Keyword.keyword?(opts) and Keyword.keys(opts) -- [:call, :takes, :replies] == [],
+          do: fail.("endpoint #{inspect(name)}: the options are call:, takes: and replies:")
+
+        call = opts[:call]
+
+        cond do
+          is_nil(call) or not snake?(call) ->
+            fail.("endpoint #{inspect(name)} needs call: <a snake_case atom>")
+
+          call == :open ->
+            fail.("endpoint #{inspect(name)}: call :open is for pages; use defpage")
+
+          true ->
+            :ok
+        end
+
+        unless is_nil(opts[:takes]) or snake?(opts[:takes]),
+          do: fail.("endpoint #{inspect(name)}: takes: is a snake_case atom")
+
+        replies = opts[:replies] || []
+
+        unless Keyword.keyword?(replies) and replies != [] and
+                 Enum.all?(replies, fn {reply, returns} -> snake?(reply) and snake?(returns) end),
+               do: fail.("endpoint #{inspect(name)} needs replies: [reply: what it returns]")
+
+        segments =
+          case AtlasBFF.Paths.parse(endpoint.path) do
+            {:ok, segments} -> segments
+            {:error, why} -> fail.("endpoint #{inspect(name)}: #{why}")
+          end
+
+        shape = {call, AtlasBFF.Paths.shape(segments)}
+
+        cond do
+          Map.has_key?(seen, {call, name}) ->
+            fail.("endpoint #{inspect(name)} (#{call}) is defined twice")
+
+          other = Enum.find_value(seen, fn {key, s} -> s == shape && key end) ->
+            fail.(
+              "endpoints #{inspect(elem(other, 1))} and #{inspect(name)} match the same paths"
+            )
+
+          true ->
+            :ok
+        end
+
+        entry = %{
+          name: name,
+          call: call,
+          page: nil,
+          path: endpoint.path,
+          params: for({:param, p} <- segments, do: p),
+          takes: opts[:takes],
+          replies: for({reply, returns} <- replies, do: %{name: reply, returns: returns})
+        }
+
+        {entry, Map.put(seen, {call, name}, shape)}
+      end)
+
+    endpoints
   end
 
   # Pages are a namespace of their own: a page may share its name with a block.

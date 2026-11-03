@@ -45,7 +45,9 @@
         "id"
       ],
       "path": "/cards/:id",
-      "returns": "view model"
+      "replies": {
+        "page": "view model"
+      }
     },
     {
       "call": "open",
@@ -53,7 +55,9 @@
       "page": "new_card",
       "params": [],
       "path": "/cards/new",
-      "returns": "view model"
+      "replies": {
+        "page": "view model"
+      }
     },
     {
       "call": "open",
@@ -61,7 +65,22 @@
       "page": "home",
       "params": [],
       "path": "/",
-      "returns": "view model"
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "submit",
+      "name": "save_card",
+      "params": [
+        "id"
+      ],
+      "path": "/cards/:id",
+      "replies": {
+        "refused": "view model",
+        "saved": "view model"
+      },
+      "takes": "values"
     }
   ],
   "markup": [

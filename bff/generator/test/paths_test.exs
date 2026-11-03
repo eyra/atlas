@@ -15,10 +15,22 @@ defmodule AtlasBFF.PathsTest do
              %{name: :home, path: "/", params: []}
            ] = schema.pages
 
-    assert %{name: :card, call: :open, page: :card, params: [:id], returns: :view_model} =
-             hd(schema.endpoints)
+    assert %{
+             name: :card,
+             call: :open,
+             page: :card,
+             params: [:id],
+             replies: [%{name: :page, returns: :view_model}]
+           } = hd(schema.endpoints)
 
-    assert length(schema.endpoints) == length(schema.pages)
+    # Then the contract's own endpoints, after one per page.
+    assert [%{name: :save_card, call: :submit, page: nil, takes: :values} = save] =
+             Enum.drop(schema.endpoints, length(schema.pages))
+
+    assert save.replies == [
+             %{name: :saved, returns: :view_model},
+             %{name: :refused, returns: :view_model}
+           ]
   end
 
   test "a path is matched to its page, a literal before a parameter, whatever the order" do
@@ -49,6 +61,49 @@ defmodule AtlasBFF.PathsTest do
       assert target.pages() == @pages
       assert target.match("/cards/new") == {:ok, :new_card, %{}}
       assert target.path(:card, id: "C-1") == "/cards/C-1"
+    end
+  end
+
+  test "an endpoint is matched within its call: the same path is a page and a submit" do
+    for target <- [Server, Client] do
+      assert target.endpoint(:submit, "/cards/C-1") == {:ok, :save_card, %{id: "C-1"}}
+      assert target.endpoint(:open, "/cards/C-1") == {:ok, :card, %{id: "C-1"}}
+      assert target.endpoint(:submit, "/cards/new") == {:ok, :save_card, %{id: "new"}}
+      assert target.endpoint(:submit, "/") == :error
+      assert target.endpoint(:hello, "/cards/C-1") == :error
+      assert length(target.endpoints()) == 4
+    end
+  end
+
+  describe "an endpoint mistake fails at compile time" do
+    test "no call, the pages' call, or no replies" do
+      assert_raise CompileError, ~r/endpoint :a needs call: <a snake_case atom>/, fn ->
+        spec(~s(defendpoint :a, "/a", replies: [ok: :view_model]))
+      end
+
+      assert_raise CompileError, ~r/call :open is for pages; use defpage/, fn ->
+        spec(~s(defendpoint :a, "/a", call: :open, replies: [ok: :view_model]))
+      end
+
+      assert_raise CompileError, ~r/endpoint :a needs replies: \[reply: what it returns\]/, fn ->
+        spec(~s(defendpoint :a, "/a", call: :submit))
+      end
+
+      assert_raise CompileError, ~r/the options are call:, takes: and replies:/, fn ->
+        spec(~s(defendpoint :a, "/a", call: :submit, replies: [ok: :x], method: :post))
+      end
+    end
+
+    test "two endpoints of one call for the same paths, or one name twice" do
+      assert_raise CompileError, ~r/endpoints :a and :b match the same paths/, fn ->
+        spec(~s(defendpoint :a, "/x/:id", call: :submit, replies: [ok: :x]
+                defendpoint :b, "/x/:key", call: :submit, replies: [ok: :x]))
+      end
+
+      assert_raise CompileError, ~r/endpoint :a \(submit\) is defined twice/, fn ->
+        spec(~s(defendpoint :a, "/x", call: :submit, replies: [ok: :x]
+                defendpoint :a, "/y", call: :submit, replies: [ok: :x]))
+      end
     end
   end
 

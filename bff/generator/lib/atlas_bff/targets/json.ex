@@ -48,17 +48,29 @@ defmodule AtlasBFF.Targets.Json do
             %{
               "name" => Atom.to_string(endpoint.name),
               "call" => Atom.to_string(endpoint.call),
-              "page" => Atom.to_string(endpoint.page),
               "path" => endpoint.path,
               "params" => Enum.map(endpoint.params, &Atom.to_string/1),
-              "returns" => Names.view_model()
+              "replies" =>
+                Map.new(endpoint.replies, &{Atom.to_string(&1.name), returns(&1.returns)})
             }
+            |> then(
+              &if(endpoint.page, do: Map.put(&1, "page", Atom.to_string(endpoint.page)), else: &1)
+            )
+            |> then(
+              &if(endpoint.takes,
+                do: Map.put(&1, "takes", Atom.to_string(endpoint.takes)),
+                else: &1
+              )
+            )
           end)
       }
       |> pretty()
 
     [{"blocks.json", body}]
   end
+
+  defp returns(:view_model), do: Names.view_model()
+  defp returns(other), do: Atom.to_string(other)
 
   defp type({:list, inner}), do: "list of " <> type(inner)
   defp type(type), do: Atom.to_string(type)

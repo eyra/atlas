@@ -195,11 +195,21 @@ defmodule AtlasControl.Session do
       else: {:noreply, show(state, state.route, "reconcile", nil)}
   end
 
+  # A submit goes to one of the contract's submit endpoints (`defendpoint`, call :submit);
+  # any other `to` is refused without reading or writing anything.
   defp handle_op("submit", %{"to" => to} = message, state) do
     raw = Map.new(message["values"] || %{}, fn {k, v} -> {k, to_string(v)} end)
     cause = if is_binary(message["cause"]) and message["cause"] != "", do: message["cause"]
-    state = submit(route(to, state), raw, %{state | cause: cause})
-    {:noreply, %{state | cause: nil}}
+
+    case AtlasControl.Blocks.endpoint(:submit, to) do
+      {:ok, endpoint, params} ->
+        route = endpoint |> Pages.submit_route(params) |> Pages.resolve(state.description)
+        state = submit(route, raw, %{state | cause: cause})
+        {:noreply, %{state | cause: nil}}
+
+      :error ->
+        {:noreply, notice(state, "error", "Control takes no submit at #{to}.")}
+    end
   end
 
   defp handle_op(op, _message, state),

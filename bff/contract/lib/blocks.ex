@@ -15,7 +15,8 @@ defmodule AtlasBFFContract.Blocks do
   # 0.7.0: markup names meaning; part (main, related) replaces border and columns.
   # 0.8.0: a pair may carry its origin: the fact that set it (since, by, cause).
   # 0.9.0: the pages Control serves (defpage); a path outside them is no page.
-  version "0.9.0"
+  # 0.10.0: the form submits Control takes (defendpoint, call :submit).
+  version "0.10.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -180,4 +181,19 @@ defmodule AtlasBFFContract.Blocks do
   defpage :links, "/k/:kind/:key/links/:relation"
   defpage :set, "/k/:kind/:key/set/:relation"
   defpage :remove, "/k/:kind/:key/remove/:relation"
+
+  # The form submits Control takes: {"op": "submit", "to": path, "values": {name => text}},
+  # where `to` is a form's submit_to or a confirm's confirm_to. The values are the form's
+  # inputs by name; what they hold comes from rela's description, at run time, so no kind
+  # is named here. stored: the page to go to next (reason "stored"); refused: the form
+  # again, with its errors (reason "refused"). Notices come with either.
+  @submit [call: :submit, takes: :values, replies: [stored: :view_model, refused: :view_model]]
+
+  defendpoint :create, "/k/:kind/new", @submit
+  defendpoint :create_under, "/k/:kind/new/:relation/:parent", @submit
+  defendpoint :update, "/k/:kind/:key/edit", @submit
+  defendpoint :delete, "/k/:kind/:key/delete", @submit
+  defendpoint :link, "/k/:kind/:key/links/:relation", @submit
+  defendpoint :accept, "/k/:kind/:key/set/:relation", @submit
+  defendpoint :reopen, "/k/:kind/:key/remove/:relation", @submit
 end
