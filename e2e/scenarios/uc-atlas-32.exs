@@ -46,7 +46,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
          {%{"refused" => [why]}, _} = atlas_json(i, ["set", use_case, "accepted_by=melle"], 1)
          why =~ "only a person accepts" || raise why
          {%{"refused" => [why]}, _} = atlas_json(i, ["set", issue, "done_in=PR-eyra-atlas-1"], 1)
-         why =~ "only a migration sets it" || raise why
+         why =~ "only a migration or connector sets it" || raise why
          {tools, 0, _} = atlas(i, ["tools"])
 
          if String.contains?(tools, "accepted_by") or String.contains?(tools, "done_in"),

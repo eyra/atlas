@@ -42,6 +42,7 @@ defmodule AtlasState.FakeRela do
   def down(pid), do: Agent.update(pid, &%{&1 | up: false})
   def up(pid), do: Agent.update(pid, &%{&1 | up: true})
   def facts(pid), do: Agent.get(pid, & &1.facts)
+  def links(pid), do: Agent.get(pid, & &1.links)
 
   def link(pid, part, widget, relation \\ "of_widget"),
     do: Agent.update(pid, &%{&1 | links: put_links(&1.links, part, relation, [widget])})

@@ -18,6 +18,16 @@ defmodule AtlasState.Connector do
   facts themselves. A failed read is logged and tried again next round; the stored
   values stay. When each fact was last read is kept in `AtlasState.Copies`.
 
+  A rule may also say what a copied field names (`names`):
+
+      "names": {"field": "title", "relation": "done_in", "when": {"state": ["merged"]}}
+
+  Every round, for each fact whose values match `when`, the keys in `field` that fit the
+  id prefix of the relation's `from` kind (other than the facts it points at already) are
+  facts it was also done for: each such fact that exists gets a link to it through
+  `relation`, one change with its cause. Links that are there already stay; a link is
+  never removed by this.
+
   It reaches State as any layer does: reads and facts over the Bus, as its own endpoint
   `connector/<system>`. Nothing is ever written to the outside system.
   """
@@ -109,6 +119,7 @@ defmodule AtlasState.Connector do
             case call("read", kind, %{}) do
               {:ok, %{"facts" => facts}} ->
                 refresh(state, kind, Enum.reject(facts, &done?(&1, rule)))
+                link_named(state, description, kind, rule)
 
               other ->
                 Logger.warning("#{name(state)} could not list #{kind}: #{inspect(other)}")
@@ -131,6 +142,72 @@ defmodule AtlasState.Connector do
           description["entities"] || %{},
         into: %{},
         do: {kind, rule}
+  end
+
+  # The facts each fact names in a field, linked to it (`names` in the rule), when its
+  # values match `when`. Read again, so what this round just copied counts.
+  defp link_named(state, description, kind, %{"names" => %{} = names}) do
+    relation = names["relation"]
+    from = get_in(description, ["relations", relation, "from"])
+
+    with [target] <- from,
+         prefix when is_binary(prefix) and prefix != "" <-
+           get_in(description, ["entities", target, "create", "id", "prefix"]),
+         {:ok, %{"facts" => facts}} <- call("read", kind, %{}) do
+      {:ok, pattern} = Regex.compile(Regex.escape(prefix) <> "\\d+")
+
+      for fact <- facts,
+          matches?(fact, names["when"] || %{}),
+          own = fact["links"] |> Map.values() |> List.flatten(),
+          key <-
+            pattern
+            |> Regex.scan(to_string(fact["values"][names["field"]]))
+            |> List.flatten()
+            |> Enum.uniq(),
+          key not in own,
+          do: link(state, target, key, relation, fact["key"])
+    end
+
+    :ok
+  end
+
+  defp link_named(_state, _description, _kind, _rule), do: :ok
+
+  defp matches?(fact, conditions),
+    do: Enum.all?(conditions, fn {name, values} -> fact["values"][name] in List.wrap(values) end)
+
+  defp link(state, kind, key, relation, to) do
+    case call("read", kind, %{"key" => key}) do
+      {:ok, %{"fact" => %{} = fact}} ->
+        keys = fact["links"][relation] || []
+
+        if to not in keys do
+          {mod, config} = state.source
+
+          content = %{
+            "op" => "change",
+            "key" => key,
+            "values" => %{},
+            "links" => %{relation => keys ++ [to]},
+            "version" => nil,
+            "by" => "connector/#{state.system}",
+            "cause" => "#{mod.label(config)} connector: #{to} names #{key}"
+          }
+
+          case call("fact", kind, content) do
+            {:stored, _} ->
+              Logger.info("#{name(state)}: #{key} #{relation} #{to}")
+
+            other ->
+              Logger.warning(
+                "#{name(state)}: #{key} #{relation} #{to} not stored: #{inspect(other)}"
+              )
+          end
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   defp done?(fact, rule) do
