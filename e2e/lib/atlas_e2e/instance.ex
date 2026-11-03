@@ -36,7 +36,12 @@ defmodule AtlasE2E.Instance do
         "extra" => "rela/atlas.json"
       },
       "state" => %{"data" => Path.join(dir, "beam")},
-      "reconcile_seconds" => 5
+      "reconcile_seconds" => 5,
+      # The planning agent is a scripted stand-in, so no model is needed (UC-Atlas-16).
+      "agent" => %{
+        "planner" => ["elixir", Path.join(@root, "e2e/fixtures/planner.exs")],
+        "name" => "the e2e stand-in"
+      }
     }
 
     file = Path.join(dir, "test.json")

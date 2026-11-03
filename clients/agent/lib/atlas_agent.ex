@@ -26,17 +26,24 @@ defmodule AtlasAgent do
   `ATLAS_ENV_FILE` (a private instance), whose `"env"` must be the same environment.
   """
   def connect(env) do
-    root = System.get_env("ATLAS_ROOT") || @root
-    file = System.get_env("ATLAS_ENV_FILE") || Path.join(root, "env/#{env}.json")
+    with {:ok, settings} <- settings(env), do: Client.connect(env, settings)
+  end
+
+  @doc "The settings of `env`: `env/<env>.json`, or `ATLAS_ENV_FILE` for a private instance."
+  def settings(env) do
+    file = System.get_env("ATLAS_ENV_FILE") || Path.join(root(), "env/#{env}.json")
 
     with {:ok, json} <- File.read(file),
          {:ok, %{"env" => ^env} = settings} <- JSON.decode(json) do
-      Client.connect(env, settings)
+      {:ok, settings}
     else
       {:ok, %{"env" => other}} -> {:error, "#{file} is for #{inspect(other)}, not #{env}"}
       _ -> {:error, "Atlas has no environment #{inspect(env)} (no readable #{file})"}
     end
   end
+
+  @doc "The repository Atlas runs from."
+  def root, do: System.get_env("ATLAS_ROOT") || @root
 
   @doc "The folder `atlas` was called from, which a relative path is read from."
   def caller_cwd, do: System.get_env("ATLAS_CALLER_CWD") || File.cwd!()
@@ -47,13 +54,7 @@ defmodule AtlasAgent do
   `{:error, text}`.
   """
   def put(client, kind, values, parent \\ nil) do
-    path =
-      if parent,
-        do: "/k/#{enc(kind)}/new/_parent/#{enc(parent)}",
-        else: "/k/#{enc(kind)}/new"
-
-    with {:ok, page} <- Client.open(client, path),
-         {:ok, form} <- form(page, kind),
+    with {:ok, form} <- create_form(client, kind, parent),
          :ok <- asked(form, values, :create) do
       case Client.submit(client, form["submit_to"], values) do
         {:stored, page} -> {:ok, Client.key_of(page["path"])}
@@ -64,8 +65,7 @@ defmodule AtlasAgent do
 
   @doc "Change `values` (field name to text) of the fact with `key`; the rest stays."
   def set(client, key, values) do
-    with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}/edit"),
-         {:ok, form} <- form(page, key),
+    with {:ok, form} <- change_form(client, key),
          :ok <- asked(form, values, :change) do
       case Client.submit(client, form["submit_to"], values) do
         {:stored, _page} -> {:ok, key}
@@ -192,8 +192,41 @@ defmodule AtlasAgent do
     end
   end
 
+  @doc """
+  The form a create of `kind` fills (under the fact with key `parent`, when given), as
+  Control sends it: `{:ok, props}`.
+  """
+  def create_form(client, kind, parent \\ nil) do
+    path =
+      if parent,
+        do: "/k/#{enc(kind)}/new/_parent/#{enc(parent)}",
+        else: "/k/#{enc(kind)}/new"
+
+    with {:ok, page} <- Client.open(client, path), do: form(page, kind)
+  end
+
+  @doc "The form that changes the fact with `key`, as Control sends it: `{:ok, props}`."
+  def change_form(client, key) do
+    with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}/edit"), do: form(page, key)
+  end
+
+  @doc """
+  The page at `path` (or of the fact with a key), as Control sends it: `%{"path", "title",
+  "blocks", "markup"}`, its view model.
+  """
+  def page(client, "/" <> _ = path) do
+    with {:ok, page} <- Client.open(client, path),
+         do: {:ok, Map.take(page, ["path", "title", "blocks", "markup"])}
+  end
+
+  def page(client, key), do: page(client, "/k/_/#{enc(key)}")
+
+  @doc """
+  Whether `values` fit `form`: only what it asks, and on a create (`mode` `:create`)
+  everything it requires. `:ok`, `{:refused, reasons}` or `{:error, text}`.
+  """
   # Only what the form asks reaches State; a create fills what the form requires.
-  defp asked(form, values, mode) do
+  def asked(form, values, mode) do
     inputs = Enum.reject(form["inputs"] || [], &(&1["kind"] == "readonly"))
     names = Enum.map(inputs, & &1["name"])
     unknown = Map.keys(values) -- names

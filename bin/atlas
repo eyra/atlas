@@ -22,8 +22,11 @@
 #   atlas set <key> <field>=<text> ...       change, e.g. `atlas set IS-Atlas-12 stage=testing`
 #   atlas get <key> [--json]                 one item, and what hangs under it
 #   atlas list <kind> [--json]               the items of a kind
+#   atlas tools [--json]                     the agent's tools: Control's actions, from the description
+#   atlas plan --on <key> <request>          what the agent proposes for a request on that page;
+#                      it reads through Control and writes nothing (UC-Atlas-16)
 #   atlas load-plan <SCENES.md> <links.json> [--dry-run]   UC-Atlas-05: the plan into Atlas
-#                      put, set, get, list and load-plan go through Control like the TUI,
+#                      put, set, get, list, tools, plan and load-plan go through Control like the TUI,
 #                      and start nothing: Control must run (`atlas status`).
 #
 # Every command works on prod unless it gets --env test: `atlas tui --env test`. Scripts,
@@ -40,7 +43,7 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
-usage() { sed -n '2,33p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,36p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
 caller="$PWD"
 no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
@@ -56,7 +59,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|put|set|get|list|load-plan|help) args+=("$1"); shift ;;
+        e2e|put|set|get|list|tools|plan|load-plan|help) args+=("$1"); shift ;;
         *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
       esac ;;
   esac
@@ -230,10 +233,10 @@ case "$cmd" in
     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "atlas: add ~/.local/bin to your PATH" ;; esac
     ;;
   # The clients run in their own folders; a path the caller gives is read from where they called.
-  put|set|get|list|help)
+  put|set|get|list|tools|plan|help)
     # `atlas help` (not --json) starts with this script's own commands.
     if [ "$cmd" = help ] && [[ " ${args[*]-} " != *" --json "* ]]; then
-      sed -n '2,33p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
+      sed -n '2,36p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
     fi
     cd "$root/clients/agent"
     mix compile >&2

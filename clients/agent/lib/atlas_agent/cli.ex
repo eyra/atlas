@@ -6,6 +6,8 @@ defmodule AtlasAgent.CLI do
       atlas set  <key> <field>=<text> ...                  change; prints the item
       atlas get  <key>                                     one item, with what hangs under it
       atlas list <kind> [--in <key>]                       the items of a kind (under <key>)
+      atlas tools                                          the agent's tools: Control's actions
+      atlas plan --on <key or path> <request ...>          what the agent proposes; writes nothing
 
   Every command takes --json: it then prints one JSON value on stdout, the item, the
   list, or `{"refused": [reasons]}` / `{"error": text}`. Without it, short text.
@@ -40,6 +42,21 @@ defmodule AtlasAgent.CLI do
   # from this code. `atlas help [<kind>]`, `atlas <command> [<kind>] --help`.
   # `atlas help` prints bin/atlas's own usage first, so only the kinds come from here.
   defp parse(["help" | rest]), do: {:ok, {:help, List.first(rest), false}}
+
+  defp parse(["tools"]), do: {:ok, :tools}
+
+  defp parse(["plan" | rest]) do
+    case take_flag(rest, "--on", nil) do
+      {nil, _} ->
+        {:error, "plan needs --on <key or path>: the page the request is made on\n" <> usage()}
+
+      {on, words} when words != [] ->
+        with {:ok, request} <- read(Enum.join(words, " ")), do: {:ok, {:plan, on, request}}
+
+      _ ->
+        {:error, "plan needs a request\n" <> usage()}
+    end
+  end
 
   defp parse([command | rest]) when command in ~w(put set get list) do
     if "--help" in rest or "-h" in rest,
@@ -96,6 +113,13 @@ defmodule AtlasAgent.CLI do
   defp run({:list, kind, parent}, client),
     do: client |> AtlasAgent.list(kind, parent) |> as(:list)
 
+  defp run(:tools, client), do: client |> AtlasAgent.Tools.list() |> as(:tools)
+
+  defp run({:plan, on, request}, client) do
+    with {:ok, settings} <- AtlasAgent.settings(client.env),
+         do: client |> AtlasAgent.Plan.make(settings, on, request) |> as(:plan)
+  end
+
   defp then_get({:ok, key}, client), do: client |> AtlasAgent.get(key) |> as(:item)
   defp then_get(other, _client), do: other
 
@@ -107,6 +131,10 @@ defmodule AtlasAgent.CLI do
   defp show({:item, item}, true), do: json(item, 0)
   defp show({:list, rows}, true), do: json(rows, 0)
   defp show({:help, kinds, _usage?}, true), do: json(kinds, 0)
+  defp show({:tools, tools}, true), do: json(tools, 0)
+  defp show({:plan, plan}, true), do: json(plan, 0)
+  defp show({:tools, tools}, false), do: IO.puts(tools_text(tools)) && 0
+  defp show({:plan, plan}, false), do: IO.puts(plan_text(plan)) && 0
   defp show({:help, kinds, usage?}, false), do: IO.puts(help(kinds, usage?)) && 0
   defp show({:item, item}, false), do: IO.puts(text(item)) && 0
 
@@ -150,6 +178,68 @@ defmodule AtlasAgent.CLI do
       end)
 
     Enum.join([item["title"] | fields] ++ lists, "\n")
+  end
+
+  defp tools_text(tools) do
+    sections =
+      for tool <- tools do
+        about =
+          case tool do
+            %{"tool" => "put", "asks" => asks} ->
+              asks =
+                Enum.map_join(asks, ", ", fn ask ->
+                  ask["name"] <> if(ask["required"], do: " (required)", else: "")
+                end)
+
+              [
+                "  #{tool["title"]}; asks #{asks}"
+                | if(tool["in"], do: ["  goes in: #{tool["in"]}"], else: [])
+              ]
+
+            %{"tool" => "set", "fields" => fields} ->
+              ["  " <> tool["title"] <> ": " <> Enum.map_join(fields, ", ", & &1["name"])]
+
+            _ ->
+              ["  " <> tool["title"]]
+          end
+
+        Enum.join(["atlas " <> tool["usage"] | about], "\n")
+      end
+
+    Enum.join(
+      ["Tools (Control's actions, from rela's description, through Control):" | sections],
+      "\n\n"
+    )
+  end
+
+  defp plan_text(plan) do
+    steps =
+      for step <- plan["steps"] do
+        values =
+          for input <- step["inputs"] do
+            [first | rest] = String.split(input["value"] || "", "\n")
+
+            Enum.join(
+              ["       #{input["label"]}: #{first}" | Enum.map(rest, &("         " <> &1))],
+              "\n"
+            )
+          end
+
+        problem = if step["problem"], do: ["     ✗ #{step["problem"]}"], else: []
+        why = if step["why"], do: ["     why: #{step["why"]}"], else: []
+        Enum.join(["  #{step["n"]}. #{step["label"]}" | values ++ why ++ problem], "\n")
+      end
+
+    steps = if steps == [], do: ["  (no steps)"], else: steps
+
+    Enum.join(
+      [
+        "Plan by #{plan["by"]} for #{inspect(plan["request"])} on #{plan["on"]}:",
+        "  " <> (plan["summary"] || ""),
+        "" | steps
+      ] ++ ["", "Nothing was written."],
+      "\n"
+    )
   end
 
   defp help(kinds, usage?) do

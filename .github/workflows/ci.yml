@@ -95,7 +95,7 @@ jobs:
         with:
           otp-version: "28"
           elixir-version: "1.18"
-      - run: mix compile --warnings-as-errors && mix format --check-formatted
+      - run: mix compile --warnings-as-errors && mix format --check-formatted && mix test
         working-directory: clients/agent
       # The loader compiles the client too; its tests read SCENES.md's layout.
       - run: mix compile --warnings-as-errors && mix format --check-formatted && mix test
