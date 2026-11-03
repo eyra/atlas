@@ -17,7 +17,7 @@ Test has no GitHub connector: in test, connectors do nothing (d-0003). The end-t
 | Step | Keys | What you should see |
 |---|---|---|
 | An issue with a merged pull request | open `IS-Atlas-01` (`SC-Atlas-01` → its use case → the issue) | Under **Pull requests**, the row shows the title (its first 40 characters), then its code and state: `UC-Atlas-01: manage scenes in the TUI (B  PR-eyra-atlas-1 · Merged`. |
-| The pull request | `enter` on that row | Title, State `Merged`, Draft `no`, the URL, and `Last read  2026-11-03 14:05 UTC from GitHub`. There is no `e Change`: all of it is GitHub's. |
+| The pull request | `enter` on that row | Title, State `Merged`, Draft `no`, the URL, and `Last read  2026-11-03 14:05 UTC from GitHub`. All of it is GitHub's: `e Change` only moves it to another issue (UC-Atlas-30). |
 | One linked a moment ago | in an issue, `a`, a pull request URL, `ctrl-s` | `✓ Stored as PR-…`; within a few seconds its title replaces the URL and its state shows. |
 | One merged on GitHub | merge an open pull request on GitHub, keep its issue open in Atlas | Within 5 minutes its row says `Merged`, without anyone touching Atlas. |
 

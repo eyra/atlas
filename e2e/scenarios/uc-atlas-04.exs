@@ -42,15 +42,22 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
     stored(t1, "✓ Stored as PR-eyra-atlas-12", at)
     page = stored(t1, "Pull request PR-eyra-atlas-12: #{url}", at)
     page =~ ~r/In issue\s+IS-Atlas-\d+/ || raise "it is not in the issue"
-    # Nothing a person may change: no Change action; title and state come from GitHub.
-    refute_see(t1, "e Change")
+    # Title and state come from GitHub; nothing to fill in.
     refute_see(t1, ~r/Title\s/)
     by_hint(t2, url, at)
+
+    # Change only moves it to another issue (IS-Atlas-59): the URL is read-only.
+    press(t1, "e")
+    see(t1, ~r/In issue \*\s+‹ IS-Atlas-\d+: An issue with pull requests ›/)
+    see(t1, ~r/Url\s+#{Regex.escape(url)}/)
+    for field <- ["Title", "State", "Draft"], do: refute_see(t1, ~r/^\s+#{field}\s/m)
+    press(t1, "Escape")
+    see(t1, "Pull request PR-eyra-atlas-12: #{url}")
   end
 
   # IS-Atlas-47. The run's browser is a stand-in that records the address.
   step "o opens it in the browser, on its page and on its row in the issue", fn ->
-    see(t1, "d Delete   o Open in browser   r refresh")
+    see(t1, "d Delete   o Open in browser")
     at = press(t1, "o")
     opened(i, url, at, 1)
     see(t1, "Opened #{url} in the browser")

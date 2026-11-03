@@ -38,8 +38,8 @@ defmodule AtlasControl.PagesTest do
     %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @d, [answer])
 
     assert [
-             %{"label" => "One", "detail" => "W-1 · Dark", "to" => "/k/widget/W-1"},
-             %{"label" => "Two", "detail" => "W-2 · done"}
+             %{"id" => "W-1", "label" => "One", "detail" => "Dark", "to" => "/k/widget/W-1"},
+             %{"id" => "W-2", "label" => "Two", "detail" => "done"}
            ] = list["rows"]
 
     assert [%{"key" => "n", "to" => "/k/widget/new", "label" => "New widget"}] = list["actions"]
@@ -68,9 +68,27 @@ defmodule AtlasControl.PagesTest do
     } =
       Pages.render({:item, "widget", "W-1"}, @d, [answer, parts])
 
-    # The fact in a border, the related list in a section that carries its title.
+    # Two parts side by side: the content (the fact) and its references (the related
+    # list, in a section that carries its title).
     assert [
-             %{"kind" => "border", "start" => "item", "end" => "item", "props" => %{}},
+             %{
+               "kind" => "columns",
+               "start" => "item",
+               "end" => "list:of_widget",
+               "props" => %{"count" => 2}
+             },
+             %{
+               "kind" => "border",
+               "start" => "item",
+               "end" => "item",
+               "props" => %{"title" => "Content"}
+             },
+             %{
+               "kind" => "border",
+               "start" => "list:of_widget",
+               "end" => "list:of_widget",
+               "props" => %{"title" => "References"}
+             },
              %{
                "kind" => "section",
                "start" => "list:of_widget",
@@ -111,10 +129,19 @@ defmodule AtlasControl.PagesTest do
       }
     }
 
-    %{back: "/k/widget/W-1", blocks: [%{"props" => item}]} =
+    %{back: "/k/widget/W-1", blocks: [%{"props" => item}, parent], markup: markup} =
       Pages.render({:item, "part", "P-1"}, @d, [part])
 
     assert {"Of widget", "W-1"} in Enum.map(item["fields"], &{&1["label"], &1["value"]})
+
+    # Among its references, to open it from.
+    assert %{"id" => "parent:of_widget", "type" => "list", "props" => %{"rows" => rows}} = parent
+    assert [%{"id" => "W-1", "label" => "Widget", "to" => "/k/widget/W-1"} = row] = rows
+    refute Map.has_key?(row, "detail")
+
+    assert %{"kind" => "section", "props" => %{"title" => "Of widget"}} =
+             Enum.find(markup, &(&1["start"] == "parent:of_widget" and &1["kind"] == "section"))
+
     assert Pages.after_delete(@d, "part", part) == {:item, "widget", "W-1"}
     assert Pages.after_delete(@d, "widget", %{"fact" => fact("W-1", %{})}) == {:list, "widget"}
   end
@@ -168,6 +195,7 @@ defmodule AtlasControl.PagesTest do
     assert fields["Has under it"] == "tag"
     assert fields["Id"] =~ "P-"
     assert fields["Fields"] =~ "title: text; required"
+    assert fields["Fields"] =~ "of_widget: the key of a widget; a change moves it there"
 
     widget = Enum.find(items, &(&1["title"] =~ "(widget)"))
 
@@ -219,11 +247,11 @@ defmodule AtlasControl.PagesTest do
     %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @rolled, [answer])
 
     assert Enum.map(list["rows"], & &1["detail"]) ==
-             ["W-1 · Fine · 2/3", "W-2 · Done · 3/3", "W-3 · Dark", "W-4"]
+             ["Fine · 2/3", "Done · 3/3", "Dark", nil]
 
     # A kind without a rule shows its fields as before.
     %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @d, [answer])
-    assert hd(list["rows"])["detail"] == "W-1 · Dark"
+    assert hd(list["rows"])["detail"] == "Dark"
   end
 
   test "a field shows under the description's label for it, on the page and in its form" do
@@ -280,6 +308,44 @@ defmodule AtlasControl.PagesTest do
              "choices" => [%{"value" => ""}, %{"value" => "light", "label" => "Light"}, _]
            } =
              Enum.find(form["inputs"], &(&1["name"] == "shade"))
+  end
+
+  test "a change form offers each parent relation: every fact of the parent's kind" do
+    part = Map.put(fact("P-1", %{"title" => "Wheel"}), "links", %{"of_widget" => ["W-2"]})
+    widgets = %{"facts" => [fact("W-2", %{"title" => "Two"}), fact("W-1", %{"title" => "One"})]}
+
+    assert Pages.reads({:edit, "part", "P-1"}, @d) == [
+             {"part", %{"key" => "P-1"}},
+             {"widget", %{}}
+           ]
+
+    %{blocks: [%{"props" => form}]} =
+      Pages.render({:edit, "part", "P-1"}, @d, [%{"fact" => part}, widgets])
+
+    assert Enum.map(form["inputs"], & &1["name"]) == ["_key", "title", "of_widget"]
+
+    # The current parent selected; a fact that has one keeps one, so no empty choice.
+    assert %{
+             "label" => "Of widget",
+             "kind" => "choice",
+             "value" => "W-2",
+             "required" => true,
+             "choices" => [
+               %{"value" => "W-1", "label" => "W-1: One"},
+               %{"value" => "W-2", "label" => "W-2: Two"}
+             ]
+           } = Enum.find(form["inputs"], &(&1["name"] == "of_widget"))
+
+    # Without a parent: the empty choice first, and selected.
+    loose = Map.put(part, "links", %{})
+
+    %{blocks: [%{"props" => form}]} =
+      Pages.render({:edit, "part", "P-1"}, @d, [%{"fact" => loose}, widgets])
+
+    assert %{"value" => "", "required" => false, "choices" => [%{"value" => ""} | _]} =
+             Enum.find(form["inputs"], &(&1["name"] == "of_widget"))
+
+    assert Pages.parent_values(@d, "part", part) == %{"of_widget" => "W-2"}
   end
 
   test "text of several lines keeps its line breaks, on the page and in a change form" do
@@ -399,12 +465,18 @@ defmodule AtlasControl.PagesTest do
 
     assert Enum.map(edit["inputs"], &{&1["name"], &1["kind"], &1["value"]}) == [
              {"_key", "readonly", "T-a-1"},
-             {"name", "readonly", "#a/1"}
+             {"name", "readonly", "#a/1"},
+             {"on_part", "choice", ""}
            ]
 
-    # Labelled by that property; nothing a user may change, so no Change action.
+    # Labelled by that property; no field a user may set, but it can move to another part.
     %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [stored])
     assert item["title"] == "Tag T-a-1: #a/1"
+    assert Enum.map(item["actions"], & &1["key"]) == ["e", "d"]
+
+    # A kind with nothing to set and no parent has nothing to change.
+    loose = put_in(@d, ["relations", "on_part", "max_outgoing"], 2)
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, loose, [stored])
     assert Enum.map(item["actions"], & &1["key"]) == ["d"]
   end
 

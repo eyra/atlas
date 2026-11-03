@@ -18,7 +18,7 @@ In TUI 1:
 |---|---|---|
 | An issue | a scene (`n`), a use case in it (`a`), an issue in that (`a`), each with a title and `ctrl-s` | The issue, and under it **Pull requests**: `No pull requests yet. Press a to add one.` |
 | Link | `a`, paste or type `https://github.com/eyra/atlas/pull/12`, `ctrl-s` | The form asks only for the URL. `✓ Stored as PR-eyra-atlas-12`: the id is made from the URL (owner, repository, number; a `.` in a name becomes `_`). The pull request opens, labelled by its URL, with `In issue IS-Atlas-NN`. |
-| Open | `esc` back to the issue, ↑/↓, `enter` | The pull request. There is no `e Change`: the URL is what it is, and title, state and draft are GitHub's, filled by a GitHub connector later. They show only once filled. |
+| Open | `esc` back to the issue, ↑/↓, `enter` | The pull request. The URL is what it is, and title, state and draft are GitHub's, filled by a GitHub connector later. They show only once filled. `e Change` only moves it to another issue (IS-Atlas-59, see UC-Atlas-30). |
 | Open in the browser (IS-Atlas-47) | on the pull request's page, or on its row in the issue's list, `o` | The footer shows `o Open in browser`. The browser shows the pull request on GitHub, and the TUI says `Opened https://… in the browser`. Only http and https addresses are opened. |
 | Remove | `d`, then `y` | `✓ Stored …`. You are back in the issue, without it. |
 
@@ -35,6 +35,6 @@ Also try:
 ## What changed for this
 
 - **rela's description:** `rela/atlas.json` says how a pull request's id is made: `create.id.from: "url"`, with a pattern, the template `PR-{1}-{2}-{3}` and `.` → `_`. It also marks title, state and draft as set by a connector. Pull requests are always GitHub's (d-0012).
-- **Control:** an id made from a property is the same for the same value. So a taken id is never retried with the next number, and a value that does not fit the pattern is never sent to State. A change form shows that property read-only. A kind without a primary property is labelled by it. A kind with nothing a person may change has no Change action. None of this code names a kind.
+- **Control:** an id made from a property is the same for the same value. So a taken id is never retried with the next number, and a value that does not fit the pattern is never sent to State. A change form shows that property read-only. A kind without a primary property is labelled by it. A kind with nothing a person may change and no parent to move to has no Change action. None of this code names a kind.
 - **Open in the browser (IS-Atlas-47):** `rela/atlas.json` marks the type of a pull request's url as a web address (`types.github_pull_url.format: "url"`; rela has no such type). Control then gives every fact with such a field a link (`o Open in browser`), on its page and on its row in a list; the TUI opens it with `open` (macOS) or `xdg-open`, never anything but http and https. A footer too long for one line goes on on the next.
 - **The end-to-end test:** `e2e/scenarios/uc-atlas-04.exs` follows this guide. Its browser is a stand-in (`"browser"` in the run's settings) that only records the address.

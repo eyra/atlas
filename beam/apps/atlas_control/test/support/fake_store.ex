@@ -126,6 +126,9 @@ defmodule AtlasControl.FakeStore do
   def link(part, widget), do: put(part, %{"title" => part}, "part", %{"of_widget" => [widget]})
   def silent(on?), do: GenServer.call(__MODULE__, {:silent, on?})
 
+  @doc "The content of the last fact it was sent."
+  def last_fact, do: GenServer.call(__MODULE__, :last_fact)
+
   @doc "Make a key taken without listing it, as rela does for a key deleted a moment ago."
   def reserve(key), do: GenServer.call(__MODULE__, {:reserve, key})
 
@@ -134,7 +137,15 @@ defmodule AtlasControl.FakeStore do
     :ok = AtlasBus.attach(AtlasBus.store())
 
     {:ok,
-     %{facts: %{}, position: 0, silent: false, reserved: MapSet.new(), origins: %{}, sent: []}}
+     %{
+       facts: %{},
+       position: 0,
+       silent: false,
+       reserved: MapSet.new(),
+       last: nil,
+       origins: %{},
+       sent: []
+     }}
   end
 
   @impl true
@@ -142,6 +153,7 @@ defmodule AtlasControl.FakeStore do
     do: {:reply, :ok, put_in(s.facts[{kind, key}], {values, 0, links})}
 
   def handle_call({:silent, on?}, _from, s), do: {:reply, :ok, %{s | silent: on?}}
+  def handle_call(:last_fact, _from, s), do: {:reply, s.last, s}
 
   def handle_call({:origin, kind, key, relation, origin}, _from, s),
     do: {:reply, :ok, put_in(s.origins[{kind, key, relation}], origin)}
@@ -203,6 +215,7 @@ defmodule AtlasControl.FakeStore do
     do: {:noreply, s}
 
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = e, %{"op" => op, "key" => key} = c}, s) do
+    s = %{s | last: c}
     about = %{"op" => op, "key" => key}
     s = %{s | sent: [c | s.sent]}
     id = {e.kind, key}

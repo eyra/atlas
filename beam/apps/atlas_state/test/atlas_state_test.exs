@@ -328,6 +328,51 @@ defmodule AtlasStateTest do
     assert %{"fact" => nil} = read("widget", %{"key" => "W-1"})
   end
 
+  test "a change can move a fact to another parent; reads follow it", %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One"})
+    fact("create", "W-2", %{"title" => "Two"})
+    fact("create", "P-1", %{"title" => "Part"}, kind: "part", links: %{"of_widget" => ["W-1"]})
+    %{"fact" => %{"version" => version}} = read("part", %{"key" => "P-1"})
+
+    assert {"stored", %{"op" => "change", "cause" => "moved"}, _} =
+             send_and_wait(Envelope.new("fact", "part"), %{
+               "op" => "change",
+               "key" => "P-1",
+               "values" => %{},
+               "version" => version,
+               "links" => %{"of_widget" => ["W-2"]},
+               "cause" => "moved"
+             })
+
+    assert %{"fact" => %{"links" => %{"of_widget" => ["W-2"]}}} = read("part", %{"key" => "P-1"})
+    assert %{"incoming" => %{"of_widget" => []}} = read("widget", %{"key" => "W-1"})
+    assert %{"incoming" => %{"of_widget" => ["P-1"]}} = read("widget", %{"key" => "W-2"})
+
+    # Sent again on the old version after a lost answer: already where it was asked to go.
+    assert {"stored", _, _} =
+             fact("change", "P-1", %{},
+               kind: "part",
+               version: version,
+               links: %{"of_widget" => ["W-2"]}
+             )
+
+    # On the old version to somewhere else: someone changed it meanwhile.
+    assert {"refused", %{"reasons" => ["P-1 changed meanwhile; open it again"]}, _} =
+             fact("change", "P-1", %{},
+               kind: "part",
+               version: version,
+               links: %{"of_widget" => ["W-1"]}
+             )
+
+    assert {"refused", %{"reasons" => ["W-9 does not exist"]}, _} =
+             fact("change", "P-1", %{}, kind: "part", links: %{"of_widget" => ["W-9"]})
+
+    assert {"refused", %{"reasons" => ["of_widget allows at most 1"]}, _} =
+             fact("change", "P-1", %{}, kind: "part", links: %{"of_widget" => ["W-1", "W-2"]})
+
+    assert FakeRela.facts(rela)["P-1"] |> elem(0) == %{"title" => "Part"}
+  end
+
   test "a stored fact is a hint to listeners of its kind", _ do
     test = self()
 

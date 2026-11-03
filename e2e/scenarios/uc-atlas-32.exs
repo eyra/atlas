@@ -32,15 +32,22 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
       atlas_json(i, ["set", use_case, "accepted_by=melle", "--cause", "tested it in the e2e"])
 
     got["origins"]["Accepted by"]["cause"] == "tested it in the e2e" || raise inspect(got)
-    by_hint(t1, ~r/Accepted by\s+melle/, at)
+    # In the references, the person it points at; in the content, with its origin.
+    by_hint(t1, ~r/Accepted by ─+(.|\n)*melle  Person/, at)
+    press(t1, "Tab")
+    see(t1, "↑↓ scroll")
+    press(t1, ["j", "j", "j"])
+    see(t1, ~r/Accepted by\s+melle/)
     see(t1, ~r/since \d+ \w+ \d\d:\d\d · by agent · tested it in the e2e/)
   end
 
   step "Removing it is a fact too: the page says it was removed, by whom and why", fn ->
     %{use_case: use_case} = Process.get(:uc32)
     {_, at} = atlas_json(i, ["set", use_case, "accepted_by=", "--cause", "found a bug"])
-    by_hint(t1, ~r/Accepted by\s+—/, at)
-    see(t1, "by agent · found a bug")
+    by_hint(t1, "by agent · found a bug", at)
+    see(t1, ~r/Accepted by\s+—/)
+    refute_see(t1, "melle  Person")
+    press(t1, ["k", "k", "k", "Tab"])
   end
 
   step "done_in is history only: no client sets it", fn ->

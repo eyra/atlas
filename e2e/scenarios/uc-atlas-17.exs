@@ -13,7 +13,7 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
   """
 
   # A use case in the scene's list, not the same words in its description.
-  row = fn title -> ~r/#{Regex.escape(title)}\s+UC-Atlas-\d+/ end
+  row = fn title -> ~r/UC-Atlas-\d+\s+#{Regex.escape(title)}/ end
 
   step "A scene with use cases in its description, open in both TUIs", fn ->
     {scene, at} =

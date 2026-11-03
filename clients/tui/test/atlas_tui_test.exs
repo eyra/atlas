@@ -70,6 +70,7 @@ defmodule AtlasTuiTest do
   end
 
   defp screen(model), do: model |> View.render(90, 20, 5) |> View.plain()
+  defp tall(model), do: model |> View.render(90, 30, 5) |> View.plain()
 
   test "keys: arrows, escape, enter, text" do
     assert Keys.parse("\e[A\e[Bx\r") == {[:up, :down, {:char, "x"}, :enter], ""}
@@ -168,6 +169,133 @@ defmodule AtlasTuiTest do
     assert AtlasTui.Browser.open("file:///etc/passwd", %{}) == {:error, :not_http}
     assert AtlasTui.Browser.command(%{"browser" => "/tmp/stand-in"}) == "/tmp/stand-in"
     assert AtlasTui.Browser.command(%{}) in ["open", "xdg-open"]
+  end
+
+  # A page in two parts, as Control sends an item's page: its content, and its references
+  # (two lists) in columns.
+  defp parted(lines) do
+    notes = Enum.map_join(1..lines, "\n", &"Line #{&1} of the notes")
+    row = fn label, detail, to -> %{"label" => label, "detail" => detail, "to" => to} end
+
+    @list
+    |> Map.put("markup", [])
+    |> Map.merge(%{
+      "back" => "/k/thing",
+      "blocks" => [
+        %{
+          "id" => "item",
+          "type" => "item",
+          "props" => %{
+            "title" => "Thing T-1: One",
+            "fields" => [%{"label" => "Notes", "value" => notes}]
+          }
+        },
+        %{
+          "id" => "list:parts",
+          "type" => "list",
+          "props" => %{
+            "rows" => [row.("Wheel", "P-1", "/k/part/P-1"), row.("Axle", "P-2", "/k/part/P-2")]
+          }
+        },
+        %{
+          "id" => "parent:of",
+          "type" => "list",
+          "props" => %{"rows" => [row.("W-1", "Widget", "/k/widget/W-1")]}
+        }
+      ],
+      "markup" => [
+        %{
+          "kind" => "columns",
+          "start" => "item",
+          "end" => "parent:of",
+          "props" => %{"count" => 2}
+        },
+        %{
+          "kind" => "border",
+          "start" => "item",
+          "end" => "item",
+          "props" => %{"title" => "Content"}
+        },
+        %{
+          "kind" => "border",
+          "start" => "list:parts",
+          "end" => "parent:of",
+          "props" => %{"title" => "References"}
+        },
+        %{
+          "kind" => "section",
+          "start" => "list:parts",
+          "end" => "list:parts",
+          "props" => %{"title" => "Parts"}
+        },
+        %{
+          "kind" => "section",
+          "start" => "parent:of",
+          "end" => "parent:of",
+          "props" => %{"title" => "Of widget"}
+        }
+      ]
+    })
+    |> model()
+  end
+
+  test "a page in parts: a long content never hides the references" do
+    m = parted(60)
+    assert Model.parts(m) == [["item"], ["list:parts", "parent:of"]]
+    text = tall(m)
+
+    # One above the other on a narrow screen; the content cut, saying how much more.
+    assert text =~ ~r/┌─ Content ─+┐\n(.*\n)+.*… \d+ more lines.*\n.*└─+┘\n.*┌─ References/u
+    assert text =~ "› Wheel"
+    assert text =~ "W-1"
+    assert text =~ "tab next part"
+    assert length(String.split(text, "\n")) == 30
+
+    # The rows of both lists are one selection.
+    {down, _} = press(m, [:down, :down])
+    assert tall(down) =~ "› W-1"
+    assert {_, [{:send, %{"to" => "/k/widget/W-1"}}]} = press(down, [:enter])
+
+    # Tab: the arrows scroll the content now, and leave the selection alone.
+    {scrolled, _} = press(m, [:tab, :down, :down])
+    assert scrolled.selected == 0
+    assert tall(scrolled) =~ "↑ 2 lines above"
+    assert tall(scrolled) =~ "↑↓ scroll"
+    refute tall(scrolled) =~ "Thing T-1: One"
+    assert tall(scrolled) =~ "› Wheel"
+    {back, _} = press(scrolled, [:shift_tab, :down])
+    assert back.selected == 1
+
+    # Side by side on a wide screen.
+    wide = m |> View.render(150, 20, 5) |> View.plain()
+    assert wide =~ ~r/┌─ Content ─+┐ +┌─ References ─+┐/u
+
+    # Content that fits is not cut, and says nothing about more.
+    refute tall(parted(2)) =~ "more line"
+  end
+
+  test "rows start with the id, in a column as wide as the longest; a long label is cut" do
+    rows = [
+      %{"id" => "T-1", "label" => "Short", "detail" => "Testing · 1/2", "to" => "/k/thing/T-1"},
+      %{
+        "id" => "T-1234",
+        "label" => String.duplicate("A very long label ", 6),
+        "detail" => "Merged",
+        "to" => "/k/thing/T-1234"
+      }
+    ]
+
+    [list] = @list["blocks"]
+    lines = model(%{@list | "blocks" => [put_in(list["props"]["rows"], rows)]}) |> screen()
+    [first, second] = Regex.scan(~r/^ (?:›| ) T-1.*$/mu, lines) |> Enum.map(&hd/1)
+
+    assert first =~ ~r/^ › T-1     Short\s+  Testing · 1\/2$/u
+    assert second =~ ~r/^   T-1234  A very long label .*…  Merged$/u
+
+    # The labels and the details each start in one column.
+    at = fn line, text -> line |> String.split(text) |> hd() |> String.length() end
+    assert at.(first, "Short") == at.(second, "A very")
+    assert String.length(first) <= 90 and String.length(second) <= 90
   end
 
   test "a hint redraws the list and keeps the selected row" do
@@ -513,7 +641,7 @@ defmodule AtlasTuiTest do
                "",
                " Parts ────────────────────────────────",
                "",
-               " › Wheel"
+               " › Wheel                            P-1"
              ]
     end
 

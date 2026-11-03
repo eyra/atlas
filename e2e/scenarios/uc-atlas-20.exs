@@ -39,14 +39,27 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
   step "Save: the page shows the lines, blank lines and sections; TUI 2 by hint", fn ->
     at = press(t1, "C-s")
     stored(t1, ~r/✓ Stored as SC-Atlas-\d+/, at)
-    page = stored(t1, ~r/Description\s+## Why[\s│]*\n[\s│]*\n[\s│]+Because a scene/u, at)
+    stored(t1, ~r/Description\s+## Why[\s│]*\n[\s│]*\n[\s│]+Because a scene/u, at)
+    by_hint(t2, "Melle writes a scene with a title longer", at)
+    Process.put(:scene, capture(t1, ~r/Scene (SC-Atlas-\d+):/))
+
+    # The description is longer than its part: the part says so, and the list of use
+    # cases stays in view (IS-Atlas-48). Tab, and the arrows (here j and k, which arrive
+    # whole where an arrow's escape sequence may not) scroll the description.
+    see(t1, ~r/… \d+ more lines?/)
+    see(t1, "No use cases yet. Press a to add one.")
+    press(t1, "Tab")
+    see(t1, "↑↓ scroll")
+    press(t1, ["j", "j", "j", "j", "j"])
+    page = see(t1, "1. it is stored and shown as written")
 
     page =~
       ~r/## What[\s│]*\n[\s│]+- the title wraps[\s│]*\n[\s│]+- the description keeps its lines[\s│]*\n[\s│]*\n[\s│]+## Done when/u ||
       raise "the sections are not shown as written:\n#{page}"
 
-    by_hint(t2, "Melle writes a scene with a title longer", at)
-    Process.put(:scene, capture(t1, ~r/Scene (SC-Atlas-\d+):/))
+    page =~ "No use cases yet. Press a to add one." || raise "the use cases went out of view"
+    press(t1, ["k", "k", "k", "k", "k", "Tab"])
+    see(t1, ~r/Scene SC-Atlas-\d+: Melle writes(.|\n)*↑↓ move/)
   end
 
   step "rela keeps the line breaks", fn ->

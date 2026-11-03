@@ -59,8 +59,12 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     see(t1, ~r/State\s+Open/)
     see(t1, ~r/Draft\s+yes/)
     see(t1, ~r/Last read\s+\d{4}-\d\d-\d\d \d\d:\d\d UTC from GitHub/)
-    # Still GitHub's: nobody changes them in Atlas.
-    refute_see(t1, "e Change")
+    # Still GitHub's: a change only moves it to another issue, and never sets them.
+    press(t1, "e")
+    see(t1, ~r/In issue \*\s+‹ IS-Atlas-\d+/)
+    for field <- ["Title", "State", "Draft"], do: refute_see(t1, ~r/^\s+#{field}\s/m)
+    press(t1, "Escape")
+    see(t1, ~r/Last read\s+\d{4}-\d\d-\d\d/)
   end
 
   step "The issue's row: the title, then Open and draft; TUI 2 too", fn ->
@@ -68,7 +72,7 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     see(t1, issue)
 
     for t <- [t1, t2] do
-      see(t, ~r/Repository skeleton with the layers\s+PR-eyra-atlas-e2e-2601 · Open · draft/)
+      see(t, ~r/PR-eyra-atlas-e2e-2601  Repository skeleton with the layers\s+Open · draft/)
     end
   end
 
@@ -84,7 +88,7 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     for t <- [t1, t2] do
       see(
         t,
-        ~r/Repository skeleton with the layers\s+PR-eyra-atlas-e2e-2601 · Merged\s/,
+        ~r/PR-eyra-atlas-e2e-2601  Repository skeleton with the layers\s+Merged\s/,
         connector_wait
       )
     end

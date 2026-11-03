@@ -44,7 +44,8 @@ scenario "UC-Atlas-23: Read items from the command line", fn %{instance: i} ->
     Enum.map(rows, & &1["key"]) == [use_case] || raise inspect(rows)
 
     {out, 0, _} = atlas(i, ["list", "use_case", "--in", scene])
-    out == "#{use_case}  A use case to read\n" || raise inspect(out)
+    # The id first, then the title, then the detail, as the TUI shows the row (IS-Atlas-57).
+    out == "#{use_case}  A use case to read  Refine\n" || raise inspect(out)
   end
 
   step "A code Atlas does not have: exit 2, and why", fn ->

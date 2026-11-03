@@ -17,9 +17,11 @@ defmodule AtlasState.Server do
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
   "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional}`.
-  On a create, `links` are the fact's links; on a change, each relation named is set to
-  exactly those keys (`[]` removes its links) and the others stay. The cause and who sent
-  it are kept with State's answer and go along with the hint.
+  On a create the links are the fact's first; on a change each relation named is replaced
+  by the keys given (`[]` removes its links), so a fact moves to another parent or an
+  association is set or removed; the hint then reaches every listener of its kind, on
+  the old parent's page and the new one's. The cause and who sent it are kept with
+  State's answer and go along with the hint.
   """
   use GenServer
 
@@ -252,7 +254,7 @@ defmodule AtlasState.Server do
         result =
           case Description.targets(state.description, kind, content["links"] || %{}) do
             {:ok, targets} ->
-              with :ok <- targets_exist(state, targets) do
+              with :ok <- targets_exist(state, op, targets) do
                 store(state.rela, spec, op, key, values, content["version"], targets)
               end
 
@@ -287,13 +289,13 @@ defmodule AtlasState.Server do
     end
   end
 
-  # A change sets the values it names, and the links of each relation it names.
+  # The links of a change replace the relation's keys: a move to another parent.
   defp store(rela, spec, "change", key, values, version, targets) do
     values = Map.new(values, fn {k, v} -> {k, if(v == "", do: nil, else: v)} end)
     plural = spec["plural"]
 
     with :ok <- Description.check(spec, values, :change),
-         {:ok, []} <- Rela.change(rela, plural, key, values, targets, version) do
+         {:ok, []} <- Rela.change(rela, plural, key, values, version, targets) do
       :stored
     else
       # The current rela has already stored the change; say so instead of hiding it.
@@ -375,8 +377,9 @@ defmodule AtlasState.Server do
   end
 
   # The current rela answers 422 to a create that links to a missing fact, but stores the
-  # fact anyway, without the link. So State checks the targets exist before it writes.
-  defp targets_exist(state, targets) do
+  # fact anyway, without the link. So State checks the targets exist before it creates,
+  # and before a change moves a fact, to say which one is missing.
+  defp targets_exist(state, op, targets) when op in ["create", "change"] do
     missing =
       for {_relation, {kind, keys}} <- targets,
           key <- keys,
@@ -386,6 +389,8 @@ defmodule AtlasState.Server do
 
     if missing == [], do: :ok, else: {:refused, missing}
   end
+
+  defp targets_exist(_state, _op, _targets), do: :ok
 
   defp same?(fact, values) do
     Enum.all?(values, fn {name, value} -> loose(fact.properties[name]) == loose(value) end)

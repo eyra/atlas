@@ -75,8 +75,9 @@ defmodule AtlasState.Rela.Http do
   end
 
   @impl true
-  def change(base, plural, key, props, targets, version) do
-    body = Map.delete(body(key, props, targets), :id)
+  # A relation in `targets` is replaced as a whole: its keys become the given ones (a move).
+  def change(base, plural, key, props, version, targets) do
+    body = key |> body(props, targets) |> Map.delete(:id)
     write(:patch, "#{base}/#{plural}/#{URI.encode(key)}", body, if_match(version))
   end
 

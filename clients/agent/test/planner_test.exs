@@ -65,6 +65,13 @@ defmodule AtlasAgent.PlannerTest do
     assert prompt =~ "--env test"
     assert prompt =~ ~s|"kind":"part"|
     refute prompt =~ ~s|"tool":"get"|
+    refute prompt =~ "previous plan"
+
+    before = %{"text" => "Step 2 (New part) was refused: gone.", "not_run" => [%{"n" => 3}]}
+    prompt = Planner.prompt(Map.put(@input, "before", before), "test")
+    assert prompt =~ "Step 2 (New part) was refused: gone."
+    assert prompt =~ "Do not work around the refusal"
+    assert prompt =~ ~s|"not_run":[{"n":3}]|
     assert Planner.schema()["required"] == ["summary", "steps"]
   end
 end

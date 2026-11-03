@@ -131,7 +131,7 @@ defmodule AtlasState.FakeRela do
   defp links_of(s, key), do: Map.get(s.links, key, %{})
 
   @impl true
-  def change(pid, _plural, key, props, targets, version) do
+  def change(pid, _plural, key, props, version, targets) do
     call(pid, fn s ->
       case s.facts[key] do
         nil ->
@@ -148,22 +148,23 @@ defmodule AtlasState.FakeRela do
               {{:error, {:invalid, ["the fact it points at does not exist"]}}, s}
 
             true ->
-              {answer, s} = changed(s, key, old, props)
-
-              links =
-                Enum.reduce(targets, s.links, fn {relation, {_, keys}}, acc ->
-                  put_links(acc, key, relation, keys)
-                end)
-
-              {answer, %{s | links: links}}
+              changed(s, key, old, props, targets)
           end
       end
     end)
   end
 
-  defp changed(s, key, old, props) do
+  # A relation given replaces what the fact pointed at, as rela's PATCH does.
+  defp changed(s, key, old, props, targets) do
     new = old |> Map.merge(props) |> Map.reject(fn {_, v} -> is_nil(v) end)
-    {{:ok, warnings(new)}, %{s | facts: Map.put(s.facts, key, {new, s.n}), n: s.n + 1}}
+
+    links =
+      Enum.reduce(targets, s.links, fn {relation, {_, keys}}, acc ->
+        put_links(acc, key, relation, keys)
+      end)
+
+    {{:ok, warnings(new)},
+     %{s | facts: Map.put(s.facts, key, {new, s.n}), n: s.n + 1, links: links}}
   end
 
   @impl true

@@ -51,7 +51,7 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
     see(t1, "‹ Design ›")
     at = press(t1, "C-s")
     stored(t1, ~r/Stage\s+Design/, at)
-    by_hint(t2, ~r/IS-Atlas-\d+ · Design/, at)
+    by_hint(t2, ~r/IS-Atlas-\d+  .*  Design/, at)
   end
 
   step "Remove it; back in the use case; TUI 2 by hint", fn ->

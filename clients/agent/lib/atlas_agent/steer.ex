@@ -14,6 +14,16 @@ defmodule AtlasAgent.Steer do
   | `{"op":"cancel"}` | Drop the plan, also while it is being made. |
   | `{"op":"stop"}` | Stop a run before its next step; stored steps stay. |
 
+  When State refuses a step, the run stops there, and the agent asks the planner what
+  next, telling it what was stored, what was refused and why, and what was not run
+  (UC-Atlas-18). The answer is a new plan, with `before` saying what happened; like any
+  plan it runs only on `run`. The agent never retries a refused step by itself.
+
+  A small plan runs without asking (UC-Atlas-18): at most `agent.ask_above` steps (1 by
+  default; 0 asks always), every one of them able to run, none deleting. A plan made
+  after a refusal always asks. Such a plan shows like an accepted one, and its title says
+  it ran without asking.
+
   To the client: `{"op":"plan","block":<a plan block>}`, the plan as it is now, after
   every change (the contract's `plan` block, with its `step`s), and `{"op":"notice",
   "tone","text"}`.
@@ -80,24 +90,8 @@ defmodule AtlasAgent.Steer do
 
   # Asking
 
-  defp handle("ask", %{"request" => request, "on" => on}, state) when is_binary(request) do
-    state = drop(state)
-    %{env: env, settings: settings} = state
-
-    task =
-      Task.async(fn ->
-        with {:ok, client} <- AtlasAgent.connect(env) do
-          try do
-            Plan.make(client, settings, on, request)
-          after
-            Client.close(client)
-          end
-        end
-      end)
-
-    plan = %{request: request, state: "planning", summary: nil, by: nil, steps: []}
-    show(%{state | task: task, plan: plan})
-  end
+  defp handle("ask", %{"request" => request, "on" => on}, state) when is_binary(request),
+    do: plan(drop(state), request, on, nil)
 
   defp handle("cancel", _message, %{plan: nil} = state), do: state
 
@@ -121,23 +115,7 @@ defmodule AtlasAgent.Steer do
 
       true ->
         values = for %{"n" => n} = c <- chosen, into: %{}, do: {n, c["values"] || %{}}
-
-        steps =
-          Enum.map(plan.steps, fn step ->
-            if step["n"] in order,
-              do: edited(step, values[step["n"]]),
-              else: Map.put(step, "state", "dropped")
-          end)
-
-        case AtlasAgent.connect(state.env) do
-          {:ok, client} ->
-            send(self(), :step)
-            run = %{client: client, order: order, stop: false}
-            show(%{state | run: run, plan: %{plan | state: "running", steps: steps}})
-
-          {:error, text} ->
-            notice(state, "error", text)
-        end
+        start(state, order, values)
     end
   end
 
@@ -149,6 +127,63 @@ defmodule AtlasAgent.Steer do
 
   defp handle(_op, _message, state), do: state
 
+  # Run the steps `order` of the proposed plan, with `values` by step number.
+  defp start(%{plan: plan} = state, order, values) do
+    steps =
+      Enum.map(plan.steps, fn step ->
+        if step["n"] in order,
+          do: edited(step, values[step["n"]] || %{}),
+          else: Map.put(step, "state", "dropped")
+      end)
+
+    case AtlasAgent.connect(state.env) do
+      {:ok, client} ->
+        send(self(), :step)
+        run = %{client: client, order: order, stop: false}
+        show(%{state | run: run, plan: %{plan | state: "running", steps: steps}})
+
+      {:error, text} ->
+        notice(state, "error", text)
+    end
+  end
+
+  # Whether a plan may run without asking: small, every step able to run, none deleting,
+  # and not a plan made after a refusal.
+  defp by_itself?(state, plan) do
+    limit = get_in(state.settings, ["agent", "ask_above"]) || 1
+
+    plan.steps != [] and length(plan.steps) <= limit and plan.before == nil and
+      Enum.all?(plan.steps, &(&1["state"] == "proposed" and &1["tool"] != "delete"))
+  end
+
+  defp plan(state, request, on, before) do
+    %{env: env, settings: settings} = state
+
+    task =
+      Task.async(fn ->
+        with {:ok, client} <- AtlasAgent.connect(env) do
+          try do
+            Plan.make(client, settings, on, request, before)
+          after
+            Client.close(client)
+          end
+        end
+      end)
+
+    plan = %{
+      request: request,
+      on: on,
+      before: before && before["text"],
+      by_itself: false,
+      state: "planning",
+      summary: nil,
+      by: nil,
+      steps: []
+    }
+
+    show(%{state | task: task, plan: plan})
+  end
+
   defp planned({:ok, made}, %{plan: plan} = state) when plan != nil do
     steps =
       Enum.map(made["steps"], fn step ->
@@ -156,7 +191,13 @@ defmodule AtlasAgent.Steer do
       end)
 
     plan = %{plan | state: "proposed", summary: made["summary"], by: made["by"], steps: steps}
-    show(%{state | plan: plan})
+
+    if by_itself?(state, plan) do
+      plan = Map.put(plan, :by_itself, true)
+      start(%{state | plan: plan}, Enum.map(steps, & &1["n"]), %{})
+    else
+      show(%{state | plan: plan})
+    end
   end
 
   defp planned({:error, text}, %{plan: plan} = state) when plan != nil do
@@ -196,12 +237,47 @@ defmodule AtlasAgent.Steer do
 
       {:refused, reasons} ->
         state = put_step(state, n, %{"state" => "refused", "detail" => Enum.join(reasons, "; ")})
-        finish(%{state | run: %{run | order: rest}}, "failed")
+        state |> Map.put(:run, %{run | order: rest}) |> finish("failed") |> what_next()
 
       {:error, text} ->
         state = put_step(state, n, %{"state" => "refused", "detail" => text})
         finish(%{state | run: %{run | order: rest}}, "failed")
     end
+  end
+
+  # After a refusal: what happened, for the planner and for the user, and a new plan.
+  defp what_next(%{plan: plan} = state) do
+    shown = fn step -> Map.take(step, ~w(n label tool kind in key values detail)) end
+    stored = for %{"state" => "stored"} = s <- plan.steps, do: shown.(s)
+    not_run = for %{"state" => "not_run"} = s <- plan.steps, do: shown.(s)
+    refused = Enum.find(plan.steps, &(&1["state"] == "refused"))
+
+    text =
+      Enum.join(
+        [
+          "Step #{refused["n"]} (#{refused["label"]}) was refused: " <>
+            String.trim_trailing(refused["detail"] || "", ".") <> ".",
+          if(stored != [],
+            do: "Stored before it: " <> Enum.map_join(stored, ", ", &"step #{&1["n"]}") <> ".",
+            else: "Nothing was stored."
+          ),
+          if(not_run != [],
+            do: "Not run: " <> Enum.map_join(not_run, ", ", &"step #{&1["n"]}") <> ".",
+            else: nil
+          )
+        ]
+        |> Enum.reject(&is_nil/1),
+        " "
+      )
+
+    before = %{
+      "text" => text,
+      "stored" => stored,
+      "refused" => shown.(refused),
+      "not_run" => not_run
+    }
+
+    plan(state, plan.request, plan.on, before)
   end
 
   defp write(client, %{"tool" => "put"} = step),
@@ -273,11 +349,15 @@ defmodule AtlasAgent.Steer do
         "state" => plan.state,
         "summary" => plan.summary,
         "by" => plan.by,
+        "before" => plan[:before],
         "steps" => steps
       })
 
     %{"id" => "plan", "type" => "plan", "props" => props}
   end
+
+  defp title(%{by_itself: true, state: s} = plan) when s in ["running", "done"],
+    do: title(%{plan | by_itself: false}) <> ", without asking"
 
   defp title(%{state: "planning"}), do: "Planning…"
   defp title(%{state: "proposed", steps: []}), do: "No steps proposed"

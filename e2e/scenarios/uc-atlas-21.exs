@@ -23,6 +23,12 @@ scenario "UC-Atlas-21: Find out what Atlas can do", fn %{instance: instance} ->
     out =~ "Belongs under: use_case" || raise "no parent in:\n#{out}"
     if out =~ "Scene (scene)", do: raise("put issue --help shows other kinds")
 
+    # atlas help <kind>: the same, without the commands (IS-Atlas-51).
+    {out, 0, _} = atlas(instance, ["help", "use_case"])
+    out =~ "Use case (use_case)" || raise "atlas help use_case does not show it:\n#{out}"
+    if out =~ "Issue (issue)", do: raise("atlas help use_case shows other kinds")
+    if out =~ "atlas put <kind>", do: raise("atlas help use_case shows the commands")
+
     {kinds, _} = atlas_json(instance, ["help"])
     names = Enum.map(kinds, & &1["kind"])
     (names == Enum.sort(names) && "scene" in names) || raise "kinds: #{inspect(names)}"

@@ -151,7 +151,7 @@ defmodule AtlasAgent.CLI do
   defp show({:item, item}, false), do: IO.puts(text(item)) && 0
 
   defp show({:list, rows}, false) do
-    Enum.each(rows, &IO.puts("#{&1["key"]}  #{&1["label"]}"))
+    Enum.each(rows_text(rows, ""), &IO.puts/1)
     0
   end
 
@@ -189,7 +189,7 @@ defmodule AtlasAgent.CLI do
 
     lists =
       Enum.map(item["lists"], fn list ->
-        rows = Enum.map(list["rows"], &"  #{&1["key"]}  #{&1["label"]}")
+        rows = rows_text(list["rows"], "  ")
         rows = if rows == [], do: ["  (none)"], else: rows
         Enum.join(["#{list["title"] || "Under it"}:" | rows], "\n")
       end)
@@ -223,6 +223,29 @@ defmodule AtlasAgent.CLI do
     case origin["cause"] do
       cause when cause in [nil, ""] -> head
       cause -> head <> ": " <> cause
+    end
+  end
+
+  # Rows as the TUI shows them: the id in a column as wide as the longest, the label in
+  # the next (up to 60 wide), then the detail.
+  defp rows_text(rows, indent) do
+    width = fn field, most ->
+      rows |> Enum.map(&String.length(&1[field] || "")) |> Enum.max(fn -> 0 end) |> min(most)
+    end
+
+    keys = width.("key", 1_000)
+    labels = width.("label", 60)
+
+    for row <- rows do
+      key = String.pad_trailing(row["key"] || "", keys)
+
+      line =
+        case row["detail"] do
+          detail when detail in [nil, ""] -> "#{key}  #{row["label"]}"
+          detail -> "#{key}  #{String.pad_trailing(row["label"] || "", labels)}  #{detail}"
+        end
+
+      indent <> String.trim_trailing(line)
     end
   end
 
