@@ -8,6 +8,14 @@ defmodule AtlasControl.SessionTest do
     AtlasBus.drop_hints(0)
     start_supervised!(FakeStore)
     start_supervised!({AtlasControl.Gateway, port: 0, name: :gateway})
+
+    # A session waiting on a read sees its client close only after its tries (6 s); stopped
+    # here, it cannot read on into the next test, or another app's tests in this VM.
+    on_exit(fn ->
+      for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasControl.Sessions),
+          do: DynamicSupervisor.terminate_child(AtlasControl.Sessions, pid)
+    end)
+
     %{port: AtlasControl.Gateway.port(:gateway)}
   end
 
@@ -495,6 +503,48 @@ defmodule AtlasControl.SessionTest do
              next(a, "notice", 7_000)
 
     assert %{"tone" => "ok"} = next(a, "notice")
+  end
+
+  describe "a State that does not answer" do
+    setup do
+      # A read waits this long for each of its tries, so the tests need not wait 6 s.
+      Application.put_env(:atlas_control, :read_timeout_ms, 50)
+      on_exit(fn -> Application.delete_env(:atlas_control, :read_timeout_ms) end)
+    end
+
+    test "a page says State did not answer; No such page only where Control has no page",
+         %{port: port} do
+      FakeStore.put("W-1", %{"title" => "One"})
+      FakeStore.silent_reads(true)
+      # Its hello asks for the description, and gets no answer.
+      a = client(port)
+      next(a, "page")
+
+      put(a, %{"op" => "open", "to" => "/nowhere"})
+      assert %{"title" => "No such page"} = next(a, "page")
+
+      put(a, %{"op" => "open", "to" => "/k/_/W-1"})
+
+      assert %{"title" => "State did not answer", "path" => "/k/_/W-1", "blocks" => [block]} =
+               next(a, "page")
+
+      assert block["props"]["text"] =~ "State did not answer"
+
+      # State answers again: a refresh works the page out.
+      FakeStore.silent_reads(false)
+      put(a, %{"op" => "refresh"})
+      assert %{"path" => "/k/widget/W-1", "reason" => "reconcile"} = next(a, "page")
+    end
+
+    test "a page whose own read gets no answer says so", %{port: port} do
+      FakeStore.put("W-1", %{"title" => "One"})
+      a = client(port)
+      next(a, "page")
+      FakeStore.silent_reads(["widget"])
+
+      put(a, %{"op" => "open", "to" => "/k/_/W-1"})
+      assert %{"title" => "State did not answer"} = next(a, "page")
+    end
   end
 
   test "a links form becomes a change of those links, with who sent it and the note as cause",

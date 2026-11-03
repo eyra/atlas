@@ -11,6 +11,6 @@ COPY rela/scripts /app/rela/scripts
 RUN ATLAS_RELA_BIN=/app/bin /app/rela/scripts/start-test.sh install
 
 COPY rela/schema.yaml rela/data-entry.yaml /app/rela/
-COPY fly/apply-move.sh fly/rela-run.sh fly/counts.sh /app/fly/
+COPY fly/apply-move.sh fly/rela-run.sh fly/counts.sh fly/manifest.sh /app/fly/
 
 CMD ["/app/fly/rela-run.sh"]

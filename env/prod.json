@@ -1,6 +1,15 @@
 {
   "env": "prod",
   "tui_user": "melle",
+  "fly": {
+    "app": "eyra-atlas",
+    "rela_app": "eyra-atlas-rela",
+    "control_port": 7591,
+    "in_use": false,
+    "tunnel_port": 7593,
+    "local": "~/.local/share/atlas/prod-on-fly",
+    "move_from": "~/.local/share/atlas/prod"
+  },
   "control": { "host": "127.0.0.1", "port": 7591 },
   "rela": {
     "url": "http://127.0.0.1:7590/api/v1",

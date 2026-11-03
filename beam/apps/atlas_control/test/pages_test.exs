@@ -879,6 +879,67 @@ defmodule AtlasControl.PagesTest do
     refute list["empty"] =~ "Press"
   end
 
+  # Helpers, kept off the start page and one key away from it; each row counts the widgets
+  # and logs that point at it.
+  @counted @logged
+           |> put_in(["entities", "helper"], %{
+             "label" => "Helper",
+             "plural" => "helpers",
+             "primary" => "name",
+             "top" => false,
+             "start" => %{"key" => "g", "label" => "Helpers"},
+             "counts" => [%{"relation" => "helped_by", "text" => "{count} helped"}],
+             "properties" => %{"name" => %{"type" => "string", "required" => true}}
+           })
+           |> put_in(["relations", "helped_by"], %{
+             "label" => "helped by",
+             "from" => ["widget", "log"],
+             "to" => ["helper"],
+             "max_outgoing" => 1,
+             "inverse" => %{"id" => "helps", "label" => "helps"}
+           })
+
+  test "a kind whose rows count what points at it: one plain read per kind it comes from" do
+    plain = %{"linked" => %{}, "plain" => true}
+
+    assert Pages.reads({:list, "helper"}, @counted) == [
+             {"helper", %{}},
+             {"widget", plain},
+             {"log", plain}
+           ]
+
+    assert Pages.reads({:list, "log"}, @counted) == [{"log", %{}}]
+
+    %{blocks: [%{"props" => start}]} = Pages.render(:home, @counted, [%{"facts" => []}])
+    assert %{"key" => "g", "label" => "Helpers", "to" => "/k/helper"} in start["actions"]
+
+    helpers = %{"facts" => [fact("ada", %{"name" => "Ada"}), fact("bob", %{"name" => "Bob"})]}
+
+    helped = fn key, by ->
+      Map.put(fact(key, %{"title" => key}), "links", %{"helped_by" => by})
+    end
+
+    widgets = %{"facts" => [helped.("W-1", ["ada"]), helped.("W-2", ["ada"]), helped.("W-3", [])]}
+    logs = %{"facts" => [helped.("L-01", ["ada"])]}
+
+    %{blocks: [%{"props" => list}]} =
+      Pages.render({:list, "helper"}, @counted, [helpers, widgets, logs])
+
+    assert [%{"id" => "ada", "detail" => "3 helped"}, %{"id" => "bob", "detail" => "0 helped"}] =
+             list["rows"]
+
+    # A count whose read failed is left out, never shown as 0.
+    %{blocks: [%{"props" => list}]} =
+      Pages.render({:list, "helper"}, @counted, [helpers, widgets, %{"error" => "busy"}])
+
+    assert [ada, _] = list["rows"]
+    refute Map.has_key?(ada, "detail")
+
+    # A hint of a kind it counts refreshes the list.
+    assert Pages.shows?({:list, "helper"}, @counted, "log")
+    refute Pages.shows?({:list, "log"}, @counted, "helper")
+  end
+
   test "a kind made by no key: its page has no actions, its entries no add" do
     answer = %{"fact" => fact("L-01", %{"title" => "First"})}
     entries = %{"facts" => [fact("E-01", %{"title" => "Made W-1", "about" => "W-1"})]}

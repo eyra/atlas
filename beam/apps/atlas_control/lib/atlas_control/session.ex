@@ -24,7 +24,6 @@ defmodule AtlasControl.Session do
   alias AtlasControl.Pages
 
   @description "_description"
-  @read_timeout 2_000
   @read_attempts 3
   @first_resend 5_000
   @last_resend 60_000
@@ -196,15 +195,24 @@ defmodule AtlasControl.Session do
     do: {:noreply, notice(state, "error", "Say hello first.")}
 
   defp handle_op("open", %{"to" => to}, state) do
+    # Without the description (State did not answer at hello) no page can be worked out.
+    state = if state.description == %{}, do: describe(state), else: state
     {:noreply, show(%{state | form: %{}}, route(to, state), "open", nil)}
   end
 
   defp handle_op("refresh", _message, state) do
     state = describe(state)
 
-    if Pages.form?(state.route),
+    # A page State did not answer for is worked out again.
+    route =
+      case state.route do
+        {:unavailable, path, _failed} -> route(path, state)
+        route -> route
+      end
+
+    if Pages.form?(route),
       do: {:noreply, state},
-      else: {:noreply, show(state, state.route, "reconcile", nil)}
+      else: {:noreply, show(state, route, "reconcile", nil)}
   end
 
   # A submit names one of the contract's submit endpoints and its params, as a form's
@@ -242,36 +250,55 @@ defmodule AtlasControl.Session do
     end
   end
 
+  # "No such page" only for a path the contract has no page for. A page of the contract
+  # that cannot be worked out because State did not answer (no description, or no answer
+  # on which kind holds a key) is `{:unavailable, path, failed}`: it says so, and a
+  # refresh works it out again.
   defp route(to, state) do
-    route = Pages.route(to)
+    case Pages.route(to) do
+      :unknown ->
+        :unknown
 
-    case Pages.resolve(route, state.description) do
-      :unknown -> by_key(route, state)
-      resolved -> resolved
+      _ when state.description == %{} ->
+        {:unavailable, to, %{"error" => "State did not answer"}}
+
+      route ->
+        case Pages.resolve(route, state.description) do
+          :unknown -> by_key(route, to, state)
+          resolved -> resolved
+        end
     end
   end
 
   # `_` in place of a kind, for a key no id prefix claims: the kind without a prefix that
   # has it, asked of State (ids made from a name have no prefix).
-  defp by_key({page, "_", key}, state) when page in [:item, :edit, :delete] do
+  defp by_key({page, "_", key}, to, state) when page in [:item, :edit, :delete] do
     case kind_holding(key, state) do
+      {:ok, kind} -> {page, kind, key}
+      %{"error" => _} = failed -> {:unavailable, to, failed}
       nil -> :unknown
-      kind -> {page, kind, key}
     end
   end
 
-  defp by_key({:links, "_", key, relation}, state) do
+  defp by_key({:links, "_", key, relation}, to, state) do
     case kind_holding(key, state) do
+      {:ok, kind} -> Pages.resolve({:links, kind, key, relation}, state.description)
+      %{"error" => _} = failed -> {:unavailable, to, failed}
       nil -> :unknown
-      kind -> Pages.resolve({:links, kind, key, relation}, state.description)
     end
   end
 
-  defp by_key(_route, _state), do: :unknown
+  defp by_key(_route, _to, _state), do: :unknown
 
+  # `{:ok, kind}`; else the first failed read when one failed (it may have been that kind);
+  # else nil.
   defp kind_holding(key, state) do
-    Enum.find(Pages.unprefixed_kinds(state.description), fn kind ->
-      match?(%{"fact" => %{}}, ask(kind, %{"key" => key}))
+    Enum.reduce_while(Pages.unprefixed_kinds(state.description), nil, fn kind, failed ->
+      case ask(kind, %{"key" => key}) do
+        %{"fact" => %{}} -> {:halt, {:ok, kind}}
+        %{"error" => _} = answer -> {:cont, failed || answer}
+        _ -> {:cont, failed}
+      end
     end)
   end
 
@@ -614,7 +641,7 @@ defmodule AtlasControl.Session do
 
     resolved =
       case Pages.resolve(route, state.description) do
-        :unknown -> by_key(route, state)
+        :unknown -> by_key(route, nil, state)
         resolved -> resolved
       end
 
@@ -642,9 +669,12 @@ defmodule AtlasControl.Session do
     receive do
       {:atlas_bus, %Envelope{id: ^id, class: "answer"}, answer} -> answer
     after
-      @read_timeout -> ask(kind, content, attempts - 1)
+      read_timeout() -> ask(kind, content, attempts - 1)
     end
   end
+
+  # How long a read waits for State's answer before it asks again (a setting for tests).
+  defp read_timeout, do: Application.get_env(:atlas_control, :read_timeout_ms, 2_000)
 
   defp show(state, route, reason, position, refused \\ nil) do
     route = start(route, state)
@@ -727,6 +757,7 @@ defmodule AtlasControl.Session do
   defp current_path({:assigned, _}), do: "/"
   defp current_path(:home), do: "/"
   defp current_path(:unknown), do: "/"
+  defp current_path({:unavailable, path, _failed}), do: path
   defp current_path(route), do: Pages.path(route)
 
   defp spec(state, kind), do: get_in(state.description, ["entities", kind]) || %{}
