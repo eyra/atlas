@@ -148,6 +148,9 @@ defmodule AtlasControl.FakeStore do
   def link(part, widget), do: put(part, %{"title" => part}, "part", %{"of_widget" => [widget]})
   def silent(on?), do: GenServer.call(__MODULE__, {:silent, on?})
 
+  @doc "Leave reads unanswered: `true` for every kind, a list for those kinds, `false` for none."
+  def silent_reads(kinds), do: GenServer.call(__MODULE__, {:silent_reads, kinds})
+
   @doc "The content of the last fact it was sent."
   def last_fact, do: GenServer.call(__MODULE__, :last_fact)
 
@@ -166,6 +169,7 @@ defmodule AtlasControl.FakeStore do
        facts: %{},
        position: 0,
        silent: false,
+       silent_reads: %{},
        reserved: MapSet.new(),
        last: nil,
        refusing: %{},
@@ -179,6 +183,18 @@ defmodule AtlasControl.FakeStore do
     do: {:reply, :ok, put_in(s.facts[{kind, key}], {values, 0, links})}
 
   def handle_call({:silent, on?}, _from, s), do: {:reply, :ok, %{s | silent: on?}}
+
+  def handle_call({:silent_reads, kinds}, _from, s) do
+    silent =
+      case kinds do
+        true -> :all
+        false -> %{}
+        kinds -> Map.new(kinds, &{&1, true})
+      end
+
+    {:reply, :ok, %{s | silent_reads: silent}}
+  end
+
   def handle_call(:last_fact, _from, s), do: {:reply, s.last, s}
 
   def handle_call({:origin, kind, key, relation, origin}, _from, s),
@@ -193,6 +209,10 @@ defmodule AtlasControl.FakeStore do
     do: {:reply, :ok, %{s | reserved: MapSet.put(s.reserved, key)}}
 
   @impl true
+  def handle_info({:atlas_bus, %Envelope{class: "read", kind: kind}, _content}, s)
+      when s.silent_reads == :all or is_map_key(s.silent_reads, kind),
+      do: {:noreply, s}
+
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do
     answer =
       case {e.kind, content} do

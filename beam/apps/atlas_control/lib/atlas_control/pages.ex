@@ -273,6 +273,7 @@ defmodule AtlasControl.Pages do
   @doc "The kind a route is about."
   def kind_of(:home), do: :all
   def kind_of(:unknown), do: nil
+  def kind_of({:unavailable, _path, _failed}), do: nil
   def kind_of(:kinds), do: nil
   def kind_of(route), do: elem(route, 1)
 
@@ -383,6 +384,7 @@ defmodule AtlasControl.Pages do
         )
     ]
 
+  def reads({:unavailable, _path, _failed}, _), do: []
   def reads({:new, _}, _), do: []
   def reads({:new, _, _}, _), do: []
 
@@ -639,6 +641,11 @@ defmodule AtlasControl.Pages do
 
   def render(:unknown, _description, _answers, _form),
     do: missing("No such page", "Control serves no page at this path.", "/")
+
+  # A page of the contract that could not be worked out, because State did not answer
+  # (`AtlasControl.Session`): said as a failed read says it, never "No such page".
+  def render({:unavailable, _path, failed}, _description, _answers, _form),
+    do: unavailable(failed, "/")
 
   def render(route, description, answers, form) do
     kind = kind_of(route)
