@@ -57,6 +57,9 @@ defmodule AtlasE2E.Scenario do
 
   def type(tui, text), do: Tui.type(tui, text)
 
+  @doc "Resize the TUI's terminal; the TUI redraws for its new size by itself."
+  def resize(tui, width, height), do: Tui.resize(tui, width, height)
+
   # The command line
 
   @doc """
@@ -202,6 +205,10 @@ defmodule AtlasE2E.Scenario do
 
   @doc "Select the row of a list that shows `text`, and open it."
   def open_row(tui, text) do
+    # A row that is still on its way (by hint) is waited for first: moving down before it
+    # is there could move the selection past it.
+    see(tui, text)
+
     Enum.reduce_while(1..40, nil, fn _, _ ->
       screen = Tui.screen(tui)
 

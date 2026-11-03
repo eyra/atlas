@@ -30,6 +30,7 @@ defmodule AtlasTui.App do
     IO.write("\e[?1049h\e[?25l")
     parent = self()
     spawn_link(fn -> read_input(parent) end)
+    AtlasTui.Resize.watch(parent)
     reconcile = settings["reconcile_seconds"] || 5
     :timer.send_interval(reconcile * 1_000, :reconcile)
 
@@ -85,6 +86,9 @@ defmodule AtlasTui.App do
       {:tcp_closed, _socket} ->
         Process.send_after(self(), :reconnect, @reconnect)
         loop(draw(%{state | socket: nil, model: Model.disconnected(state.model)}))
+
+      :resized ->
+        loop(draw(state))
 
       :reconnect ->
         loop(draw(connect(state)))

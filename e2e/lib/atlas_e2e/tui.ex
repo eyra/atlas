@@ -36,6 +36,19 @@ defmodule AtlasE2E.Tui do
   @doc "Press keys by their tmux names: Enter, Escape, Up, Down, C-s, BSpace, NPage, …"
   def keys(tui, keys), do: tmux!(tui.socket, ["send-keys", "-t", tui.name | keys])
 
+  @doc "Make the TUI's terminal `width` × `height`, as a person resizing the window does."
+  def resize(tui, width, height),
+    do:
+      tmux!(tui.socket, [
+        "resize-window",
+        "-t",
+        tui.name,
+        "-x",
+        "#{width}",
+        "-y",
+        "#{height}"
+      ])
+
   def screen(tui) do
     {out, _} = tmux(tui.socket, ["capture-pane", "-p", "-t", tui.name])
     out
