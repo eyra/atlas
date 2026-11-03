@@ -334,14 +334,16 @@ defmodule AtlasControl.Pages do
   end
 
   # What is assigned to `by` (`start.assigned` in the description): the facts of every kind
-  # the relation starts at that point at `by` through it (the Assignments), and the facts of
-  # every kind those are a component of (`components/2`), whose they are.
+  # the relation starts at that point at `by` through it (the Assignments), and the facts
+  # whose component (`components/2`) they are, one step on: only those, so State works out
+  # progress and completion for them alone.
   def reads({:assigned, by}, description) do
     relation = assigned_rule(description)["relation"]
     froms = get_in(description, ["relations", relation, "from"]) || []
 
     for(from <- froms, do: {from, %{"linked" => %{relation => by}}}) ++
-      for {_relation, owner} <- owner_kinds(description, froms), do: {owner, %{}}
+      for {component, owner} <- owner_kinds(description, froms),
+          do: {owner, %{"linked" => %{component => %{relation => by}}}}
   end
 
   def reads({:list, kind}, _), do: [{kind, %{}}]

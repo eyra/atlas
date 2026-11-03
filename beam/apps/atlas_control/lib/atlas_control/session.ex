@@ -561,7 +561,7 @@ defmodule AtlasControl.Session do
         kinds = Map.keys(description["entities"] || %{})
         Enum.each(kinds, &AtlasBus.listen/1)
         state = %{state | description: description, listening: MapSet.new(kinds)}
-        %{state | by_kind: actor_kind(state)}
+        %{state | by_kind: known_kind(state, actor_kind(state))}
 
       _ ->
         notice(
@@ -571,6 +571,20 @@ defmodule AtlasControl.Session do
         )
     end
   end
+
+  # What the client was known to be stays while State does not answer whether it still is
+  # (a busy State): only a clear "no such fact" makes it nobody, so the start page does not
+  # flip to the plan and back.
+  defp known_kind(%{by_kind: nil}, found), do: found
+
+  defp known_kind(state, nil) do
+    case ask(state.by_kind, %{"key" => state.by}) do
+      %{"fact" => nil} -> nil
+      _ -> state.by_kind
+    end
+  end
+
+  defp known_kind(_state, found), do: found
 
   # The kind of fact the client is (the user at a TUI), or nil (an agent, a migration):
   # the kind whose ids its key fits, when a fact with that key exists.

@@ -1179,7 +1179,7 @@ defmodule AtlasControl.PagesTest do
   test "what is assigned through a component shows as the fact it belongs to" do
     assert Pages.reads({:assigned, "ada"}, @carded_start) == [
              {"card", %{"linked" => %{"held_by" => "ada"}}},
-             {"widget", %{}}
+             {"widget", %{"linked" => %{"card" => %{"held_by" => "ada"}}}}
            ]
 
     held = fn key, of, since, cause ->
