@@ -64,7 +64,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
   step "done_in is history only: no client sets it", fn ->
     %{issue: issue} = Process.get(:uc32)
     {%{"refused" => [why]}, _} = atlas_json(i, ["set", issue, "done_in=PR-eyra-atlas-1"], 1)
-    why =~ "only a migration sets it" || raise why
+    why =~ "only a migration or connector sets it" || raise why
     {tools, 0, _} = atlas(i, ["tools"])
     String.contains?(tools, "done_in") && raise "atlas tools offers done_in:\n" <> tools
   end

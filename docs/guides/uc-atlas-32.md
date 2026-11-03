@@ -18,7 +18,7 @@ atlas tui --env test
 | Accept a use case | open a use case in the TUI; in a terminal `atlas set UC-Atlas-NN accepted_by=melle --cause "tested it" --env test` | Within a second the page shows `Accepted by  melle` and under it, dim: `since 3 Nov 15:10 · by agent · tested it`. `atlas get UC-Atlas-NN --env test` shows the same line; `--json` gives it as `origins` (`since`, `by`, `cause`). |
 | Remove it | `atlas set UC-Atlas-NN accepted_by= --cause "found a bug" --env test` | `Accepted by  —` with `… · by agent · found a bug`. Every earlier link stays in State as the link's history. |
 | No completed field | `atlas help use_case --env test`; `atlas help issue --env test` | No `completed` field, and issue stages are specification, design, development. `use_case` lists `Links: accepted_by: to person, at most one`. |
-| History only | `atlas set IS-Atlas-NN done_in=PR-… --env test` | Refused: `Also done in is not set here: only a migration sets it.` `atlas tools` does not offer it. |
+| History only | `atlas set IS-Atlas-NN done_in=PR-… --env test` | Refused: `Also done in is not set here: only a migration or connector sets it.` `atlas tools` does not offer it. |
 
 ### Completed, worked out (IS-Atlas-63)
 

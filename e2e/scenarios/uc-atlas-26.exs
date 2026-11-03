@@ -161,4 +161,40 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
         raise "not a read with the token: #{inspect(r)}"
     end
   end
+
+  # IS-Atlas-69: a merged pull request whose title names another issue was done for it
+  # too; the connector records done_in, so that issue shows Done and "Also done in".
+  step "A merged pull request whose title names another issue makes it Done too", fn ->
+    %{use_case: use_case} = Process.get(:uc26)
+
+    {other, _} =
+      atlas_json(i, ["put", "issue", "--in", use_case, "--title", "Done in the flaky one"])
+
+    key = other["key"]
+
+    GitHub.put(flaky, %{
+      "title" => "A flaky one, which also does #{key}",
+      "state" => "closed",
+      "merged" => true,
+      "html_url" => flaky
+    })
+
+    deadline = System.monotonic_time(:millisecond) + connector_wait + 2_000
+
+    got =
+      Stream.repeatedly(fn ->
+        {got, _} = atlas_json(i, ["get", key])
+        got
+      end)
+      |> Enum.find(fn got ->
+        Enum.any?(got["fields"], &(&1 == ["Also done in", "PR-eyra-atlas-e2e-2602"])) or
+          (System.monotonic_time(:millisecond) > deadline || (Process.sleep(500) && false))
+      end)
+
+    Enum.any?(got["fields"], &(&1 == ["Also done in", "PR-eyra-atlas-e2e-2602"])) ||
+      raise "#{key} has no done_in: #{inspect(got["fields"])}"
+
+    progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
+    progress == "Done · PR-eyra-atlas-e2e-2602 merged" || raise inspect(got["fields"])
+  end
 end

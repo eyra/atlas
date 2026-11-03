@@ -154,8 +154,11 @@ defmodule AtlasControl.Pages do
   """
   def settable_relation?(description, relation, by \\ nil) do
     case get_in(description, ["relations", relation]) do
-      %{} = spec -> not parent?(spec) and spec["set_by"] in [nil, by]
-      _ -> false
+      %{} = spec ->
+        not parent?(spec) and (spec["set_by"] == nil or by in List.wrap(spec["set_by"]))
+
+      _ ->
+        false
     end
   end
 
@@ -405,7 +408,7 @@ defmodule AtlasControl.Pages do
 
             how =
               if Map.has_key?(spec, "set_by"),
-                do: "; set by a #{spec["set_by"]}, never by hand",
+                do: "; set by a #{Enum.join(List.wrap(spec["set_by"]), " or ")}, never by hand",
                 else: "; set #{relation}=<key>, empty removes it"
 
             "#{relation}: to #{Enum.join(spec["to"] || [], " or ")}#{limit}#{how}"
@@ -643,7 +646,7 @@ defmodule AtlasControl.Pages do
           not settable_relation?(description, relation, form[:by]) ->
             why =
               if rel["set_by"],
-                do: "only a #{rel["set_by"]} sets it",
+                do: "only a #{Enum.join(List.wrap(rel["set_by"]), " or ")} sets it",
                 else: "it says what the fact belongs under"
 
             missing(title, "#{String.capitalize(name)} is not set here: #{why}.", back)
