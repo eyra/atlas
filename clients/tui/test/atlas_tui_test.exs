@@ -171,8 +171,8 @@ defmodule AtlasTuiTest do
     assert AtlasTui.Browser.command(%{}) in ["open", "xdg-open"]
   end
 
-  # A page in two parts, as Control sends an item's page: its content, and its references
-  # (two lists) in columns.
+  # A page in two parts, as Control sends an item's page: its main part (the content) and
+  # its related part (two lists).
   defp parted(lines) do
     notes = Enum.map_join(1..lines, "\n", &"Line #{&1} of the notes")
     row = fn label, detail, to -> %{"label" => label, "detail" => detail, "to" => to} end
@@ -205,22 +205,16 @@ defmodule AtlasTuiTest do
       ],
       "markup" => [
         %{
-          "kind" => "columns",
-          "start" => "item",
-          "end" => "parent:of",
-          "props" => %{"count" => 2}
-        },
-        %{
-          "kind" => "border",
+          "kind" => "part",
           "start" => "item",
           "end" => "item",
-          "props" => %{"title" => "Content"}
+          "props" => %{"title" => "Content", "role" => "main"}
         },
         %{
-          "kind" => "border",
+          "kind" => "part",
           "start" => "list:parts",
           "end" => "parent:of",
-          "props" => %{"title" => "References"}
+          "props" => %{"title" => "References", "role" => "related"}
         },
         %{
           "kind" => "section",
@@ -594,7 +588,7 @@ defmodule AtlasTuiTest do
   end
 
   describe "markup" do
-    # A thing in a border, then its parts in a section, as Control sends a fact's page.
+    # A thing in a part of its own, then its parts in a section.
     @marked %{
       "op" => "page",
       "path" => "/k/thing/T-1",
@@ -619,7 +613,12 @@ defmodule AtlasTuiTest do
         }
       ],
       "markup" => [
-        %{"kind" => "border", "start" => "item", "end" => "item", "props" => %{}},
+        %{
+          "kind" => "part",
+          "start" => "item",
+          "end" => "item",
+          "props" => %{"title" => "Content", "role" => "main"}
+        },
         %{
           "kind" => "section",
           "start" => "parts",
@@ -629,11 +628,11 @@ defmodule AtlasTuiTest do
       ]
     }
 
-    test "a border is drawn around its blocks, a section heads its own" do
+    test "a part is drawn as a box with its title, a section heads its own" do
       lines = model(@marked) |> View.render(40, 20, 5) |> View.plain() |> String.split("\n")
 
       assert Enum.slice(lines, 2, 9) == [
-               " ┌────────────────────────────────────┐",
+               " ┌─ Content ──────────────────────────┐",
                " │ Thing T-1: First                   │",
                " │                                    │",
                " │   Id              T-1              │",
@@ -652,13 +651,18 @@ defmodule AtlasTuiTest do
           &[%{"kind" => "sparkle", "start" => "item", "end" => "item"} | &1]
         )
 
-      assert %Model{markup: [%{"kind" => "border"}, %{"kind" => "section"}]} = model(page)
+      assert %Model{markup: [%{"kind" => "part"}, %{"kind" => "section"}]} = model(page)
       assert screen(model(page)) =~ "┌"
     end
 
     test "markup that does not nest is left out whole, and the page renders flat" do
       crossing = [
-        %{"kind" => "border", "start" => "item", "end" => "parts", "props" => %{}},
+        %{
+          "kind" => "part",
+          "start" => "item",
+          "end" => "parts",
+          "props" => %{"title" => "All", "role" => "main"}
+        },
         %{
           "kind" => "section",
           "start" => "parts",
