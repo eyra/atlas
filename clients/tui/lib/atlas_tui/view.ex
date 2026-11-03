@@ -372,9 +372,15 @@ defmodule AtlasTui.View do
   defp markup(%kind{}, children, model, width, room) when kind in [Columns, Highlight],
     do: nodes(children, model, width, room)
 
+  # Rows in columns: the id (as wide as the list's longest), the label (the rest, cut
+  # with "…" only when it must be) and the detail (at most a third of the width).
   defp block(%ListBlock{} = list, at, model, width, _room) do
-    # Labels line up in a column; in a narrow part the column leaves room for the detail.
-    label_width = width |> div(2) |> min(40) |> max(16)
+    rows = list.rows || []
+    id_width = rows |> Enum.map(&String.length(&1.id || "")) |> Enum.max(fn -> 0 end)
+    id_column = if id_width > 0, do: id_width + 2, else: 0
+    detail = rows |> Enum.map(&String.length(&1.detail || "")) |> Enum.max(fn -> 0 end)
+    detail_column = if detail > 0, do: min(detail, div(width, 3)) + 2, else: 0
+    label_width = max(width - 4 - id_column - detail_column, 12)
 
     rows =
       case list.rows do
@@ -389,9 +395,12 @@ defmodule AtlasTui.View do
             style = if selected, do: :selected, else: :plain
             marker = if selected, do: " › ", else: "   "
 
+            id = if id_column > 0, do: pad(row.id || "", id_width) <> "  ", else: ""
+
             [
-              {style, marker <> pad(row.label, label_width) <> "  "},
-              {if(selected, do: :selected, else: :dim), row.detail || ""}
+              {style, marker <> id <> pad(cut(row.label, label_width), label_width)},
+              {if(selected, do: :selected, else: :dim),
+               if(row.detail, do: "  " <> row.detail, else: "")}
             ]
           end)
       end
@@ -862,5 +871,11 @@ defmodule AtlasTui.View do
   end
 
   defp pad(text, n), do: String.pad_trailing(String.slice(text, 0, n), n)
+
+  # Text no longer than `n`, ending in "…" when it had to be cut.
+  defp cut(text, n) do
+    if String.length(text) > n, do: String.slice(text, 0, max(n - 1, 0)) <> "…", else: text
+  end
+
   defp pad_left(text, n), do: String.pad_leading(text, max(n, 0))
 end
