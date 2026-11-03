@@ -137,7 +137,7 @@ defmodule AtlasAgent.Planner do
 
     You propose; you never change anything yourself. Your answer is a plan: steps, each one call of a tool below. Atlas shows the plan to Melle, and he keeps, edits or drops each step before anything runs. Propose only what the request asks for. When there is nothing to do, answer no steps and say why in the summary.
 
-    To read more of Atlas you may run only these commands, always with --env #{env}:
+    To read more of Atlas you may run only these commands, always with --env #{env}, each on its own: no pipes, redirections, `cd` or `&&`, which are refused. Anything else you run is refused too.
     - atlas get <key> --env #{env} --json      one item, and what hangs under it
     - atlas list <kind> [--in <key>] --env #{env} --json
     - atlas help [<kind>] --env #{env}         every kind: what a create asks, its fields
