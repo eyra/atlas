@@ -6,25 +6,19 @@ Test environment only, on this MacBook. Nothing touches prod, Fly or the live re
 
 ## Start
 
-You need three terminals, all in the Atlas repository.
+In any terminal, from any folder:
 
-1. **The core** (rela, Bus, State, Control):
+```sh
+atlas tui
+```
 
-   ```sh
-   bin/atlas up --env test
-   ```
+That is all. It starts rela test and the core (Bus, State, Control) in the background when they are not answering, also after a reboot, and opens the TUI. A first start compiles for about half a minute. When the running core is from an older build, `atlas tui` restarts it, so you never try an old build by accident. It also updates `~/projects/eyra/atlas` to the newest develop first.
 
-   It starts rela test in the background if it is not answering (also after a reboot), then runs the Bus, State and Control in the foreground. It prints `Control test listens on 127.0.0.1:7691` when ready. The first start compiles for about half a minute. Ctrl-C twice stops the core; rela keeps running (`bin/atlas rela-stop --env test` stops it, `bin/atlas rela-status --env test` shows it).
+For TUI 2, run `atlas tui` again in a second terminal, beside the first.
 
-2. **TUI 1**:
+More: `atlas status` shows what runs and which build; `atlas logs` follows the core's log; `atlas stop` stops the core (rela keeps running); `atlas restart` restarts it.
 
-   ```sh
-   bin/atlas tui --env test
-   ```
-
-3. **TUI 2**: the same command in a third terminal. Put it beside the first.
-
-Without `--env test` both commands refuse: prod is the default and is not built yet.
+Once, to get the `atlas` command: `~/projects/eyra/atlas/bin/atlas install` (it links `~/.local/bin/atlas` to the main clone).
 
 ## Try
 
@@ -47,7 +41,7 @@ Also try:
 - **Two at once.** Press `n` in both TUIs, give each a title, and save both. They get different codes. If both take the same number, State refuses the second, and its TUI tries the next number by itself (`… is taken; trying …`).
 - **A deleted code.** Delete the newest scene and create another right away. rela keeps a deleted code reserved for a few minutes, so the TUI says the code is taken and moves on to the next number.
 - **A scene with use cases.** Deleting a scene that still has use cases is refused, with the number of use cases (see UC-Atlas-02).
-- **Losing Control.** Stop the core with Ctrl-C twice. Both TUIs say `Not connected to Control. Retrying…` and show nothing old as current. Start the core again; they come back on the page they were on.
+- **Losing Control.** Run `atlas stop` in a third terminal. Both TUIs say `Not connected to Control. Retrying…` and show nothing old as current. Run `atlas restart`; they come back on the page they were on.
 
 ## What is underneath
 
