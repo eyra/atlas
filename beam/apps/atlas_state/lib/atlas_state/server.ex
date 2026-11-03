@@ -221,16 +221,48 @@ defmodule AtlasState.Server do
 
   # `progress?` false (a plain read): the facts and their links only, no progress.
   defp read_all(state, kind, spec, linked, progress?) do
-    with {:ok, facts} <- Rela.list(state.rela, spec["plural"]),
+    with {:ok, linked} <- linked_keys(state, linked),
+         {:ok, facts} <- Rela.list(state.rela, spec["plural"]),
          facts =
            Enum.filter(facts, fn fact ->
-             Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
+             Enum.all?(linked, fn {rel, keys} ->
+               Enum.any?(fact.links[rel] || [], &(&1 in keys))
+             end)
            end),
          {:ok, facts} <- if(progress?, do: with_progress(state, kind, facts), else: {:ok, facts}) do
       %{"facts" => Enum.map(facts, &wire(state, kind, &1))}
     else
       {:error, reason} -> read_error(reason)
     end
+  end
+
+  # `"linked" => %{relation => key}`: the facts that point at `key`. The key may also be a
+  # condition on the fact the relation points at, one step on (`%{relation => key}` of
+  # that fact): the facts whose Assignment points at someone, say. `%{relation => [keys]}`.
+  defp linked_keys(state, linked) do
+    Enum.reduce_while(linked, {:ok, %{}}, fn
+      {relation, key}, {:ok, acc} when is_binary(key) ->
+        {:cont, {:ok, Map.put(acc, relation, [key])}}
+
+      {relation, %{} = inner}, {:ok, acc} ->
+        with [to] <- get_in(state.description, ["relations", relation, "to"]),
+             plural when is_binary(plural) <-
+               get_in(state.description, ["entities", to, "plural"]),
+             {:ok, facts} <- Rela.list(state.rela, plural) do
+          keys =
+            for fact <- facts,
+                Enum.all?(inner, fn {rel, key} -> key in (fact.links[rel] || []) end),
+                do: fact.key
+
+          {:cont, {:ok, Map.put(acc, relation, keys)}}
+        else
+          {:error, _} = error -> {:halt, error}
+          _ -> {:halt, {:error, {:failed, "#{relation} does not point at one described kind"}}}
+        end
+
+      {relation, _}, _acc ->
+        {:halt, {:error, {:failed, "linked #{relation} needs a key or a condition"}}}
+    end)
   end
 
   # Only the fact, as rela has it, with its links: one call to rela, for a reader that

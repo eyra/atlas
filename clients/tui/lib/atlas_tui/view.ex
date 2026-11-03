@@ -40,10 +40,18 @@ defmodule AtlasTui.View do
 
   @doc "The screen: exactly `height` lines of plain segments."
   def render(%Model{} = model, width, height, reconcile_seconds) do
+    # What waits for the user, on every page: Control's words for it.
+    count = if model.count, do: " · " <> model.count, else: ""
+
     header = [
       [
         {env_style(model.env), " Atlas · #{model.env}"},
-        {:dim, pad_left(model.title <> " ", width - 13 - String.length(model.env))}
+        {:pending, count},
+        {:dim,
+         pad_left(
+           model.title <> " ",
+           width - 13 - String.length(model.env) - String.length(count)
+         )}
       ],
       [{:dim, String.duplicate("─", width)}]
     ]
@@ -384,23 +392,38 @@ defmodule AtlasTui.View do
     rows =
       case list.rows do
         [] ->
-          [[{:dim, "   " <> (list.empty || "Nothing here.")}]]
+          # What fills an empty list may take more than a line: it wraps.
+          for line <- Text.wrap(list.empty || "Nothing here.", width - 4),
+              do: [{:dim, "   " <> line}]
 
         rows ->
           rows
           |> Enum.with_index()
-          |> Enum.map(fn {row, i} ->
+          |> Enum.flat_map(fn {row, i} ->
             selected = at + i == model.selected
             style = if selected, do: :selected, else: :plain
             marker = if selected, do: " › ", else: "   "
 
             id = if id_column > 0, do: pad(row.id || "", id_width) <> "  ", else: ""
+            label = {style, marker <> id <> pad(cut(row.label, label_width), label_width)}
+            dim = if selected, do: :selected, else: :dim
 
-            [
-              {style, marker <> id <> pad(cut(row.label, label_width), label_width)},
-              {if(selected, do: :selected, else: :dim),
-               if(row.detail, do: "  " <> row.detail, else: "")}
-            ]
+            # A detail longer than its column (why a fact is yours, say) goes under the
+            # label, whole, rather than cut at the edge.
+            if row.detail && String.length(row.detail) > detail_column - 2 do
+              indent = String.duplicate(" ", 3 + id_column)
+
+              [
+                [label]
+                | for(
+                    line <- Text.wrap(row.detail, width - 4 - id_column),
+                    do: [{:dim, indent <> line}]
+                  )
+              ]
+              |> List.update_at(0, &(&1 ++ [{dim, ""}]))
+            else
+              [[label, {dim, if(row.detail, do: "  " <> row.detail, else: "")}]]
+            end
           end)
       end
 

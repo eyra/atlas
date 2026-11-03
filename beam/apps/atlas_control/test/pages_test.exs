@@ -1258,6 +1258,131 @@ defmodule AtlasControl.PagesTest do
            ]
   end
 
+  # A start page of what is assigned to the client (made-up kinds and words).
+  @assigning @d
+             |> put_in(["entities", "keeper"], %{
+               "top" => false,
+               "label" => "Keeper",
+               "plural" => "keepers",
+               "primary" => "title",
+               "properties" => %{"title" => %{"type" => "string"}}
+             })
+             |> put_in(["relations", "kept_by"], %{
+               "from" => ["widget", "part"],
+               "to" => ["keeper"],
+               "max_outgoing" => 1
+             })
+             |> put_in(["entities", "widget", "start"], %{"key" => "s", "label" => "Widgets"})
+             |> Map.put("flows", %{"f" => %{"kinds" => ["widget"], "field" => "shade"}})
+             |> Map.put("start", %{
+               "assigned" => %{
+                 "relation" => "kept_by",
+                 "title" => "Kept by you",
+                 "count" => "{count} kept by you",
+                 "empty" => "Nothing is kept by you."
+               }
+             })
+
+  defp kept(key, title, since, cause, extra \\ %{}) do
+    fact(key, Map.merge(%{"title" => title}, extra))
+    |> Map.put("origins", %{"kept_by" => %{"since" => since, "cause" => cause}})
+  end
+
+  # What is assigned is a component (a card, as the Assignment): the start page shows the
+  # fact it belongs to, with what is expected on the card and why.
+  @carded_start @carded
+                |> Map.put("flows", %{
+                  "f" => %{"kinds" => ["widget"], "on" => "card", "field" => "todo"}
+                })
+                |> Map.put("start", %{
+                  "assigned" => %{
+                    "relation" => "held_by",
+                    "title" => "Held by you",
+                    "count" => "{count} held"
+                  }
+                })
+
+  test "what is assigned through a component shows as the fact it belongs to" do
+    assert Pages.reads({:assigned, "ada"}, @carded_start) == [
+             {"card", %{"linked" => %{"held_by" => "ada"}}},
+             {"widget", %{"linked" => %{"card" => %{"held_by" => "ada"}}}}
+           ]
+
+    held = fn key, of, since, cause ->
+      fact(key, %{"of" => of, "todo" => "Paint it"})
+      |> Map.put("origins", %{"held_by" => %{"since" => since, "cause" => cause}})
+    end
+
+    cards = %{
+      "facts" => [
+        held.("C-W-1", "W-1", "2026-11-03T10:00:00Z", "hers"),
+        held.("C-W-2", "W-2", "2026-11-03T12:00:00Z", "done one")
+      ]
+    }
+
+    widgets = %{
+      "facts" => [
+        fact("W-1", %{"title" => "One"}) |> Map.put("links", %{"card" => ["C-W-1"]}),
+        fact("W-2", %{"title" => "Two"})
+        |> Map.put("links", %{"card" => ["C-W-2"]})
+        |> Map.put("completion", %{"done" => true}),
+        fact("W-3", %{"title" => "Not held"}) |> Map.put("links", %{"card" => ["C-W-3"]})
+      ]
+    }
+
+    %{blocks: [%{"props" => list}]} =
+      Pages.render({:assigned, "ada"}, @carded_start, [cards, widgets])
+
+    # The fact, not its card; a completed one is not there; what the card expects, and why.
+    assert [%{"id" => "W-1", "label" => "One", "to" => "/k/widget/W-1"} = row] = list["rows"]
+    assert row["detail"] =~ ~r/^Paint it · since 3 Nov \d\d:00 · hers$/
+    assert Pages.assigned_count(@carded_start, [cards, widgets]) == "1 held"
+  end
+
+  test "a client of a kind the start's relation points at opens on what points at it" do
+    assert Pages.assigned_start?(@assigning, "keeper")
+    refute Pages.assigned_start?(@assigning, nil)
+    refute Pages.assigned_start?(@d, "keeper")
+
+    assert Pages.reads({:assigned, "K-1"}, @assigning) == [
+             {"widget", %{"linked" => %{"kept_by" => "K-1"}}},
+             {"part", %{"linked" => %{"kept_by" => "K-1"}}}
+           ]
+
+    widgets = %{
+      "facts" => [
+        kept("W-1", "Older", "2026-11-03T10:00:00Z", "first", %{"shade" => "dark"}),
+        kept("W-2", "Done", "2026-11-03T12:00:00Z", "done")
+        |> Map.put("completion", %{"done" => true})
+      ]
+    }
+
+    parts = %{"facts" => [kept("P-1", "Newer", "2026-11-03T11:00:00Z", "second")]}
+    answers = [widgets, parts]
+
+    %{title: "Kept by you", back: nil, blocks: [%{"props" => list}]} =
+      Pages.render({:assigned, "K-1"}, @assigning, answers)
+
+    # Newest move first; a completed one is not there; what its flow expects, and why.
+    assert [%{"id" => "P-1", "to" => "/k/part/P-1"}, %{"id" => "W-1"} = older] = list["rows"]
+    assert older["detail"] =~ ~r/^dark · since 3 Nov \d\d:00 · first$/
+    assert [%{"key" => "s", "label" => "Widgets", "to" => "/k/widget"}] = list["actions"]
+    assert Pages.assigned_count(@assigning, answers) == "2 kept by you"
+
+    %{blocks: [%{"props" => empty}]} =
+      Pages.render({:assigned, "K-1"}, @assigning, [%{"facts" => []}, %{"facts" => []}])
+
+    assert empty["rows"] == [] and empty["empty"] == "Nothing is kept by you."
+  end
+
+  test "with a start of assignments, the only top kind's list goes back to it" do
+    answer = %{"facts" => []}
+    assert %{back: nil} = Pages.render({:list, "widget"}, @assigning, [answer], %{by_kind: nil})
+
+    assert %{back: "/"} =
+             Pages.render({:list, "widget"}, @assigning, [answer], %{by_kind: "keeper"})
+  end
+
   test "the kinds page names the kinds that hold a record" do
     %{blocks: blocks} =
       Pages.render(:kinds, put_in(@logged, ["entities", "log", "agent"], "request"), [])

@@ -49,6 +49,10 @@ defmodule AtlasControl.Session do
        pending: %{},
        by: "agent",
        by_kind: nil,
+       # What is assigned to the client, for the header of every page (`start.assigned`):
+       # its words, and whether a hint has made it stale since.
+       count: nil,
+       count_stale: true,
        cause: nil
      }}
   end
@@ -123,6 +127,8 @@ defmodule AtlasControl.Session do
 
   # A hint: a fact of some kind was stored, by anyone.
   def handle_info({:atlas_bus, %Envelope{class: "stored"} = envelope, content}, state) do
+    state = %{state | count_stale: true}
+
     if Pages.shows?(state.route, state.description, envelope.kind) do
       if Pages.form?(state.route) do
         {:noreply,
@@ -603,7 +609,7 @@ defmodule AtlasControl.Session do
         kinds = Map.keys(description["entities"] || %{})
         Enum.each(kinds, &AtlasBus.listen/1)
         state = %{state | description: description, listening: MapSet.new(kinds)}
-        %{state | by_kind: actor_kind(state)}
+        %{state | by_kind: known_kind(state, actor_kind(state))}
 
       _ ->
         notice(
@@ -613,6 +619,20 @@ defmodule AtlasControl.Session do
         )
     end
   end
+
+  # What the client was known to be stays while State does not answer whether it still is
+  # (a busy State): only a clear "no such fact" makes it nobody, so the start page does not
+  # flip to the plan and back.
+  defp known_kind(%{by_kind: nil}, found), do: found
+
+  defp known_kind(state, nil) do
+    case ask(state.by_kind, %{"key" => state.by}) do
+      %{"fact" => nil} -> nil
+      _ -> state.by_kind
+    end
+  end
+
+  defp known_kind(_state, found), do: found
 
   # The kind of fact the client is (the user at a TUI), or nil (an agent, a migration):
   # the kind whose ids its key fits, when a fact with that key exists.
@@ -657,8 +677,12 @@ defmodule AtlasControl.Session do
   defp read_timeout, do: Application.get_env(:atlas_control, :read_timeout_ms, 2_000)
 
   defp show(state, route, reason, position, refused \\ nil) do
+    route = start(route, state)
+
     answers =
       Enum.map(Pages.reads(route, state.description), fn {kind, content} -> ask(kind, content) end)
+
+    state = count(state, route, answers)
 
     form = Map.merge(state.form, %{by: state.by, by_kind: state.by_kind})
     page = Pages.render(route, state.description, answers, form)
@@ -692,11 +716,45 @@ defmodule AtlasControl.Session do
         "at" => now()
       }
       |> then(&if(refused, do: Map.put(&1, "refused", refused), else: &1))
+      |> then(&if(state.count, do: Map.put(&1, "count", state.count), else: &1))
     )
 
     %{state | route: route, form: form}
   end
 
+  # `/` for a client that is a fact of a kind the start's relation points at:
+  # what is assigned to it, when the description has such a start page.
+  defp start(:home, state) do
+    if Pages.assigned_start?(state.description, state.by_kind),
+      do: {:assigned, state.by},
+      else: :home
+  end
+
+  defp start(route, _state), do: route
+
+  # The header's count: from the page when it is the start page of assignments, else read
+  # again only after a hint (a fact may have moved to or away from the client).
+  defp count(state, {:assigned, _} = _route, answers),
+    do: %{state | count: Pages.assigned_count(state.description, answers), count_stale: false}
+
+  defp count(%{count_stale: true} = state, _route, _answers) do
+    if Pages.assigned_start?(state.description, state.by_kind) do
+      route = {:assigned, state.by}
+
+      answers =
+        Enum.map(Pages.reads(route, state.description), fn {kind, content} ->
+          ask(kind, content)
+        end)
+
+      count(state, route, answers)
+    else
+      %{state | count: nil, count_stale: false}
+    end
+  end
+
+  defp count(state, _route, _answers), do: state
+
+  defp current_path({:assigned, _}), do: "/"
   defp current_path(:home), do: "/"
   defp current_path(:unknown), do: "/"
   defp current_path({:unavailable, path, _failed}), do: path

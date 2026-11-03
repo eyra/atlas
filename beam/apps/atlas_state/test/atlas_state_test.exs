@@ -383,6 +383,23 @@ defmodule AtlasStateTest do
     assert %{"incoming" => %{"of_widget" => ["P-1"]}} = read("widget", %{"key" => "W-1"})
   end
 
+  test "a read can filter on what the linked fact points at, one step on", _ do
+    fact("create", "M-1", %{"title" => "Maker"}, kind: "maker")
+    fact("create", "W-1", %{"title" => "Made"}, links: %{"made_by" => ["M-1"]})
+    fact("create", "W-2", %{"title" => "Not made"})
+    fact("create", "P-1", %{"title" => "On made"}, kind: "part", links: %{"of_widget" => ["W-1"]})
+
+    fact("create", "P-2", %{"title" => "On other"},
+      kind: "part",
+      links: %{"of_widget" => ["W-2"]}
+    )
+
+    assert %{"facts" => [%{"key" => "P-1"}]} =
+             read("part", %{"linked" => %{"of_widget" => %{"made_by" => "M-1"}}})
+
+    assert %{"facts" => []} = read("part", %{"linked" => %{"of_widget" => %{"made_by" => "M-9"}}})
+  end
+
   test "a link the description does not allow, or to nothing, is refused", _ do
     fact("create", "W-1", %{"title" => "One"})
 

@@ -19,7 +19,9 @@ reconcile_wait = 7_000
 
 scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instance: i} ->
   step "A person, made from its name; not on the start page", fn ->
-    {person, _} = atlas_json(i, ["put", "person", "--name", "Melle"])
+    # UC-Atlas-28 may have made melle already (the TUI's user): the same name is the same key.
+    atlas(i, ["put", "person", "--name", "Melle"])
+    {person, _} = atlas_json(i, ["get", "melle"])
     person["key"] == "melle" || raise inspect(person)
     {scene, _} = atlas_json(i, ["put", "scene", "--title", "A scene to accept"])
 
@@ -102,7 +104,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     see(t1, ~r/#{use_case}\s+A use case to accept\s+Done · 1\/1/)
     press(t1, "Escape")
     # The scenes list may be longer than the screen: the scene's own page says it.
-    see(t1, ~r/Atlas · test\s+Scenes$/m)
+    see(t1, ~r/Atlas · test.*\sScenes$/m)
     open_row(t1, "A scene to accept")
     see(t1, "Scene #{scene}: A scene to accept")
     # Its page has more lines than its content part shows (the owner, IS-Atlas-75).
@@ -110,7 +112,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
     progress == "To test · 1/1" || raise inspect(got["fields"])
     press(t1, "Escape")
-    see(t1, ~r/Atlas · test\s+Scenes$/m)
+    see(t1, ~r/Atlas · test.*\sScenes$/m)
   end
 
   step "Nothing new goes under an accepted use case", fn ->
