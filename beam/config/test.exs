@@ -1,0 +1,6 @@
+import Config
+
+# Unit tests start the layers themselves, with fakes where rela or a socket would be.
+config :atlas_state, start: false
+config :atlas_control, start: false
+config :logger, level: :warning

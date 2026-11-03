@@ -1,0 +1,3 @@
+# rela-server needs this file; Atlas has no rela web UI (Control is the UI).
+app:
+  name: Atlas test

@@ -1,0 +1,146 @@
+# Atlas description in the current rela (upstream sourcehaven-bv/rela v26.10.14).
+# Grows one entity at a time: Scene (IS-02), then Use case (IS-08), Issue
+# (IS-10), Pull request (IS-11). A new entity is a change to this file only.
+#
+# Scene, Use case and Issue keep Flux's meaning and fields, so a Flux connector
+# can sync them later. Ids are the codes (SC-Atlas-01): the writer chooses
+# them, so a resent create is safe; flux_id holds Flux's id once synced.
+#
+# Shared shapes (rela has no base types and refuses unknown top-level keys;
+# reuse is shared enum types and YAML anchors, merged with `<<:`, defined
+# where first used):
+#   flux item  = title, description, completed, flux_id  (&flux_item)
+#                Scene, Use case, Issue
+#   plan item  = flux item + status (Flux list group)    (&plan_item)
+#                Scene, Use case; Issue has Flux's stage instead
+#   child link = in_<parent>, at most one parent, inverse <children>
+#                (a naming convention; no rela construct to share)
+#   outside ref = the field that names the item in its outside system:
+#                flux_id (Scene, Use case, Issue), url (Pull request)
+
+version: "1.0"
+namespace: "https://eyra.co/ontology/atlas#"
+description: |
+  The product plan of Atlas: scenes, their use cases, their issues and the
+  pull requests of those issues.
+
+types:
+  # Flux files scenes and use cases in a group of its Product list; no group
+  # is "none". No transitions: Flux allows any move, and a sync must follow it.
+  plan_status:
+    values: [refine, ready_to_pick_up]
+    labels:
+      refine: Refine
+      ready_to_pick_up: Ready to pick up
+    descriptions:
+      refine: Being written and negotiated; not ready to build from.
+      ready_to_pick_up: Agreed; the next level can be derived and built.
+
+  # Flux's issue stages; done is `completed`, apart from the stage.
+  issue_stage:
+    values: [specification, design, development, testing]
+    labels:
+      specification: Specification
+      design: Design
+      development: Development
+      testing: Testing
+
+  # GitHub's pull request states (gh: state). A draft is an open pull
+  # request, so draft is a separate flag, as in GitHub (gh: isDraft).
+  pull_request_state:
+    values: [open, closed, merged]
+    labels:
+      open: Open
+      closed: Closed
+      merged: Merged
+
+  github_pull_url:
+    description: The web address of a GitHub pull request
+    validations:
+      - pattern: '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+$'
+        error: "Must be a GitHub pull request URL, e.g. https://github.com/eyra/atlas/pull/12"
+
+entities:
+  scene:
+    label: Scene
+    plural: scenes
+    aliases: [sc]
+    id_type: manual
+    id_prefix: "SC-"
+    description: |
+      An actor-centred view of the system, with one angle and one zoom level
+      (Flux's meaning). The id is its code, e.g. SC-Atlas-01.
+    properties: &plan_item
+      <<: &flux_item
+        title: { type: string, required: true, description: "Without the code (Flux: name)" }
+        description: { type: string, description: "The text (Flux: description)" }
+        completed: { type: boolean, default: false, description: "Flux: completed" }
+        flux_id: { type: string, unique: true, description: "Flux (Basecamp) id, set by a later Flux sync" }
+      status: { type: plan_status, description: "Flux group; empty = no group" }
+
+  use_case:
+    label: Use case
+    plural: use_cases
+    aliases: [uc]
+    id_type: manual
+    id_prefix: "UC-"
+    description: |
+      The technical contract for part of a scene (Flux's meaning). The id is
+      its code, e.g. UC-Atlas-01.
+    properties:
+      <<: *plan_item
+
+  issue:
+    label: Issue
+    plural: issues
+    aliases: [is]
+    id_type: manual
+    id_prefix: "IS-"
+    description: |
+      Small, independently testable work, normally one pull request (Flux's
+      meaning). The id is its Atlas code, e.g. IS-Atlas-01.
+    properties:
+      <<: *flux_item
+      stage: { type: issue_stage, description: "Flux: stage" }
+      flux_ref: { type: string, unique: true, description: "Flux's own issue code (ref), e.g. NEXT-240, set by a later Flux sync" }
+
+  pull_request:
+    label: Pull request
+    plural: pull_requests
+    aliases: [pr]
+    id_type: manual
+    id_prefix: "PR-"
+    description: |
+      A GitHub pull request for an issue. Linked by URL; a GitHub connector
+      fills title and state later. The id is derived from the URL,
+      PR-<owner>-<repo>-<number>, so linking the same URL twice is one record.
+    properties:
+      url: { type: github_pull_url, required: true, unique: true, description: "GitHub: url" }
+      title: { type: string, description: "GitHub: title" }
+      state: { type: pull_request_state, description: "GitHub: state" }
+      draft: { type: boolean, default: false, description: "GitHub: isDraft" }
+
+relations:
+  in_scene:
+    label: in scene
+    description: A use case belongs to at most one scene (Flux); a scene has zero or more use cases.
+    from: [use_case]
+    to: [scene]
+    max_outgoing: 1
+    inverse: { id: use_cases, label: use cases }
+
+  in_use_case:
+    label: in use case
+    description: An issue belongs to at most one use case (Flux); a use case has zero or more issues.
+    from: [issue]
+    to: [use_case]
+    max_outgoing: 1
+    inverse: { id: issues, label: issues }
+
+  in_issue:
+    label: in issue
+    description: A pull request belongs to at most one issue; an issue has zero or more pull requests.
+    from: [pull_request]
+    to: [issue]
+    max_outgoing: 1
+    inverse: { id: pull_requests, label: pull requests }

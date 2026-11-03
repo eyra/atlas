@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Atlas on this Mac.
+#
+#   bin/atlas up  --env test   # rela test in the background (started if it is not
+#                              # answering, also after a reboot), then the core (Bus,
+#                              # State, Control) in the foreground; Ctrl-C twice stops it
+#   bin/atlas tui --env test   # a TUI; open as many as you like, each in its own terminal
+#   bin/atlas rela-status --env test
+#   bin/atlas rela-stop   --env test
+#
+# prod is the default environment and is not built yet.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+cmd="${1:-}"; [ -n "$cmd" ] || usage; shift
+env=prod
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --env) env="${2:-}"; shift 2 ;;
+    --env=*) env="${1#--env=}"; shift ;;
+    *) echo "atlas: unknown option $1" >&2; usage ;;
+  esac
+done
+
+if [ "$env" = prod ]; then echo "atlas: prod is not built yet; use --env test" >&2; exit 1; fi
+# ATLAS_ENV_FILE: a private instance of the environment (other ports and data), so a
+# test run by an agent never meets the one Melle uses. The default is env/<env>.json.
+settings="${ATLAS_ENV_FILE:-$root/env/$env.json}"
+[ -f "$settings" ] || { echo "atlas: no environment '$env' (no $settings)" >&2; exit 1; }
+export ATLAS_ROOT="$root" ATLAS_ENV="$env"
+
+setting() { v="$(plutil -extract "$1" raw -o - "$settings")"; echo "${v/#\~/$HOME}"; }
+rela_url="$(setting rela.url)"
+# The rela scripts take their port, data and binaries from these.
+export ATLAS_RELA_PORT="$(setting rela.port)" ATLAS_RELA_DATA="$(setting rela.data)" ATLAS_RELA_BIN="$(setting rela.bin)"
+export ATLAS_TEST_ROOT="$(dirname "$ATLAS_RELA_DATA")"
+
+case "$cmd" in
+  up)
+    if curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null; then
+      echo "rela $env: answering at $rela_url"
+    else
+      "$root/rela/scripts/start-bg.sh"
+    fi
+    cd "$root/beam"
+    exec mix run --no-halt
+    ;;
+  tui)
+    # Ctrl-S saves a form; without this the terminal would take it as "pause output".
+    saved="$(stty -g 2>/dev/null || true)"
+    stty -ixon 2>/dev/null || true
+    cd "$root/clients/tui"
+    status=0
+    mix atlas.tui --env "$env" || status=$?
+    [ -n "$saved" ] && stty "$saved" 2>/dev/null || true
+    exit $status
+    ;;
+  rela-status) exec "$root/rela/scripts/status.sh" ;;
+  rela-stop) exec "$root/rela/scripts/stop.sh" ;;
+  *) usage ;;
+esac
