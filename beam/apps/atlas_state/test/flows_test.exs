@@ -84,6 +84,27 @@ defmodule AtlasState.FlowsTest do
     assert %{"sign" => ["done: when knows no colour"]} = Flows.check(description(odd))
   end
 
+  test "no state depends on what Flow writes: it passes over the hints of its own writes" do
+    states = [
+      hd(@sound),
+      %{
+        "name" => "check",
+        "when" => %{"reopened" => "signed_by"},
+        "owner" => "ada",
+        "next" => ["done"]
+      },
+      %{"name" => "work", "owner" => "bob", "next" => ["check"]}
+    ]
+
+    description =
+      description(states, %{"owner_relation" => "signed_by"})
+      |> put_in(["entities", "box", "progress"], %{"own" => "todo"})
+
+    assert %{"sign" => problems} = Flows.check(description)
+    assert "check depends on signed_by, which Flow writes" in problems
+    assert "box's progress or completion depends on todo, which Flow writes" in problems
+  end
+
   test "the definitions in rela/atlas.json are sound" do
     extra = @root |> Path.join("rela/atlas.json") |> File.read!() |> JSON.decode!()
     assert map_size(extra["flows"]) > 0

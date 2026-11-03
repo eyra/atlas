@@ -162,6 +162,18 @@ defmodule AtlasStateTest do
     assert %{"error" => "rela does not describe \"gadget\""} = read("gadget")
   end
 
+  test "a plain read answers the fact and its links only", %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One"})
+    FakeRela.link(rela, "P-1", "W-1")
+
+    assert %{"fact" => %{"key" => "W-1", "values" => %{"title" => "One"}} = plain} =
+             answer = read("widget", %{"key" => "W-1", "plain" => true})
+
+    refute Map.has_key?(answer, "incoming")
+    refute Map.has_key?(plain, "progress")
+    assert %{"fact" => nil} = read("widget", %{"key" => "W-9", "plain" => true})
+  end
+
   test "Atlas's additions are merged into the description State answers", %{rela: rela, dir: dir} do
     extra = Path.join(dir, "atlas.json")
 

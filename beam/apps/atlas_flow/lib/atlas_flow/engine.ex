@@ -7,10 +7,11 @@ defmodule AtlasFlow.Engine do
     definition runs on, and starts a process for each fact that has none. A process stops
     by itself once its fact is done; reading again starts it when the fact opens again.
   - It listens to every kind. A hint pokes the processes of the fact it is about and of
-    every fact above it (through its parent links, read from State), so those look again
-    at once; one that has no process yet gets one. A hint about a delete pokes them all,
-    since what was above it can no longer be read. A lost hint only waits for the timer
-    (nobody depends on a hint).
+    every fact above it (through its parent links, read plainly from State), so those look
+    again at once; one that has no process yet gets one. A hint about a delete pokes them
+    all, since what was above it can no longer be read. A hint of Flow's own write is
+    passed over: Flow writes only what no state depends on (State checks that). A lost
+    hint only waits for the timer (nobody depends on a hint).
 
   It reaches State only over the Bus, as the endpoint `flow`.
   """
@@ -52,17 +53,21 @@ defmodule AtlasFlow.Engine do
 
   def handle_info({:atlas_bus, %Envelope{class: "stored", kind: kind}, content}, state) do
     case content do
+      # Its own write changes nothing any state depends on.
+      %{"by" => "flow"} ->
+        :ok
+
       %{"op" => "delete"} ->
         for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasFlow.Supervisor),
             is_pid(pid),
-            do: Item.poke(pid)
+            do: Item.poke(pid, state.description)
 
       %{"key" => key} when is_binary(key) ->
         for {kind, key} <- up(state.description, kind, key, @depth),
             kind in state.kinds,
             pid = ensure(kind, key, state),
             is_pid(pid),
-            do: Item.poke(pid)
+            do: Item.poke(pid, state.description)
 
       _ ->
         :ok
@@ -115,7 +120,7 @@ defmodule AtlasFlow.Engine do
 
   defp up(description, kind, key, depth) do
     parents =
-      case Talk.read(kind, %{"key" => key}) do
+      case Talk.read(kind, %{"key" => key, "plain" => true}) do
         %{"fact" => %{"links" => links}} ->
           for {relation, %{"parent" => true, "from" => from, "to" => [to]}} <-
                 description["relations"] || %{},
