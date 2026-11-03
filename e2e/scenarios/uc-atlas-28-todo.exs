@@ -85,8 +85,8 @@ scenario "UC-Atlas-28: What to do, for the owner of a fact", fn %{t1: t1, instan
   step "atlas get shows the same part to its owner, and to nobody else", fn ->
     %{use_case: use_case, scene: scene} = Process.get(:uc28todo)
     # An agent on the command line is not melle: no part.
-    {got, _} = atlas_json(i, ["get", use_case])
-    Map.has_key?(got, "todo") && raise inspect(got["todo"])
+    {plain_get, _} = atlas_json(i, ["get", use_case])
+    Map.has_key?(plain_get, "todo") && raise inspect(plain_get["todo"])
 
     # The coordinator owns an open issue; as the coordinator, atlas get shows its part.
     {other, _} = atlas_json(i, ["put", "use_case", "--in", scene, "--title", "Still building"])
