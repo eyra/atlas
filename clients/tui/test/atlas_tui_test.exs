@@ -691,7 +691,7 @@ defmodule AtlasTuiTest do
   end
 
   test "the header shows what waits for the user; a long detail goes under its row" do
-    long = "Test it · since 3 Nov 14:20 · all 12 issues are completed, and Melle can test it now"
+    long = "Test it · since 3 Nov 14:20 · all 12 parts are completed, and Melle can test it now"
 
     page =
       @list
@@ -700,7 +700,7 @@ defmodule AtlasTuiTest do
 
     text = model(page) |> View.render(90, 20, 5) |> View.plain()
     assert text =~ ~r/Atlas · test · 2 assigned to you\s+Things/
-    assert text =~ "all 12 issues are completed"
+    assert text =~ "all 12 parts are completed"
     # Whole, under the row's label, not cut at the edge.
     assert text =~ ~r/First\s*\n\s+Test it · since/
   end
