@@ -18,7 +18,7 @@ scenario "UC-Atlas-02: Manage the use cases of a scene", fn %{t1: t1, t2: t2} ->
     scene = Process.get(:scene)
     press(t1, "a")
     see(t1, "New use case in #{scene}")
-    for field <- ["Status", "Completed", "Flux id"], do: refute_see(t1, field)
+    for field <- ["Flux group", "Status", "Completed", "Flux id"], do: refute_see(t1, field)
     type(t1, "Add the first use case")
     press(t1, "Down")
     type(t1, "Made by the end-to-end test.")
@@ -44,7 +44,7 @@ scenario "UC-Atlas-02: Manage the use cases of a scene", fn %{t1: t1, t2: t2} ->
     press(t1, "Escape")
     see(t1, ~r/Scene SC-Atlas-\d+: A scene with use cases/)
     open_row(t1, "Add the first use case")
-    screen = see(t1, ~r/Status\s+Refine/)
+    screen = see(t1, ~r/Flux group\s+Refine/)
     screen =~ ~r/Completed\s+no/ || raise "completed is not no"
   end
 

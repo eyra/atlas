@@ -10,7 +10,7 @@ scenario "UC-Atlas-01: Manage scenes", fn %{t1: t1, t2: t2, instance: instance} 
     press(t1, "n")
     form = see(t1, ~r/^ New scene$/m)
     for field <- ["Title *", "Description"], do: form =~ field || raise("no #{field}")
-    for field <- ["Id", "Status", "Completed", "Flux id"], do: refute_see(t1, field)
+    for field <- ["Id", "Flux group", "Status", "Completed", "Flux id"], do: refute_see(t1, field)
 
     type(t1, "Write the first scene")
     press(t1, "Down")
@@ -26,7 +26,7 @@ scenario "UC-Atlas-01: Manage scenes", fn %{t1: t1, t2: t2, instance: instance} 
     press(t1, "Escape")
     see(t1, "› Write the first scene")
     open_row(t1, "Write the first scene")
-    screen = see(t1, ~r/Status\s+Refine/)
+    screen = see(t1, ~r/Flux group\s+Refine/)
     screen =~ ~r/Completed\s+no/ || raise "completed is not no"
     refute_see(t1, "Flux id")
     open_row(t2, "Write the first scene")
