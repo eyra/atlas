@@ -396,8 +396,19 @@ defmodule AtlasControl.Session do
 
     if Pages.may_link_to?(state.description, relation, state.by, state.by_kind, keys) do
       note = String.trim(raw["note"] || "")
-      state = if note != "", do: %{state | cause: note}, else: state
-      put_fact(state, kind, link(key, relation, keys), {:item, kind, key})
+      change = Pages.change_action(state.description, relation)
+
+      state =
+        case Pages.change_cause(change || %{}, keys, state.by, note) do
+          nil -> state
+          cause -> %{state | cause: cause}
+        end
+
+      # What the change also asks (`with`) goes in the same change as the link.
+      with_fields = List.wrap(change && change["with"])
+      values = Pages.values_for(spec(state, kind), Map.take(raw, with_fields))
+      content = %{link(key, relation, keys) | "values" => values}
+      put_fact(state, kind, content, {:item, kind, key})
     else
       show(state, route, "refused", nil)
     end

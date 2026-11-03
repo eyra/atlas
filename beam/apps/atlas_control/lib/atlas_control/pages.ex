@@ -1005,7 +1005,12 @@ defmodule AtlasControl.Pages do
     back = path({:item, kind, key})
     rel = get_in(description, ["relations", relation]) || %{}
     name = rel["label"] || relation
-    title = "#{String.capitalize(name)}: #{key}"
+    change = change_action(description, relation)
+
+    title =
+      if change,
+        do: "#{change["label"]} #{label(spec, fact_of(answer, key))}",
+        else: "#{String.capitalize(name)}: #{key}"
 
     case answer do
       %{"fact" => nil} ->
@@ -1028,22 +1033,34 @@ defmodule AtlasControl.Pages do
 
           true ->
             current = Enum.join(get_in(fact, ["links", relation]) || [], ", ")
-            values = Map.merge(%{"to" => current}, form[:values] || %{})
+            # The fields the change also asks (`with`), as the fact holds them.
+            with_fields = List.wrap(change && change["with"])
+
+            held =
+              for name <- with_fields,
+                  into: %{},
+                  do: {name, to_text(get_in(fact, ["values", name]))}
+
+            values = Map.merge(Map.put(held, "to", current), form[:values] || %{})
 
             form_block =
               Blocks.form(
                 title: title,
-                inputs: [
-                  Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key),
-                  link_input(rel, values["to"], targets),
-                  Blocks.input(
-                    name: "note",
-                    label: "Note",
-                    kind: "multiline",
-                    value: values["note"],
-                    hint: "Why; kept with the change"
-                  )
-                ],
+                inputs:
+                  [
+                    Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key),
+                    link_input(rel, values["to"], targets)
+                  ] ++
+                    inputs(spec, values, only: with_fields) ++
+                    [
+                      Blocks.input(
+                        name: "note",
+                        label: "Note",
+                        kind: "multiline",
+                        value: values["note"],
+                        hint: "Why; kept with the change"
+                      )
+                    ],
                 submit_label: "Save",
                 submit_to: call_to({:links, kind, key, relation}),
                 cancel_to: back,
@@ -1433,14 +1450,40 @@ defmodule AtlasControl.Pages do
         may_link?(description, relation, form[:by], form[:by_kind]),
         {op, page} <-
           [
-            if((get_in(fact, ["links", relation]) || []) == [],
-              do: {"set", :set},
-              else: {"remove", :remove}
-            )
+            cond do
+              is_map(actions["change"]) -> {"change", :links}
+              (get_in(fact, ["links", relation]) || []) == [] -> {"set", :set}
+              true -> {"remove", :remove}
+            end
           ],
         %{"label" => label, "key" => key} <- [actions[op]],
         do: Blocks.action(label: label, key: key, to: path({page, kind, fact["key"], relation}))
   end
+
+  @doc """
+  The action that changes an association whether a link is there or not
+  (`actions.change`: label, key, with, cause), or nil.
+  """
+  def change_action(description, relation) do
+    case get_in(description, ["relations", relation, "actions", "change"]) do
+      %{} = change -> change
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The cause of a change made through `change_action/2`: the note, when one is given, as it
+  is given; else its `cause` with {to} (the keys, or nobody) and {by} filled in. Nil when
+  there is neither.
+  """
+  def change_cause(_change, _keys, _by, note) when is_binary(note) and note != "", do: note
+
+  def change_cause(%{"cause" => cause}, keys, by, _note) when is_binary(cause) do
+    to = if keys == [], do: "nobody", else: Enum.join(keys, ", ")
+    cause |> String.replace("{to}", to) |> String.replace("{by}", to_string(by))
+  end
+
+  def change_cause(_change, _keys, _by, _note), do: nil
 
   @doc """
   Why a fact of `kind` may not go under `parent` (a fact of `parent_kind`, as State
@@ -1462,6 +1505,10 @@ defmodule AtlasControl.Pages do
       end
     end)
   end
+
+  # The fact a read answered, or one with only its key (to title a page that says it is gone).
+  defp fact_of(%{"fact" => %{} = fact}, _key), do: fact
+  defp fact_of(_answer, key), do: %{"key" => key, "values" => %{}}
 
   @doc "The keys a links form's `to` names; none removes the links."
   def link_keys(text) do
