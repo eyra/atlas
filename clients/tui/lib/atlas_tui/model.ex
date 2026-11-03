@@ -344,14 +344,20 @@ defmodule AtlasTui.Model do
             {%{model | ask: nil}, []}
 
           request ->
-            plan = %Plan{title: "Planning…", request: request, state: "planning", steps: []}
-            ask = %{"op" => "ask", "request" => request, "on" => model.path || "/"}
-            {%{model | ask: nil, plan: plan, steps: @no_steps, notice: nil}, [{:agent, ask}]}
+            ask_agent(%{model | ask: nil}, request, nil)
         end
 
       _ ->
         {model, []}
     end
+  end
+
+  # Ask the agent about the page you are on; its plan shows over the page.
+  defp ask_agent(model, request, intent) do
+    plan = %Plan{title: "Planning…", request: request, state: "planning", steps: []}
+    ask = %{"op" => "ask", "request" => request, "on" => model.path || "/"}
+    ask = if intent, do: Map.put(ask, "intent", intent), else: ask
+    {%{model | plan: plan, steps: @no_steps, notice: nil}, [{:agent, ask}]}
   end
 
   defp plan_key(model, %Plan{state: "planning"}, key) do
@@ -477,8 +483,12 @@ defmodule AtlasTui.Model do
     link = Enum.find(links(model), &(key == {:char, &1.key}))
 
     case key do
+      # An action Control marks for the agent (`agent:<intent>`) asks it about this page.
       _ when action != nil ->
-        open(model, action.to)
+        case action.to do
+          "agent:" <> intent -> ask_agent(model, action.label, intent)
+          to -> open(model, to)
+        end
 
       _ when link != nil ->
         open_url(model, link.url)

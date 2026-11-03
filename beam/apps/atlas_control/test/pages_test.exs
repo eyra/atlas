@@ -774,6 +774,46 @@ defmodule AtlasControl.PagesTest do
     assert Pages.shows?({:item, "widget", "W-1"}, @logged, "entry")
   end
 
+  test "actions the description adds, only while a field has one of the values in when" do
+    logged =
+      put_in(@logged, ["entities", "entry", "actions"], [
+        %{"key" => "x", "label" => "Undo", "to" => "agent:undo", "when" => %{"state" => ["done"]}}
+      ])
+
+    page = fn state ->
+      answer = %{"fact" => fact("E-01", %{"title" => "One", "state" => state})}
+
+      %{blocks: [item | _]} =
+        Pages.render({:item, "entry", "E-01"}, logged, [answer, %{"facts" => []}])
+
+      item["props"]["actions"]
+    end
+
+    assert [%{"key" => "x", "label" => "Undo", "to" => "agent:undo"}] = page.("done")
+    assert page.("dropped") == []
+  end
+
+  test "a cause field may name a fact of its own kind" do
+    logged =
+      put_in(@logged, ["entities", "log", "properties", "redoes"], %{
+        "type" => "string",
+        "cause" => "Redone by"
+      })
+
+    assert {"log", %{}} in Pages.reads({:item, "log", "L-01"}, logged)
+    answer = %{"fact" => fact("L-01", %{"title" => "First"})}
+    redo = %{"facts" => [fact("L-02", %{"title" => "Again", "redoes" => "L-01"})]}
+    reads = Pages.reads({:item, "log", "L-01"}, logged)
+
+    answers =
+      for {kind, content} <- tl(reads),
+          do: if(kind == "log" and content == %{}, do: redo, else: %{"facts" => []})
+
+    page = Pages.render({:item, "log", "L-01"}, logged, [answer | answers])
+    redone = Enum.find(page.blocks, &(&1["id"] == "cause:log:redoes"))
+    assert [%{"id" => "L-02"}] = redone["props"]["rows"]
+  end
+
   test "the kinds page names the kinds that hold a record" do
     %{blocks: blocks} =
       Pages.render(:kinds, put_in(@logged, ["entities", "log", "agent"], "request"), [])
