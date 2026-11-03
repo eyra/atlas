@@ -37,7 +37,7 @@ defmodule AtlasControl.Pages do
     form, never through the change form. One marked `set_by` (a migration, say) is
     history only: shown, and set only by a client that says it is that (`by`). One with
     `only_target` is set and removed only by a client that is one of the facts it points
-    at, and links only that one: "only a person accepts". Its `actions` (`set`, `remove`:
+    at, and links only that one (who accepts is who it names). Its `actions` (`set`, `remove`:
     label and key) are offered on the page, `requires_completed_children` refuses `set`
     while a fact under it is not completed, and `closes_parent` refuses a new fact under
     one that has the link.
