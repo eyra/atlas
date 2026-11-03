@@ -34,10 +34,10 @@ atlas migrate-completion --env prod --dry-run
 atlas migrate-completion --env prod
 ```
 
-The dry run prints every step and writes nothing. On prod today that is 48 steps, each one fact with the cause `completion becomes an association (UC-Atlas-32)`:
+The dry run prints every step and writes nothing. On prod today that is 47 steps, each one fact with the cause `completion becomes an association (UC-Atlas-32)`:
 
 - the person `melle`;
-- `accepted_by` melle on UC-Atlas-01, 02, 03, 04 and 22 (the ones with completed=true; no scene has it);
+- `accepted_by` melle on UC-Atlas-01, 02, 03 and 04 (the ones with completed=true; no scene has it);
 - 30 issues from stage testing to development;
 - `done_in` for the 12 issues done in another issue's pull request: IS-Atlas-02 to 07 in PR #1, IS-Atlas-08 in PR #2, IS-Atlas-12 and 34 to 37 in PR #14 (`tools/plan/done_in.json`).
 
@@ -45,12 +45,12 @@ The real run then stops rela, removes the old `completed` values with rela's own
 
 Check: `atlas get UC-Atlas-01 --env prod` shows `Accepted by: melle (since …, by migration: completion becomes an association (UC-Atlas-32))`; `atlas get IS-Atlas-34 --env prod` shows `Also done in: PR-eyra-atlas-14`.
 
-Until IS-Atlas-63 is merged, nothing shows as Done: Done came from the `completed` field. Merge IS-Atlas-63 before running the migration on prod, or right after.
+This PR and IS-Atlas-63 merge together, then the migration runs: without IS-Atlas-63 nothing would show Done, since Done came from the `completed` field.
 
 ## What changed for this
 
 - **rela's description:** `rela/schema.yaml` has a `person` kind (name; id made from it) and two associations: `accepted_by` (scene, use case → person, at most one, inverse `accepted`) and `done_in` (issue → pull request, inverse `also_done`). `completed` and the stage `testing` are gone. `rela/atlas.json` marks the parent relations (`relations.<name>.parent`: in_scene, in_use_case, in_issue), so an association with at most one link is never taken for a parent; `done_in` is `set_by: migration`; `person` is `top: false` (not on the start page).
 - **State:** a change may set or remove the links of the relations it names. State records the fact that set each link (when, position, by, cause) in `links.dets` in its data folder, and answers each link with its `origins`, and one fact with the `history` of its links.
-- **Control:** a page shows each association with the fact that set it (`pair.origin` in the contract, 0.5.0). `/k/<kind>/<key>/links/<relation>` sets or removes an association's links, with a note as its cause; parents and `set_by` associations are refused there. Each fact carries `by`: who is on the session. A submit may carry a `cause`.
+- **Control:** a page shows each association with the fact that set it (`pair.origin` in the contract, 0.7.0). `/k/<kind>/<key>/links/<relation>` sets or removes an association's links, with a note as its cause; parents and `set_by` associations are refused there. Each fact carries `by`: who is on the session. A submit may carry a `cause`.
 - **Clients:** the TUI shows the origin dim under the value. `atlas set <key> <association>=<key>` sets a link, empty removes it, and `--cause` says why (put and set). `atlas get --json` gives `origins`.
 - **Tools:** `atlas migrate-completion` (`tools/plan`, `AtlasPlan.Completion`).
