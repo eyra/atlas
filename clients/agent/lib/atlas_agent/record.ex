@@ -55,7 +55,8 @@ defmodule AtlasAgent.Record do
   """
   def step(client, %{"step" => kind}, key, step, made \\ nil, was \\ nil) do
     values = %{
-      "title" => step["label"] || "",
+      # Its number in the plan first: steps are kept in the order they ran, dropped last.
+      "title" => "#{step["n"]}. #{step["label"]}",
       "n" => to_string(step["n"]),
       "tool" => step["tool"] || "",
       "state" => step["state"],
