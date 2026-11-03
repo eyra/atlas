@@ -6,10 +6,15 @@ defmodule AtlasTui.Model do
   The TUI knows blocks only. Which keys open what comes from the blocks' actions and
   links; the TUI adds moving around, going back, refreshing and quitting. A link's key
   gives the effect `{:open_url, url}`, only for an http or https address.
+
+  A page whose markup puts its blocks in columns (`parts/1`) has parts, each with its own
+  room and scrolling. Tab moves the focus from part to part. In the part with the lists,
+  the arrows move the selected row; in another, they scroll it. The rows of all lists on
+  a page are one selection (`rows/1`).
   """
 
   alias AtlasTui.{Blocks, Text}
-  alias AtlasTui.Blocks.{Confirm, Form, Input, Item}
+  alias AtlasTui.Blocks.{Columns, Confirm, Form, Input, Item}
   alias AtlasTui.Blocks.List, as: ListBlock
 
   @scroll_step 10
@@ -27,6 +32,10 @@ defmodule AtlasTui.Model do
             # A page longer than the screen: nil follows the selected row or the focus;
             # a number of lines is scrolled to by page up and page down.
             scroll: nil,
+            # The part with the focus (nil: the one with the lists), and how far each part
+            # is scrolled by hand (by part number; missing: its top, or its selected row).
+            part: nil,
+            scrolls: %{},
             focus: 0,
             # Where typing goes in a multi-line input: `{line, column}`, nil for the end.
             cursor: nil,
@@ -73,7 +82,9 @@ defmodule AtlasTui.Model do
       | selected: keep_selection(model, same),
         focus: if(same, do: model.focus, else: 0),
         cursor: if(same, do: model.cursor, else: nil),
-        scroll: if(same, do: model.scroll, else: first_scroll(blocks))
+        scroll: if(same, do: model.scroll, else: first_scroll(blocks)),
+        part: if(same, do: model.part, else: nil),
+        scrolls: if(same, do: model.scrolls, else: %{})
     }
 
     model = if msg["reason"] == "hint", do: %{model | last_hint: updated}, else: model
@@ -94,18 +105,66 @@ defmodule AtlasTui.Model do
   # A list keeps the selected row when it is redrawn, even if rows moved.
   defp keep_selection(_model, false), do: 0
 
-  defp keep_selection(model, true) do
-    case list(model) do
-      %ListBlock{rows: rows} -> min(model.selected, max(length(rows) - 1, 0))
-      nil -> 0
-    end
-  end
+  defp keep_selection(model, true), do: min(model.selected, max(length(rows(model)) - 1, 0))
 
   # The block that takes the keys.
 
   def form(model), do: Enum.find(model.blocks, &match?(%Form{}, &1))
   def list(model), do: Enum.find(model.blocks, &match?(%ListBlock{}, &1))
   def confirm(model), do: Enum.find(model.blocks, &match?(%Confirm{}, &1))
+
+  @doc "The rows of every list on the page, in order: one selection."
+  def rows(model) do
+    Enum.flat_map(model.blocks, fn
+      %ListBlock{rows: rows} -> rows || []
+      _ -> []
+    end)
+  end
+
+  @doc """
+  The parts of a page: the block ids of each column, when the page's markup puts all its
+  blocks in columns of two or more. `[]` for a page in one part.
+  """
+  def parts(%__MODULE__{markup: []}), do: []
+
+  def parts(model) do
+    case AtlasSpec.Markup.tree(model.ids, model.markup) do
+      [{:markup, %{"value" => %Columns{}}, [_, _ | _] = columns}] -> Enum.map(columns, &ids_in/1)
+      _ -> []
+    end
+  end
+
+  defp ids_in({:block, id}), do: [id]
+  defp ids_in({:markup, _entry, children}), do: Enum.flat_map(children, &ids_in/1)
+
+  @doc "The part with the focus: the one chosen with tab, else the first with a list."
+  def part(model) do
+    parts = parts(model)
+
+    lists =
+      for {id, %ListBlock{}} <- Enum.zip(model.ids, model.blocks), into: MapSet.new(), do: id
+
+    cond do
+      parts == [] -> nil
+      model.part != nil -> rem(model.part, length(parts))
+      true -> Enum.find_index(parts, fn ids -> Enum.any?(ids, &(&1 in lists)) end) || 0
+    end
+  end
+
+  @doc "Whether the part with the focus holds the lists, so the arrows move the selection."
+  def selecting?(model) do
+    case part(model) do
+      nil ->
+        true
+
+      part ->
+        ids = Enum.at(parts(model), part)
+
+        Enum.any?(Enum.zip(model.ids, model.blocks), fn {id, block} ->
+          id in ids and match?(%ListBlock{}, block)
+        end)
+    end
+  end
 
   def actions(model) do
     Enum.flat_map(model.blocks, fn
@@ -117,11 +176,7 @@ defmodule AtlasTui.Model do
 
   @doc "The web addresses the keys open: the item's, then the selected row's."
   def links(model) do
-    selected =
-      case list(model) do
-        %ListBlock{rows: rows} -> Enum.at(rows || [], model.selected)
-        nil -> nil
-      end
+    selected = Enum.at(rows(model), model.selected)
 
     Enum.flat_map(model.blocks, fn
       %Item{links: links} -> links || []
@@ -161,7 +216,8 @@ defmodule AtlasTui.Model do
   end
 
   defp browse_key(model, key) do
-    rows = (list(model) && list(model).rows) || []
+    rows = rows(model)
+    part = part(model)
     action = Enum.find(actions(model), &(key == {:char, &1.key}))
     link = Enum.find(links(model), &(key == {:char, &1.key}))
 
@@ -171,6 +227,39 @@ defmodule AtlasTui.Model do
 
       _ when link != nil ->
         open_url(model, link.url)
+
+      # Tab moves the focus to the next part of a page in parts.
+      k when k in [:tab, :shift_tab] and part != nil ->
+        step = if k == :tab, do: 1, else: -1
+        count = length(parts(model))
+        {%{model | part: rem(part + step + count, count)}, []}
+
+      # In a part without lists, the arrows scroll it, a line at a time.
+      k when k in [:up, {:char, "k"}] and part != nil ->
+        if selecting?(model),
+          do:
+            {%{
+               model
+               | selected: max(model.selected - 1, 0),
+                 scrolls: Map.delete(model.scrolls, part)
+             }, []},
+          else: {scroll_part(model, part, -1), []}
+
+      k when k in [:down, {:char, "j"}] and part != nil ->
+        if selecting?(model),
+          do:
+            {%{
+               model
+               | selected: min(model.selected + 1, max(length(rows) - 1, 0)),
+                 scrolls: Map.delete(model.scrolls, part)
+             }, []},
+          else: {scroll_part(model, part, 1), []}
+
+      :page_down when part != nil ->
+        {scroll_part(model, part, @scroll_step), []}
+
+      :page_up when part != nil ->
+        {scroll_part(model, part, -@scroll_step), []}
 
       # Moving in a list brings its selected row back in sight.
       k when k in [:up, {:char, "k"}] ->
@@ -310,6 +399,10 @@ defmodule AtlasTui.Model do
     do: {put_in(model.values[name], fun.(model.values[name] || "")), []}
 
   defp edit(model, _input, _fun), do: {model, []}
+
+  # How far a part is scrolled; the view keeps it within the part's lines.
+  defp scroll_part(model, part, by),
+    do: put_in(model.scrolls[part], max((model.scrolls[part] || 0) + by, 0))
 
   defp back(%{back: nil} = model), do: {model, []}
   defp back(model), do: open(model, model.back)

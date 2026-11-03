@@ -71,7 +71,7 @@ On the wire a block is `{"id": "item", "type": "list", "props": {...}}`. An opti
 |---|---|---|
 | `section` | `title`, `collapsible` | a heading with a rule, above its blocks |
 | `border` | `title` (optional) | a box around its blocks |
-| `columns` | `count` | not yet: its blocks show one under the other |
+| `columns` | `count` | over a whole page, its parts: side by side from 120 columns, else one above the other; each part with its own room and scrolling, tab moves the focus between them. Elsewhere not yet: its blocks show one under the other |
 | `highlight` | `tone` (info, ok, error, pending) | not yet: its blocks show as they are |
 
 On the wire an entry is `{"kind": "section", "start": "<block id>", "end": "<block id>", "props": {...}}`, covering `start` to `end`, both included, with `"group"` on the pieces of split markup.
@@ -84,7 +84,7 @@ All markup nests, of every kind, as in XML: two entries share no block, or one c
 - `move/4`: a moved block keeps an entry only while it stays inside the stretch, and joins those it lands inside; markup of the block alone moves with it.
 - `place/3`: adds an entry, split into grouped pieces where it would cross.
 
-Today an item page puts the item in a `border` and each related list in a `section` carrying its title (a scene: the scene in a border, then a "Use cases" section).
+An item page is in two parts (IS-Atlas-48): `columns` over the whole page, then a `border` titled "Content" around the item (later also what is said about it, such as comments) and a `border` titled "References" around its related lists and the facts it points at, each list in a `section` carrying its title (a scene: the scene in Content; its "Use cases" in References; a use case also lists "In scene" there, to open its scene from). The rows of all lists on a page are one selection.
 
 The names (view model, markup) live in one place: `AtlasSpec.Names`, plus the `defmarkup` macro and the module name `AtlasSpec.Markup`.
 

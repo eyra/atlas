@@ -358,7 +358,8 @@ defmodule AtlasControl.Pages do
                 Blocks.columns("item", List.last(ids), count: 2),
                 Blocks.border("item", "item", title: "Content"),
                 Blocks.border(first, List.last(ids), title: "References")
-              ] ++ for {id, {title, _list}} <- references, do: Blocks.section(id, id, title: title)
+              ] ++
+                for {id, {title, _list}} <- references, do: Blocks.section(id, id, title: title)
           end
 
         content = [{"item", item} | for({id, {_title, list}} <- references, do: {id, list})]

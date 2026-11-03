@@ -57,6 +57,9 @@ defmodule AtlasE2E.Scenario do
 
   def type(tui, text), do: Tui.type(tui, text)
 
+  @doc "Resize the TUI's terminal; the TUI redraws for its new size by itself."
+  def resize(tui, width, height), do: Tui.resize(tui, width, height)
+
   # The command line
 
   @doc """

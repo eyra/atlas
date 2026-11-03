@@ -24,6 +24,8 @@ defmodule AtlasTui.View do
   @resting_rows 8
   # A focused one never shows fewer than this, however small the screen.
   @least_rows 3
+  # A page in parts shows them side by side from this width; narrower, one above the other.
+  @side_by_side 120
 
   @doc """
   The contract's names this view knows: the blocks it draws, and the kinds of markup it
@@ -46,10 +48,13 @@ defmodule AtlasTui.View do
     # the status line. A page longer than its room adds scrolling to the help.
     room_for = fn help -> max(height - length(header) - 3 - length(help), 1) end
     short = help_lines(help(model, false), width)
-    lines = body(model, width, room_for.(short))
-    help = help_lines(help(model, length(lines) > room_for.(short)), width)
+    {lines, long} = laid_out(model, width, room_for.(short))
+    help = help_lines(help(model, long), width)
     room = room_for.(help)
-    lines = if room == room_for.(short), do: lines, else: body(model, width, room)
+
+    {lines, _} =
+      if room == room_for.(short), do: {lines, long}, else: laid_out(model, width, room)
+
     body = window(lines, model, room)
     body = body ++ Elixir.List.duplicate([], room - length(body))
 
@@ -106,28 +111,225 @@ defmodule AtlasTui.View do
 
   defp body(model, width, room), do: nodes(content(model), model, width, room)
 
-  # The view model as a tree, top down: blocks, and markup around them.
-  defp content(%Model{markup: []} = model), do: Enum.map(model.blocks, &{:block, &1})
+  # The body's lines, and whether it is longer than its room. A page in parts fills its
+  # room exactly, each part scrolled on its own; a part that is cut says so itself.
+  defp laid_out(model, width, room) do
+    case content(model) do
+      [{:markup, _columns, parts}] when model.connected and model.blocks != [] ->
+        if Model.parts(model) != [],
+          do: parts(parts, model, width, room),
+          else: plain_layout(model, width, room)
+
+      _ ->
+        plain_layout(model, width, room)
+    end
+  end
+
+  defp plain_layout(model, width, room) do
+    lines = body(model, width, room)
+    {lines, length(lines) > room}
+  end
+
+  # The view model as a tree, top down: blocks (with where their rows start in the page's
+  # one selection), and markup around them.
+  defp content(%Model{markup: []} = model),
+    do: Enum.map(with_offsets(model), fn {_id, block, at} -> {:block, block, at} end)
 
   defp content(model) do
-    by_id = Map.new(Enum.zip(model.ids, model.blocks))
+    by_id = Map.new(with_offsets(model), fn {id, block, at} -> {id, {block, at}} end)
 
     model.ids
     |> AtlasSpec.Markup.tree(model.markup)
     |> blocks_in(by_id)
   end
 
+  defp with_offsets(model) do
+    {placed, _} =
+      model.ids
+      |> Enum.zip(model.blocks)
+      |> Enum.map_reduce(0, fn
+        {id, %ListBlock{rows: rows} = block}, at -> {{id, block, at}, at + length(rows || [])}
+        {id, block}, at -> {{id, block, at}, at}
+      end)
+
+    placed
+  end
+
   defp blocks_in(tree, by_id) do
     Enum.map(tree, fn
-      {:block, id} -> {:block, Map.fetch!(by_id, id)}
-      {:markup, entry, children} -> {:markup, entry, blocks_in(children, by_id)}
+      {:block, id} ->
+        {block, at} = Map.fetch!(by_id, id)
+        {:block, block, at}
+
+      {:markup, entry, children} ->
+        {:markup, entry, blocks_in(children, by_id)}
     end)
+  end
+
+  # A page in parts: side by side when the terminal is wide enough (the first part the
+  # wider), else one above the other, each given the room it needs as far as there is
+  # room. Each part scrolls on its own; the one with the focus has a bright frame.
+  defp parts(parts, model, width, room) do
+    focus = Model.part(model)
+
+    drawn =
+      parts
+      |> Enum.with_index()
+      |> Enum.map(fn {node, i} -> {i, node} end)
+
+    if width >= @side_by_side do
+      first = div(width * 3, 5)
+      widths = [first | List.duplicate(width - first, length(parts) - 1)]
+
+      columns =
+        for {{i, node}, w} <- Enum.zip(drawn, widths),
+            do: {part(node, model, i == focus, model.scrolls[i], w, room), w}
+
+      lines =
+        for row <- 0..(room - 1) do
+          Enum.flat_map(columns, fn {{lines, _cut}, w} ->
+            line = Enum.at(lines, row) || []
+            pad_line(fit(line, w), w)
+          end)
+        end
+
+      {lines, Enum.any?(columns, fn {{_, cut}, _} -> cut end)}
+    else
+      needs = for {_i, node} <- drawn, do: length(part_lines(node, model, width)) + 2
+      heights = share(needs, room, lists_part(model))
+
+      drawn =
+        for {{i, node}, h} <- Enum.zip(drawn, heights),
+            do: part(node, model, i == focus, model.scrolls[i], width, h)
+
+      lines = Enum.flat_map(drawn, &elem(&1, 0))
+      {Enum.take(lines, room), Enum.any?(drawn, &elem(&1, 1))}
+    end
+  end
+
+  # Room for parts one above the other: each its need when all fit. Else the part with
+  # the lists first, so long content never pushes them away, while every other part keeps
+  # a third of the room (or what it needs, when less); the rest is shared equally.
+  defp share(needs, room, first) do
+    cond do
+      Enum.sum(needs) <= room ->
+        needs
+
+      first == nil ->
+        equal(needs, room, List.duplicate(0, length(needs)))
+
+      true ->
+        others = List.delete_at(needs, first)
+        kept = others |> Enum.map(&min(&1, max(div(room, 3), 5))) |> Enum.sum()
+        need = Enum.at(needs, first)
+        top = need |> min(room - kept) |> max(min(need, 3))
+        given = equal(others, room - top, List.duplicate(0, length(others)))
+        List.insert_at(given, first, top)
+    end
+  end
+
+  defp equal(needs, room, given) do
+    open = for {need, i} <- Enum.with_index(needs), Enum.at(given, i) < need, do: i
+    left = room - Enum.sum(given)
+
+    if open == [] or left <= 0 do
+      given
+    else
+      each = max(div(left, length(open)), 1)
+
+      given =
+        Enum.reduce(open, given, fn i, given ->
+          left = room - Enum.sum(given)
+          add = Enum.min([each, Enum.at(needs, i) - Enum.at(given, i), left])
+          List.update_at(given, i, &(&1 + max(add, 0)))
+        end)
+
+      if room - Enum.sum(given) == left, do: given, else: equal(needs, room, given)
+    end
+  end
+
+  # The part that holds the page's lists, if any.
+  defp lists_part(model) do
+    lists = for {id, %ListBlock{}} <- Enum.zip(model.ids, model.blocks), do: id
+    Enum.find_index(Model.parts(model), fn ids -> Enum.any?(ids, &(&1 in lists)) end)
+  end
+
+  # What a part holds, at the width inside its frame.
+  defp part_lines({:markup, %{"value" => %Border{}}, children}, model, width),
+    do: nodes(children, model, width - 4, :all)
+
+  defp part_lines(node, model, width), do: nodes([node], model, width, :all)
+
+  # One part, `height` lines: its frame and title, and its lines from where it is
+  # scrolled to (by hand, or to keep its selected row in sight). When it holds more than
+  # fits, its last line says how much more there is.
+  defp part(node, model, focused, scrolled, width, height) do
+    title =
+      case node do
+        {:markup, %{"value" => %Border{title: title}}, _} -> title
+        _ -> nil
+      end
+
+    inner = width - 4
+    lines = part_lines(node, model, width)
+    room = max(height - 2, 1)
+    total = length(lines)
+    cut = total > room
+    shown = if cut, do: room - 1, else: room
+    last = max(total - shown, 0)
+    selected = Enum.find_index(lines, &selected_line?/1)
+
+    start =
+      cond do
+        not cut -> 0
+        scrolled != nil -> min(scrolled, last)
+        selected != nil -> (selected - div(shown, 2)) |> min(last) |> max(0)
+        true -> 0
+      end
+
+    visible = Enum.slice(lines, start, shown)
+    below = total - start - length(visible)
+
+    more =
+      [
+        start > 0 && "↑ #{count(start, "line")} above",
+        below > 0 && "… #{count(below, "more line")}"
+      ]
+      |> Enum.filter(& &1)
+
+    body =
+      visible ++
+        if(cut, do: [[{:dim, "   " <> Enum.join(more, " · ")}]], else: []) ++
+        List.duplicate([], max(room - length(visible) - if(cut, do: 1, else: 0), 0))
+
+    style = if focused, do: :bold, else: :dim
+    label = if title, do: "─ " <> title <> " ", else: ""
+    top = " ┌" <> label <> String.duplicate("─", max(inner - String.length(label), 0)) <> "┐"
+
+    framed =
+      for line <- body do
+        line = fit(line, inner)
+        [{style, " │"} | pad_line(line, inner)] ++ [{style, "│"}]
+      end
+
+    lines =
+      ([[{style, top}]] ++ framed ++ [[{style, " └" <> String.duplicate("─", inner) <> "┘"}]])
+      |> Enum.take(height)
+
+    {lines, cut}
+  end
+
+  defp count(n, noun), do: "#{n} #{noun}#{if n == 1, do: "", else: "s"}"
+
+  defp pad_line(line, width) do
+    used = line |> Enum.map(&String.length(elem(&1, 1))) |> Enum.sum()
+    line ++ [{:plain, String.duplicate(" ", max(width - used, 0))}]
   end
 
   defp nodes(tree, model, width, room) do
     tree
     |> Enum.map(fn
-      {:block, block} -> block(block, model, width, room)
+      {:block, block, at} -> block(block, at, model, width, room)
       {:markup, %{"value" => value}, children} -> markup(value, children, model, width, room)
     end)
     |> Enum.intersperse([[]])
@@ -159,7 +361,10 @@ defmodule AtlasTui.View do
   defp markup(%kind{}, children, model, width, room) when kind in [Columns, Highlight],
     do: nodes(children, model, width, room)
 
-  defp block(%ListBlock{} = list, model, _width, _room) do
+  defp block(%ListBlock{} = list, at, model, width, _room) do
+    # Labels line up in a column; in a narrow part the column leaves room for the detail.
+    label_width = width |> div(2) |> min(40) |> max(16)
+
     rows =
       case list.rows do
         [] ->
@@ -169,12 +374,13 @@ defmodule AtlasTui.View do
           rows
           |> Enum.with_index()
           |> Enum.map(fn {row, i} ->
-            style = if i == model.selected, do: :selected, else: :plain
-            marker = if i == model.selected, do: " › ", else: "   "
+            selected = at + i == model.selected
+            style = if selected, do: :selected, else: :plain
+            marker = if selected, do: " › ", else: "   "
 
             [
-              {style, marker <> pad(row.label, 40) <> "  "},
-              {if(i == model.selected, do: :selected, else: :dim), row.detail || ""}
+              {style, marker <> pad(row.label, label_width) <> "  "},
+              {if(selected, do: :selected, else: :dim), row.detail || ""}
             ]
           end)
       end
@@ -184,7 +390,7 @@ defmodule AtlasTui.View do
   end
 
   # Values keep their line breaks and blank lines; a heading line (`#`) is bold.
-  defp block(%Item{} = item, _model, width, _room) do
+  defp block(%Item{} = item, _at, _model, width, _room) do
     fields =
       Enum.flat_map(item.fields, fn pair ->
         [first | rest] = Text.wrap(pair.value || "—", width - @label_width - 4)
@@ -199,7 +405,7 @@ defmodule AtlasTui.View do
   end
 
   # A form that does not fit gives its focused multi-line input fewer rows, down to a few.
-  defp block(%Form{} = form, model, width, room) do
+  defp block(%Form{} = form, _at, model, width, room) do
     lines = form_lines(form, model, width, :all)
     over = length(lines) - room
 
@@ -212,7 +418,7 @@ defmodule AtlasTui.View do
     end
   end
 
-  defp block(%Confirm{} = confirm, _model, width, _room) do
+  defp block(%Confirm{} = confirm, _at, _model, width, _room) do
     choices =
       if confirm.confirm_to,
         do: [
@@ -229,7 +435,7 @@ defmodule AtlasTui.View do
       Enum.map(Text.wrap(confirm.text, width - 4), &[{:plain, "   " <> &1}]) ++ [[]] ++ choices
   end
 
-  defp block(%Fallback{type: type}, _model, _width, _room),
+  defp block(%Fallback{type: type}, _at, _model, _width, _room),
     do: [[{:dim, "   (a #{type || "?"} block this TUI cannot show)"}]]
 
   defp title(text, width), do: Enum.map(Text.wrap(text, width - 2), &[{:bold, " " <> &1}])
@@ -453,7 +659,14 @@ defmodule AtlasTui.View do
   defp selected_line?(line), do: Enum.any?(line, &match?({:selected, _}, &1))
 
   defp nav(model, long) do
-    move = if Model.list(model), do: "   ↑↓ move   ↵ open", else: ""
+    move =
+      cond do
+        Model.parts(model) != [] and not Model.selecting?(model) -> "   ↑↓ scroll   ↵ open"
+        Model.list(model) -> "   ↑↓ move   ↵ open"
+        true -> ""
+      end
+
+    move = if Model.parts(model) != [], do: move <> "   tab next part", else: move
     move = if long, do: move <> "   pgup/pgdn scroll", else: move
     back = if model.back, do: "   esc back", else: ""
     move <> "   r refresh" <> back <> "   q quit"
