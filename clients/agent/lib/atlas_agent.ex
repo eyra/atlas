@@ -127,7 +127,7 @@ defmodule AtlasAgent do
   def delete(client, key) do
     with {:ok, confirm} <- delete_confirm(client, key) do
       case confirm do
-        %{"confirm_to" => to} when is_binary(to) ->
+        %{"confirm_to" => to} when is_map(to) ->
           case Client.submit(client, to, %{}) do
             {:stored, _page} -> {:ok, key}
             other -> other

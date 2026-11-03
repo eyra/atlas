@@ -111,7 +111,19 @@ defmodule AtlasBFF.Targets.Server do
       `:error` for a path that is no such endpoint (`AtlasBFF.Paths.match/2`).
       """
       def endpoint(call, path),
-        do: AtlasBFF.Paths.match(Enum.filter(@endpoints, &(&1.call == call)), path)
+        do: AtlasBFF.Paths.match(Enum.filter(@endpoints, &(&1.call == call and &1.path)), path)
+
+      @doc """
+      The path of endpoint `name` of `call` with `params`; nil for an endpoint without a
+      path, and raises when it does not exist or a parameter is missing.
+      """
+      def endpoint_path(call, name, params \\ %{}) do
+        case Enum.find(@endpoints, &(&1.call == call and &1.name == name)) do
+          nil -> raise ArgumentError, "no endpoint #{inspect(name)} (#{call})"
+          %{path: nil} -> nil
+          endpoint -> AtlasBFF.Paths.build([endpoint], name, params)
+        end
+      end
 
       unquote_splicing(builders ++ markup)
 
@@ -138,6 +150,7 @@ defmodule AtlasBFF.Targets.Server do
   end
 
   defp type_name({:list, inner}), do: {:list, type_name(inner)}
+  defp type_name({:map, inner}), do: {:map, type_name(inner)}
   defp type_name(type), do: Atom.to_string(type)
 
   defp field_list(entry) do
@@ -215,6 +228,9 @@ defmodule AtlasBFF.Targets.Server do
 
   defp check!(fields, {:list, type}, values, at) when is_list(values),
     do: Enum.map(values, &check!(fields, type, &1, at))
+
+  defp check!(fields, {:map, type}, values, at) when is_map(values),
+    do: Map.new(values, fn {k, v} -> {to_string(k), check!(fields, type, v, "#{at}.#{k}")} end)
 
   defp check!(fields, model, value, _at)
        when is_map_key(fields, model) and (is_map(value) or is_list(value)),

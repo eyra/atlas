@@ -4,6 +4,8 @@
 # completed; Test it once all is; nothing once it is accepted; Rework, with the note,
 # once it is reopened. Flow never completes anything itself. GitHub is the stand-in.
 # IS-Atlas-76: a save is refused only when a field it sets changed meanwhile.
+# IS-Atlas-75: Flow also writes the owner, on the fact's Assignment: the coordinator to
+# build and rework, melle to test, nobody once it is done.
 import AtlasE2E.Scenario
 
 alias AtlasE2E.GitHub
@@ -19,12 +21,29 @@ expected = fn i, key ->
   Enum.find_value(got["fields"], fn [label, value] -> label == "Expected" && value end)
 end
 
+# What `atlas get` shows for `label`, once it is `want` (Flow writes within moments).
+shows = fn i, key, label, want ->
+  Enum.reduce_while(1..30, nil, fn _, _ ->
+    {got, _} = atlas_json(i, ["get", key])
+    value = Enum.find_value(got["fields"], fn [l, v] -> l == label && v end)
+
+    if value == want,
+      do: {:halt, value},
+      else:
+        (
+          Process.sleep(100)
+          {:cont, value}
+        )
+  end) == want || raise "#{key}: #{label} is not #{inspect(want)}"
+end
+
 scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", fn ctx ->
   %{t1: t1, instance: i} = ctx
 
   step "A use case with an open issue: Flow says Build it", fn ->
-    # The same person again is the same fact: stored once.
+    # The same person and agent again are the same facts: stored once.
     atlas_json(i, ["put", "person", "--name", "Melle"])
+    atlas_json(i, ["put", "agent", "--name", "Coordinator"])
     {scene, _} = atlas_json(i, ["put", "scene", "--title", "A scene Flow moves"])
 
     {use_case, _} =
@@ -36,8 +55,13 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
     home(t1)
     open_row(t1, "A scene Flow moves")
     open_row(t1, "A use case Flow moves")
+    # Flow writes on the use case's Assignment (IS-Atlas-78); its page shows it whole.
+    open_row(t1, "AS-#{use_case["key"]}")
     see(t1, ~r/Expected\s+Build it/)
+    see(t1, ~r/Assigned to ─+(.|\n)*coordinator  Agent/)
     expected.(i, scene["key"]) == "Build it" || raise "the scene is not Build it"
+    # A new fact gets its owner from the flow's rule, also an issue.
+    shows.(i, issue["key"], "Assigned to", "coordinator")
 
     Process.put(:uc27, %{scene: scene["key"], use_case: use_case["key"], issue: issue["key"]})
   end
@@ -50,7 +74,14 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
     GitHub.put(url, %{pull | "state" => "closed", "merged" => true})
 
     see(t1, ~r/Expected\s+Test it/, connector_wait)
+    # Melle is next in line, within a second, in the open TUI too.
+    see(t1, ~r/Assigned to ─+(.|\n)*melle  Person/, 1_000)
     expected.(i, use_case) == "Test it" || raise "the use case is not Test it"
+    shows.(i, use_case, "Assigned to", "melle")
+    # The merged pull request and its issue are done: nobody is next in line on them.
+    shows.(i, issue, "Assigned to", "—")
+    press(t1, "Escape")
+    see(t1, "Use case #{use_case}: A use case Flow moves")
     # Flow never completes anything by itself: it waits for Melle.
     {got, _} = atlas_json(i, ["get", use_case])
     progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
@@ -64,8 +95,8 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
     see(t1, "will be accepted by melle")
     at = press(t1, "y")
     stored(t1, ~r/Accepted by ─+(.|\n)*melle  Person/, at)
-    gone(t1, "Expected")
-    expected.(i, use_case) == nil || raise "something is still expected"
+    shows.(i, use_case, "Expected", nil)
+    shows.(i, use_case, "Assigned to", "—")
   end
 
   step "Reopened with a note: Rework, with the note", fn ->
@@ -76,8 +107,8 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
     type(t1, "The footer is wrong")
     at = press(t1, "C-s")
     stored(t1, "Use case #{use_case}: A use case Flow moves", at)
-    see(t1, ~r/Expected\s+Rework: The footer is wrong/)
-    expected.(i, use_case) == "Rework: The footer is wrong" || raise "not Rework"
+    shows.(i, use_case, "Expected", "Rework: The footer is wrong")
+    shows.(i, use_case, "Assigned to", "coordinator")
   end
 
   step "A new issue under it: Build it again", fn ->

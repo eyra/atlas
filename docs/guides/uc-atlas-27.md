@@ -180,3 +180,35 @@ Tried on a private instance with prod's shape (prod's 169 items copied in with r
   - `uc-atlas-27-owner.exs` reads the owner's list of Assignments.
   - `uc-atlas-20.exs` gives its first TUI 4 rows more, the room the Assignment's row in the references takes.
 - **Prod:** the migration above. It restarts rela and the core itself.
+
+## IS-Atlas-75: Flow writes the owner
+
+Flow now writes the owner too, on each fact's Assignment (IS-Atlas-78), together with what is expected, in one change with its cause, by `flow`. Each flow state names its owner with its kind (`"owner": {"kind": "agent", "key": "coordinator"}`), and State's check refuses a definition whose owner relation does not allow that kind.
+
+What each kind gets, from the flows in `rela/atlas.json`:
+
+| Kind | State | Owner | Expected |
+|---|---|---|---|
+| Scene, use case (`test_and_accept`) | not all under it is completed | coordinator | Build it |
+| | all under it is completed (To test) | melle | Test it |
+| | reopened, nothing new under it yet | coordinator | Rework: \<the note\> |
+| | accepted (done) | nobody | nothing |
+| Issue (`build_and_merge`) | its pull request is not merged | coordinator | Build it |
+| | completed: its pull request merged (done) | nobody | nothing |
+| Pull request (`review_and_merge`) | open | coordinator | Review and merge it |
+| | merged or closed (done) | nobody | nothing |
+
+So a new scene, use case, issue or pull request gets its owner within moments of being made. IS-Atlas-79, made without one, gets the coordinator.
+
+- **An owner set by hand stays.** Within a state, an owner a person or an agent set (`atlas set … assigned_to=…`, or `u`) stays. Flow moves the owner when the state changes (what is expected changes), or when Flow, a migration or nobody set it.
+- **The owner must exist.** When the owner a state names does not exist yet, only what is expected is written, and the owner follows as soon as it is made.
+- **Done facts from before:** facts that were already done have no Flow process, so they keep the owner the IS-Atlas-52 migration gave them (the coordinator).
+
+| Step | Keys / command | What you should see |
+|---|---|---|
+| A new item | `atlas put issue --in UC-Atlas-NN --title … --env test` | `Assigned to: coordinator (… by flow: Flow build_and_merge: its pull request is not merged → coordinator)`, and `Expected: Build it`. |
+| All of a use case done | merge the last issue's pull request | The use case shows `Assigned to: melle` and `Expected: Test it` within a second; the merged pull request and its issue have no owner (`Assigned to: —`). |
+| Accept | `a`, `y` | No owner, nothing expected. |
+| Reopen | `a`, a note, `ctrl-s` | The coordinator, with `Rework: <the note>`. |
+
+`e2e/scenarios/uc-atlas-27.exs` follows these steps. `uc-atlas-27-owner.exs` checks that a new fact gets its owner from Flow, and that `atlas migrate-owner` leaves it alone.

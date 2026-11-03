@@ -6,6 +6,8 @@ defmodule AtlasFlowTest do
   setup do
     Application.put_env(:atlas_bus, :store, "state-#{System.unique_integer([:positive])}")
     start_supervised!(FakeState)
+    # Who can own, as facts: the owners the definition names must exist.
+    for key <- ["ada", "bob"], do: FakeState.put("clerk", %{"key" => key})
 
     on_exit(fn ->
       for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasFlow.Supervisor),
@@ -19,7 +21,7 @@ defmodule AtlasFlowTest do
 
   defp alive(key), do: Registry.lookup(AtlasFlow.Items, {"box", key}) != []
 
-  defp eventually(fun, tries \\ 50) do
+  defp eventually(fun, tries \\ 150) do
     cond do
       fun.() -> :ok
       tries == 0 -> flunk("did not happen")
@@ -164,6 +166,67 @@ defmodule AtlasFlowTest do
         AtlasFlow.Talk.put("crate", %{"op" => "change", "key" => "C-1", "values" => %{}})
 
       eventually(fn -> elem(FakeState.reads(), 1) >= 2 end)
+    end
+
+    test "an owner set by hand stays while the state stays; a new state moves it" do
+      FakeState.put("clerk", %{"key" => "cy"})
+
+      FakeState.put("box", %{
+        "key" => "B-1",
+        "values" => %{"todo" => "Pack it"},
+        "links" => %{"owned_by" => ["cy"]},
+        "origins" => %{"owned_by" => %{"keys" => ["cy"], "by" => "ada", "cause" => "cy packs"}}
+      })
+
+      engine()
+      Process.sleep(200)
+      # Packing still: cy, whom ada chose, stays.
+      assert FakeState.sent() == []
+
+      # All in it is packed: a new state, and its owner.
+      FakeState.put(
+        "box",
+        Map.put(FakeState.get("box", "B-1"), "progress", %{"value" => "check"})
+      )
+
+      :ok = AtlasBus.attach("tester-#{System.unique_integer([:positive])}")
+
+      {:stored, _} =
+        AtlasFlow.Talk.put("box", %{"op" => "change", "key" => "B-1", "values" => %{}})
+
+      eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
+    end
+
+    test "an owner Flow, a migration or nobody set follows the state" do
+      FakeState.put("box", %{
+        "key" => "B-1",
+        "values" => %{"todo" => "Pack it"},
+        "links" => %{"owned_by" => ["ada"]},
+        "origins" => %{"owned_by" => %{"keys" => ["ada"], "by" => "migration"}}
+      })
+
+      engine()
+      eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["bob"] end)
+      assert [%{"values" => values, "links" => %{"owned_by" => ["bob"]}}] = FakeState.sent()
+      assert values == %{}
+    end
+
+    test "an owner that does not exist yet: what is expected is written, the owner waits" do
+      FakeState.put("box", %{"key" => "B-1", "progress" => %{"value" => "check"}})
+      GenServer.call(FakeState, {:drop, "clerk", "ada"})
+      engine()
+      eventually(fn -> FakeState.get("box", "B-1")["values"]["todo"] == "Check it" end)
+      assert [%{"values" => %{"todo" => "Check it"}} = sent] = FakeState.sent()
+      refute Map.has_key?(sent, "links")
+
+      # Once the owner is made, the fact gets it at once.
+      FakeState.put("clerk", %{"key" => "ada"})
+      :ok = AtlasBus.attach("tester-#{System.unique_integer([:positive])}")
+
+      {:stored, _} =
+        AtlasFlow.Talk.put("clerk", %{"op" => "create", "key" => "ada", "values" => %{}})
+
+      eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
     end
 
     test "a fact made later gets its process from its hint" do

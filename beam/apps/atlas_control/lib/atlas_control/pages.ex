@@ -196,6 +196,44 @@ defmodule AtlasControl.Pages do
   def submit_route(:accept, p), do: {:set, p.kind, p.key, p.relation}
   def submit_route(:reopen, p), do: {:remove, p.kind, p.key, p.relation}
 
+  @doc """
+  The `call` (the contract's `call` model) that submits the form or confirm of `route`:
+  its submit endpoint by name and its parameters, as a form's `submit_to` holds it.
+  """
+  def call_to(route) do
+    {:ok, name, params} = Blocks.endpoint(:submit, path(route))
+
+    Blocks.call(
+      endpoint: Atom.to_string(name),
+      params: Map.new(params, fn {k, v} -> {to_string(k), v} end)
+    )
+  end
+
+  @doc """
+  The submit endpoint a submit message names, and its parameters: `{:ok, name, params}`,
+  or `:error`. A message names it as a form's `submit_to` does (`"endpoint"` and
+  `"params"`), or by its path (`"to"`), as a client that knows only paths may.
+  """
+  def submit_call(%{"endpoint" => endpoint} = message) when is_binary(endpoint) do
+    params = message["params"] || %{}
+
+    with %{} = found <-
+           Enum.find(
+             Blocks.endpoints(),
+             &(&1.call == :submit and Atom.to_string(&1.name) == endpoint)
+           ),
+         true <- is_map(params),
+         values = for(p <- found.params, do: {p, params[Atom.to_string(p)]}),
+         true <- Enum.all?(values, fn {_, v} -> is_binary(v) and v != "" end) do
+      {:ok, found.name, Map.new(values)}
+    else
+      _ -> :error
+    end
+  end
+
+  def submit_call(%{"to" => to}), do: Blocks.endpoint(:submit, to)
+  def submit_call(_message), do: :error
+
   # A route's path, by the contract's page for it.
   def path(:home), do: Blocks.path(:home)
   def path(:kinds), do: Blocks.path(:kinds)
@@ -799,7 +837,7 @@ defmodule AtlasControl.Pages do
                   )
                 ],
                 submit_label: "Save",
-                submit_to: path({:links, kind, key, relation}),
+                submit_to: call_to({:links, kind, key, relation}),
                 cancel_to: back,
                 errors: form[:errors] || []
               )
@@ -836,7 +874,7 @@ defmodule AtlasControl.Pages do
                 text:
                   "#{key}: #{label(spec, fact)} will be #{rel["label"] || relation} #{form[:by]}.",
                 confirm_label: label,
-                confirm_to: path(route),
+                confirm_to: call_to(route),
                 cancel_to: back
               )
 
@@ -890,7 +928,7 @@ defmodule AtlasControl.Pages do
                   )
                 ],
                 submit_label: label,
-                submit_to: path(route),
+                submit_to: call_to(route),
                 cancel_to: back,
                 errors: form[:errors] || []
               )
@@ -911,7 +949,7 @@ defmodule AtlasControl.Pages do
     form_block =
       form_block
       |> put_in(["props", "title"], title)
-      |> put_in(["props", "submit_to"], path(route))
+      |> put_in(["props", "submit_to"], call_to(route))
       |> put_in(["props", "cancel_to"], path(parent_route))
 
     page(title, path(parent_route), [form_block])
@@ -927,7 +965,7 @@ defmodule AtlasControl.Pages do
         title: elem(operation(:create, spec, kind), 0),
         inputs: inputs(spec, values, only: asked),
         submit_label: verb(:create),
-        submit_to: path({:new, kind}),
+        submit_to: call_to({:new, kind}),
         cancel_to: path({:list, kind}),
         errors: form[:errors] || []
       )
@@ -964,7 +1002,7 @@ defmodule AtlasControl.Pages do
                 inputs(spec, values, except: id_property(spec)) ++
                 parent_inputs(description, kind, values, parent_answers),
             submit_label: verb(:update),
-            submit_to: path({:edit, kind, key}),
+            submit_to: call_to({:edit, kind, key}),
             cancel_to: back,
             errors: form[:errors] || []
           )
@@ -1027,7 +1065,7 @@ defmodule AtlasControl.Pages do
                   "#{key}: #{label(spec, fact)} will be deleted#{with_parts}. " <>
                     "This cannot be undone.",
                 confirm_label: verb(:delete),
-                confirm_to: path({:delete, kind, key}),
+                confirm_to: call_to({:delete, kind, key}),
                 cancel_to: back
               )
 

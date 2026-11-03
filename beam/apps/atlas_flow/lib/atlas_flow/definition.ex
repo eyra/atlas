@@ -13,8 +13,9 @@ defmodule AtlasFlow.Definition do
         "owner_relation": "<relation>",    where it writes the owner (optional)
         "states": [                        in order: the first that holds is the state
           {"name": ..., "when": {...}, "done": true},
-          {"name": ..., "when": {...}, "owner": <key>, "expected": <text>, "why": <text>,
-           "next": [<state>, ...], "every_seconds": <n>}, ...
+          {"name": ..., "when": {...}, "owner": {"kind": <kind>, "key": <key>},
+           "expected": <text>, "why": <text>, "next": [<state>, ...],
+           "every_seconds": <n>}, ...
           {"name": ..., "owner": ..., ...}        the last holds when nothing else does
         ]}}
 
@@ -24,7 +25,9 @@ defmodule AtlasFlow.Definition do
   - `"progress": <value>`: its progress has that value (such as to test);
   - `"reopened": <relation>`: the newest fact about that association removed it, and no
     fact came under it since (through a parent relation). `{note}` in `expected` is that
-    fact's cause.
+    fact's cause;
+  - `"values": {<property>: [<value>, ...]}`: each property has one of those values (such
+    as merged or closed).
 
   State checks every definition (`flow_problems` in the description it answers): every
   state that is not done has an owner and a way out to a next state, and every state can
@@ -45,6 +48,15 @@ defmodule AtlasFlow.Definition do
   @doc "The definition that runs on `kind`, as `{name, definition}`, or nil."
   def for_kind(description, kind) do
     Enum.find(flows(description), fn {_name, flow} -> kind in (flow["kinds"] || []) end)
+  end
+
+  @doc "The kinds the definitions assign to: what their owner relations point at."
+  def owner_kinds(description) do
+    for {_name, %{"owner_relation" => relation}} <- flows(description),
+        is_binary(relation),
+        kind <- get_in(description, ["relations", relation, "to"]) || [],
+        uniq: true,
+        do: kind
   end
 
   @doc "Every kind a definition runs on."
@@ -90,6 +102,11 @@ defmodule AtlasFlow.Definition do
     end
   end
 
+  defp condition("values", values, fact, _, _) when is_map(values) do
+    if Enum.all?(values, fn {name, allowed} -> fact["values"][name] in List.wrap(allowed) end),
+      do: %{}
+  end
+
   defp condition(_name, _value, _fact, _children, _parents), do: nil
 
   # The position of the newest fact that came under this one (created or moved there).
@@ -115,9 +132,15 @@ defmodule AtlasFlow.Definition do
     |> String.trim_trailing(":")
   end
 
-  @doc "The owner of `state` (a key), or nil when done."
+  @doc "The owner of `state`, the key of a fact (who is next in line), or nil when done."
   def owner(%{"done" => true}), do: nil
-  def owner(state), do: state["owner"]
+  def owner(%{"owner" => %{"key" => key}}), do: key
+  def owner(%{"owner" => key}) when is_binary(key), do: key
+  def owner(_state), do: nil
+
+  @doc "The kind of the owner of `state`, or nil when it names none."
+  def owner_kind(%{"owner" => %{"kind" => kind}}), do: kind
+  def owner_kind(_state), do: nil
 
   @doc "How often a fact in `state` is looked at again, in ms; `default` when it says nothing."
   def every(state, default) do
