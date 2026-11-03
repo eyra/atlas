@@ -25,8 +25,11 @@ defmodule AtlasAgent.Plan do
   Plan `request`, made on the page at `on` (a path, or the key of a fact): read the page
   and the tools through Control, ask the environment's planner, check what it answers.
   Writes nothing. `{:ok, %{"request", "on", "by", "summary", "steps"}}` or `{:error, text}`.
+
+  `before` is what became of the previous plan for the same request, when it was refused
+  (see `AtlasAgent.Planner`), or nil.
   """
-  def make(client, settings, on, request) do
+  def make(client, settings, on, request, before \\ nil) do
     with {:ok, page} <- AtlasAgent.page(client, on),
          {:ok, tools} <- Tools.list(client),
          input = %{
@@ -35,6 +38,7 @@ defmodule AtlasAgent.Plan do
            "page" => page,
            "tools" => tools
          },
+         input = if(before, do: Map.put(input, "before", before), else: input),
          {:ok, plan, by} <- Planner.plan(settings, input) do
       {:ok,
        %{

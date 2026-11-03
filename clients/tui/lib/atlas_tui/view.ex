@@ -245,6 +245,7 @@ defmodule AtlasTui.View do
     about =
       [
         {"You asked", plan.request},
+        {"Before", plan.before},
         {"By", plan.by},
         {"It says", plan.summary}
       ]

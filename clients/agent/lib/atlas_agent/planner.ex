@@ -14,7 +14,10 @@ defmodule AtlasAgent.Planner do
   is how long it may take, 300 by default.
 
   The input: `%{"request", "env", "page", "tools"}`; `page` is the view model of the page
-  the request was made on, `tools` are `AtlasAgent.Tools.list/1`. The answer:
+  the request was made on, `tools` are `AtlasAgent.Tools.list/1`. After a refusal it also
+  has `"before"`: what became of the previous plan for the same request, `%{"text",
+  "stored", "refused", "not_run"}`, each step as the plan had it (with `"detail"`: the id
+  it stored, or why it was refused). The answer:
   `%{"summary" => text, "steps" => [step]}`, the steps as `AtlasAgent.Plan` takes them.
 
   A planner only proposes. Nothing it answers is run before a person accepts it; the
@@ -142,13 +145,27 @@ defmodule AtlasAgent.Planner do
     - atlas list <kind> [--in <key>] --env #{env} --json
     - atlas help [<kind>] --env #{env}         every kind: what a create asks, its fields
 
-    The page he is on, as Atlas's Control sends it (its blocks):
+    #{before(input["before"])}The page he is on, as Atlas's Control sends it (its blocks):
     #{JSON.encode!(input["page"])}
 
     The tools a step may use:
     #{JSON.encode!(Enum.filter(input["tools"] || [], &(&1["tool"] in ["put", "set"])))}
 
     A step is {"tool": "put", "kind": <kind>, "in": <the key of the item it goes in, when the tool has "in">, "values": {<field>: <text>}, "why": <one sentence>} or {"tool": "set", "key": <key>, "values": {<only the fields that change>: <text>}, "why": <one sentence>}. Use only fields the tool asks for. Ids are made by Atlas: never give one. Write titles and descriptions in the language and style of the items on the page; a title says what, without a code. The summary says in one or two sentences what the plan does.
+    """
+  end
+
+  defp before(nil), do: ""
+
+  defp before(before) do
+    """
+    Your previous plan for this request ran, and Atlas refused one of its steps; the run stopped there. What happened:
+    #{before["text"]}
+
+    In detail: #{JSON.encode!(Map.drop(before, ["text"]))}
+
+    Propose what next. Do not work around the refusal: never propose the refused step again with other values only to get it stored, unless the reason says what to change. Steps already stored stay; do not propose them again. Say in the summary what was refused and why. When nothing sensible is left, answer no steps.
+
     """
   end
 
