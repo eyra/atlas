@@ -443,7 +443,7 @@ defmodule AtlasControl.Session do
         show(state, route, "refused", nil)
 
       note == "" ->
-        not_sent(state, route, ["a note is required: why it is reopened"])
+        not_sent(state, route, ["a note is required: why"])
 
       true ->
         put_fact(%{state | cause: note}, kind, link(key, relation, []), {:item, kind, key})

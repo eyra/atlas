@@ -429,7 +429,9 @@ defmodule AtlasControl.Pages do
 
   # Setting a link that needs the facts under it completed reads them, as the page does.
   def reads({:set, kind, key, _relation}, description), do: reads({:item, kind, key}, description)
-  def reads({:remove, kind, key, _relation}, _description), do: [{kind, %{"key" => key}}]
+  # Removing reads as the page does too: an owner's answer may remove what is not set.
+  def reads({:remove, kind, key, _relation}, description),
+    do: reads({:item, kind, key}, description)
 
   # The fact, and the facts it may point at: of each kind the relation points at.
   def reads({:links, kind, key, relation}, description) do
@@ -922,7 +924,8 @@ defmodule AtlasControl.Pages do
             title: "#{singular(spec, kind)} #{key}: #{label(spec, fact)}",
             fields: fields,
             # Nothing to change when a user may set nothing but where the id comes from, and
-            # there is no parent to move it to.
+            # there is no parent to move it to. The owner's answers (IS-Atlas-56) take the
+            # place of an action on the same key.
             actions:
               if(by_hand?(spec, :update) and changeable?(description, kind, spec),
                 do: [action(:update, spec, kind, path({:edit, kind, key}))],
@@ -939,6 +942,7 @@ defmodule AtlasControl.Pages do
                 end),
             links: links(description, spec, fact)
           )
+          |> answers_first(answer_actions(description, kind, fact, parts, form))
 
         lists =
           relations
@@ -1115,12 +1119,33 @@ defmodule AtlasControl.Pages do
   end
 
   # Remove the link (Reopen); a note says why, and is kept with the fact that removes it.
-  defp page({:remove, kind, key, relation} = route, kind, _spec, description, [answer], form) do
+  defp page(
+         {:remove, kind, key, relation} = route,
+         kind,
+         _spec,
+         description,
+         [answer | rest],
+         form
+       ) do
     back = path({:item, kind, key})
     rel = get_in(description, ["relations", relation]) || %{}
+    # The owner's answer that removes it (reject): also when it is not set (IS-Atlas-56).
+    as_answer =
+      case answer do
+        %{"fact" => %{} = fact} ->
+          parts = item_parts(description, kind, rest)
+
+          Enum.find(
+            owner_answers(description, kind, fact, parts, form),
+            &(&1["remove"] == relation)
+          )
+
+        _ ->
+          nil
+      end
 
     label =
-      get_in(rel, ["actions", "remove", "label"]) ||
+      (as_answer && as_answer["label"]) || get_in(rel, ["actions", "remove", "label"]) ||
         "Remove #{rel["label"] || relation}"
 
     title = "#{label} #{key}"
@@ -1134,7 +1159,7 @@ defmodule AtlasControl.Pages do
           not may_link?(description, relation, form[:by], form[:by_kind]) ->
             missing(title, "#{title} is not done here: #{why_not(rel)}.", back)
 
-          (get_in(fact, ["links", relation]) || []) == [] ->
+          (get_in(fact, ["links", relation]) || []) == [] and as_answer == nil ->
             missing(title, "#{key} has no #{rel["label"] || relation}.", back)
 
           true ->
@@ -1656,13 +1681,8 @@ defmodule AtlasControl.Pages do
   # instructions, the section of the fact they name, and the answers they can give. Every
   # word is the description's (the labels: its top-level `todo`) or the fact's.
   defp todo(description, kind, fact, parts, form) do
-    with {_name, flow} <- flow_of(description, kind),
-         %{} = written <- written_fact(description, flow, fact, parts),
-         by when is_binary(by) <- form[:by],
-         true <- by in (get_in(written, ["links", flow["owner_relation"]]) || []),
-         name when name not in [nil, ""] <- get_in(written, ["values", flow["state_field"]]),
-         %{"todo" => %{} = todo} = state <-
-           Enum.find(flow["states"] || [], &(&1["name"] == name)) do
+    with {flow, written, %{"todo" => %{} = todo} = state} <-
+           owner_state(description, kind, fact, parts, form) do
       origin = get_in(written, ["origins", flow["owner_relation"]]) || %{}
       expected = to_text(get_in(written, ["values", flow["field"]]))
 
@@ -1715,7 +1735,64 @@ defmodule AtlasControl.Pages do
     end
   end
 
+  # The flow on the fact's kind, the fact it writes on and the state it is in, when the
+  # client is that fact's owner (the flow's owner relation points at it); else nil.
+  defp owner_state(description, kind, fact, parts, form) do
+    with {_name, flow} <- flow_of(description, kind),
+         %{} = written <- written_fact(description, flow, fact, parts),
+         by when is_binary(by) <- form[:by],
+         true <- by in (get_in(written, ["links", flow["owner_relation"]]) || []),
+         name when name not in [nil, ""] <- get_in(written, ["values", flow["state_field"]]),
+         %{} = state <- Enum.find(flow["states"] || [], &(&1["name"] == name)) do
+      {flow, written, state}
+    else
+      _ -> nil
+    end
+  end
+
   defp todo_label(description, name), do: to_text(get_in(description, ["todo", name]))
+
+  @doc """
+  The answers the client may give as the fact's owner, in the state it is in: the state's
+  `todo.answers` (`[%{"key", "label", "set" | "remove" => relation}]`), or none.
+  """
+  def owner_answers(description, kind, fact, parts, form) do
+    case owner_state(description, kind, fact, parts, form) do
+      {_flow, _written, %{"todo" => %{"answers" => answers}}} when is_list(answers) -> answers
+      _ -> []
+    end
+  end
+
+  # Each answer that sets or removes an association of the fact, as an action to its page.
+  defp answer_actions(description, kind, fact, parts, form) do
+    for answer <- owner_answers(description, kind, fact, parts, form),
+        {op, relation} <- [{:set, answer["set"]}, {:remove, answer["remove"]}],
+        is_binary(relation),
+        do:
+          Blocks.action(
+            label: answer["label"],
+            key: answer["key"],
+            to: path({op, kind, fact["key"], relation})
+          )
+  end
+
+  # The answers first among an item's actions: an action on the same key gives way to one.
+  defp answers_first(item, []), do: item
+
+  defp answers_first(item, answers) do
+    keys = Enum.map(answers, & &1["key"])
+
+    update_in(item, ["props", "actions"], fn actions ->
+      answers ++ Enum.reject(actions || [], &(&1["key"] in keys))
+    end)
+  end
+
+  # The component answers of an item page's reads, after its lists and causes.
+  defp item_parts(description, kind, rest) do
+    {_children, rest} = Enum.split(rest, length(child_relations(description, kind)))
+    {_causes, part_answers} = Enum.split(rest, length(cause_fields(description)))
+    parts(description, kind, part_answers)
+  end
 
   # The flow definition that runs on `kind`, as `{name, definition}`, or nil.
   defp flow_of(description, kind) do
