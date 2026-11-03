@@ -5,7 +5,7 @@
       "fields": [
         {
           "name": "title",
-          "required": true,
+          "required": false,
           "type": "string"
         },
         {
@@ -110,6 +110,53 @@
         }
       ],
       "name": "confirm"
+    }
+  ],
+  "markup": [
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "collapsible",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "name": "section"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "border"
+    },
+    {
+      "fields": [
+        {
+          "name": "count",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "name": "columns"
+    },
+    {
+      "fields": [
+        {
+          "name": "tone",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "highlight"
     }
   ],
   "models": [
@@ -224,6 +271,11 @@
       "name": "input"
     }
   ],
-  "version": "0.1.0",
-  "wire": "{\"type\": \"<block>\", \"props\": {...}}; an optional prop without a value is left out"
+  "version": "0.2.0",
+  "wire": {
+    "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
+    "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",
+    "props": "an optional prop without a value is left out",
+    "view_model": "{\"blocks\": [<block>], \"markup\": [<markup>]}; all markup nests"
+  }
 }

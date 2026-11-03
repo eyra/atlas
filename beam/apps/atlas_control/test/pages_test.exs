@@ -60,9 +60,24 @@ defmodule AtlasControl.PagesTest do
 
     %{
       back: "/k/widget",
-      blocks: [%{"type" => "item", "props" => item}, %{"type" => "list", "props" => list}]
+      blocks: [
+        %{"id" => "item", "type" => "item", "props" => item},
+        %{"id" => "list:of_widget", "type" => "list", "props" => list}
+      ],
+      markup: markup
     } =
       Pages.render({:item, "widget", "W-1"}, @d, [answer, parts])
+
+    # The fact in a border, the related list in a section that carries its title.
+    assert [
+             %{"kind" => "border", "start" => "item", "end" => "item", "props" => %{}},
+             %{
+               "kind" => "section",
+               "start" => "list:of_widget",
+               "end" => "list:of_widget",
+               "props" => %{"title" => "Parts"}
+             }
+           ] = markup
 
     assert item["title"] == "Widget W-1: One"
 
@@ -74,7 +89,7 @@ defmodule AtlasControl.PagesTest do
              {"Notes", "—"}
            ]
 
-    assert list["title"] == "Parts"
+    refute Map.has_key?(list, "title")
     assert [%{"label" => "Wheel", "to" => "/k/part/P-1"}] = list["rows"]
 
     assert [%{"label" => "Add part", "key" => "a", "to" => "/k/part/new/of_widget/W-1"}] =
