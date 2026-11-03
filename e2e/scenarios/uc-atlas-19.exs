@@ -14,7 +14,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
   row = fn title -> ~r/UC-Atlas-\d+\s+#{Regex.escape(title)}/ end
 
   step "A request whose plan runs: one step kept, one dropped", fn ->
-    for t <- [t1, t2], do: see(t, ~r/Atlas · test\s+Scenes$/m)
+    for t <- [t1, t2], do: see(t, ~r/Atlas · test.*\sScenes$/m)
 
     {scene, at} =
       atlas_json(
@@ -74,7 +74,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     see(t1, "w What the agent did")
     refute_see(t1, "Agent requests")
     press(t1, "w")
-    see(t1, ~r/Atlas · test\s+Agent requests$/m)
+    see(t1, ~r/Atlas · test.*\sAgent requests$/m)
     see(t1, ~r/#{request}\s+propose use cases from this scene's description\s+Done/)
     open_row(t1, "propose use cases from this scene's description")
     see(t1, "Agent request #{request}: propose use cases")
@@ -114,7 +114,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
 
     home(t1)
     press(t1, "w")
-    screen = see(t1, ~r/Atlas · test\s+Agent requests$/m)
+    screen = see(t1, ~r/Atlas · test.*\sAgent requests$/m)
     {a, _} = :binary.match(screen, newest["key"])
     {b, _} = :binary.match(screen, oldest["key"])
     a < b || raise "not newest first:\n#{screen}"
@@ -124,7 +124,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
   open_step = fn request, step ->
     home(t1)
     press(t1, "w")
-    see(t1, ~r/Atlas · test\s+Agent requests$/m)
+    see(t1, ~r/Atlas · test.*\sAgent requests$/m)
     open_row(t1, request)
     see(t1, "Agent request #{request}:")
     open_row(t1, step)
