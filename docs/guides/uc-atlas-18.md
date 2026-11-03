@@ -15,7 +15,7 @@ Run it again in a second terminal for TUI 2, on the same scene.
 | Step | Keys | What you should see |
 |---|---|---|
 | A plan | on a scene whose description lists a few use cases: `:`, `propose use cases from this scene's description`, `enter` | `Proposed: N steps`. |
-| Run | `enter` | The step being run shows `[…]`. Each stored step turns `[✓] … Stored as UC-Atlas-NN.`, and the title counts: `Running: 1 of N stored`. TUI 2 shows each use case by hint as it is stored. At the end: `Done: N of N stored`. |
+| Run | `enter` | The step being run shows `[…]`. Each stored step turns `[✓] … Stored as UC-Atlas-NN.`, and the title counts: `Running: 1 of N stored`. TUI 2 shows each use case by hint as it is stored. Once the last one is stored: `Done: N of N stored`, without the pause between steps. |
 | Stop | ask again, `enter`, then `esc` while it runs | `Stopping after this step…`, then `Stopped: 1 of N stored`. The steps not run show `[-] … Not run: stopped before it.` Only the stored ones are in the scene. |
 
 Nothing is rolled back by itself: undoing a stored step is an overrule (UC-Atlas-19).
