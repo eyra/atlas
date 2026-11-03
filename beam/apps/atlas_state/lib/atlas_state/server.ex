@@ -18,6 +18,8 @@ defmodule AtlasState.Server do
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
   "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional}`.
+  A fact's components (`AtlasState.Components`, its Assignment) are made in the same write,
+  before it, and deleted with it; a component alone is not deleted while its fact exists.
   On a create the links are the fact's first; on a change each relation named is replaced
   by the keys given (`[]` removes its links), so a fact moves to another parent or an
   association is set or removed; the hint then reaches every listener of its kind, on
@@ -29,7 +31,7 @@ defmodule AtlasState.Server do
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Copies, Description, Flows, Ledger, Links, Progress, Rela}
+  alias AtlasState.{Components, Copies, Description, Flows, Ledger, Links, Progress, Rela}
 
   @description "_description"
 
@@ -320,8 +322,10 @@ defmodule AtlasState.Server do
           case Description.targets(state.description, kind, content["links"] || %{}) do
             {:ok, targets} ->
               with {:ok, targets} <- target_kinds(state, op, targets),
-                   :ok <- targets_exist(state, op, targets) do
-                store(state.rela, spec, op, key, values, content["version"], targets)
+                   :ok <- targets_exist(state, op, targets),
+                   :ok <- not_a_part(state, kind, op, key) do
+                parts = Components.of(state.description, kind, key)
+                store(state, spec, op, key, values, content["version"], targets, parts)
               end
 
             {:error, problems} ->
@@ -339,6 +343,108 @@ defmodule AtlasState.Server do
   end
 
   defp store(state, _kind, _content), do: {{:refused, ["a fact needs an op and a key"]}, state}
+
+  # A fact with components: they are made first (the fact links to them), and when the fact
+  # is then not stored, the ones made here go again.
+  defp store(state, spec, "create", key, values, _version, targets, parts) do
+    values = Map.reject(values, fn {_, v} -> v in [nil, ""] end)
+    plural = spec["plural"]
+
+    with :ok <- both(Description.check_key(spec, key), Description.check(spec, values, :create)),
+         {:ok, []} <- Rela.check_create(state.rela, plural, key, values, targets),
+         {:ok, made} <- make_parts(state, parts) do
+      linked =
+        for {relation, kind, part, _} <- parts, into: targets, do: {relation, {kind, [part]}}
+
+      case Rela.create(state.rela, plural, key, values, linked) do
+        {:ok, _warnings} ->
+          :stored
+
+        error ->
+          unmake_parts(state, made)
+
+          case error do
+            {:error, :exists} -> resent_create(state.rela, plural, key, values, targets)
+            error -> failure(error)
+          end
+      end
+    else
+      {:ok, warnings} -> {:refused, warnings}
+      {:error, :exists} -> resent_create(state.rela, plural, key, values, targets)
+      {:refused, _} = refused -> refused
+      {:refused, _, _} = refused -> refused
+      error -> failure(error)
+    end
+  end
+
+  # Deleted with the fact, by the keys they are made with, so a resent delete finds them too.
+  defp store(state, spec, "delete", key, values, version, targets, parts) do
+    case store(state.rela, spec, "delete", key, values, version, targets) do
+      :stored ->
+        Enum.reduce_while(parts, :stored, fn {_relation, kind, part, _}, :stored ->
+          case Rela.delete(state.rela, plural(state, kind), part, nil) do
+            :ok -> {:cont, :stored}
+            {:error, :not_found} -> {:cont, :stored}
+            error -> {:halt, failure(error)}
+          end
+        end)
+
+      other ->
+        other
+    end
+  end
+
+  defp store(state, spec, op, key, values, version, targets, _parts),
+    do: store(state.rela, spec, op, key, values, version, targets)
+
+  # Made here: `{:ok, [{kind, key}]}`; one there already with the same values is kept and
+  # not made again (a resent create).
+  defp make_parts(state, parts) do
+    Enum.reduce_while(parts, {:ok, []}, fn {_relation, kind, part, values}, {:ok, made} ->
+      spec = Description.kind(state.description, kind) || %{}
+
+      result =
+        with :ok <- Description.check(spec, values, :create) do
+          case Rela.create(state.rela, spec["plural"], part, values, %{}) do
+            {:ok, []} -> :made
+            {:ok, warnings} -> {:refused, warnings}
+            {:error, :exists} -> resent_create(state.rela, spec["plural"], part, values, %{})
+            error -> failure(error)
+          end
+        else
+          {:error, problems} -> {:refused, Enum.map(problems, &"#{part}: #{&1}")}
+        end
+
+      case result do
+        :made -> {:cont, {:ok, [{kind, part} | made]}}
+        :stored -> {:cont, {:ok, made}}
+        other -> unmake_parts(state, made) && {:halt, other}
+      end
+    end)
+  end
+
+  defp unmake_parts(state, made) do
+    for {kind, part} <- made, do: Rela.delete(state.rela, plural(state, kind), part, nil)
+    true
+  end
+
+  defp plural(state, kind), do: get_in(state.description, ["entities", kind, "plural"])
+
+  # A component goes with its fact, never alone while that fact exists.
+  defp not_a_part(state, kind, "delete", key) do
+    owners =
+      for {relation, _from} <- Components.owners(state.description, kind),
+          {:ok, keys} <- [Rela.incoming(state.rela, plural(state, kind), key, relation)],
+          owner <- keys,
+          do: owner
+
+    case owners do
+      [] -> :ok
+      _ -> {:refused, ["#{key} goes with #{Enum.join(owners, ", ")}; delete that instead"]}
+    end
+  end
+
+  defp not_a_part(_state, _kind, _op, _key), do: :ok
 
   defp store(rela, spec, "create", key, values, _version, targets) do
     values = Map.reject(values, fn {_, v} -> v in [nil, ""] end)

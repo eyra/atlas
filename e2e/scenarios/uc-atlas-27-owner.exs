@@ -64,17 +64,18 @@ scenario "UC-Atlas-27: Every fact has an owner", fn %{t1: t1, t2: t2, instance: 
     key = Process.get(:uc27)
     open_row(t1, "ann  Person")
     see(t1, "Person ann: Ann")
-    see(t1, "Assignments: Scenes")
-    see(t1, ~r/#{key}\s+A scene with an owner/)
+    # Since IS-Atlas-78 what is assigned is an Assignment, named by its fact.
+    see(t1, "Assignments")
+    see(t1, ~r/AS-#{key}\s+#{key}/)
   end
 
   step "atlas migrate-owner: every fact without an owner gets the coordinator, once", fn ->
     {lone, _} = atlas_json(i, ["put", "scene", "--title", "A scene without an owner"])
     {out, 0, _} = atlas(i, ["migrate-owner", "--dry-run"])
-    out =~ "assign   #{lone["key"]}  assigned_to coordinator" || raise out
+    out =~ "assign   AS-#{lone["key"]}  assigned_to coordinator" || raise out
     out =~ ~r/IS-Atlas-52 migration: \d+ steps; cause: owner introduced/ || raise out
     out =~ "Dry run: nothing was written." || raise out
-    String.contains?(out, "assign   #{Process.get(:uc27)}") && raise "it would move an owner"
+    String.contains?(out, "assign   AS-#{Process.get(:uc27)}") && raise "it would move an owner"
 
     {out, 0, _} = atlas(i, ["migrate-owner"])
     out =~ ~r/Done: (\d+) of \1 steps written\./ || raise out

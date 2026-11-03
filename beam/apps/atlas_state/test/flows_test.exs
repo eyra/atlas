@@ -105,11 +105,92 @@ defmodule AtlasState.FlowsTest do
     assert "box's progress or completion depends on todo, which Flow writes" in problems
   end
 
+  # A box has a card, made with it; Flow writes on the card.
+  defp on_card(description) do
+    description
+    |> put_in(["entities", "card"], %{"properties" => %{"todo" => %{"type" => "string"}}})
+    |> update_in(["entities", "box", "properties"], &Map.delete(&1, "todo"))
+    |> put_in(["relations", "card"], %{"from" => ["box"], "to" => ["card"], "max_outgoing" => 1})
+    |> put_in(["relations", "signed_by", "from"], ["card"])
+  end
+
+  test "with on, Flow writes on the fact that relation points at, and is checked there" do
+    description = on_card(description(@sound, %{"on" => "card", "owner_relation" => "signed_by"}))
+    assert Flows.check(description) == %{"sign" => []}
+
+    # Without on, the box has no todo, and signed_by does not start at it.
+    plain = put_in(description, ["flows", "sign", "on"], nil)
+    assert %{"sign" => problems} = Flows.check(plain)
+    assert "box has no todo to write what is expected" in problems
+    assert "signed_by does not start at box" in problems
+
+    many =
+      put_in(description, ["relations", "card"], %{"from" => ["crate"], "to" => ["card", "box"]})
+
+    assert %{"sign" => problems} = Flows.check(many)
+    assert "card does not start at box" in problems
+    assert "card must point at one kind" in problems
+    assert "card must allow one link" in problems
+
+    # A rule of the card that reads what Flow writes there, or of the box through card.
+    carded = put_in(description, ["entities", "card", "progress"], %{"own" => "todo"})
+    assert %{"sign" => [problem]} = Flows.check(carded)
+    assert problem == "card's progress or completion depends on todo, which Flow writes"
+
+    through = %{"through" => "card", "field" => "todo", "value" => "x"}
+    boxed = put_in(description, ["entities", "box", "completion"], through)
+    assert %{"sign" => [problem]} = Flows.check(boxed)
+    assert problem == "box's progress or completion depends on todo, which Flow writes"
+  end
+
+  # rela's half of the description, as far as the definitions need it: what the relation
+  # each names in `on` says in rela/schema.yaml, and the fields of the kind it points at.
+  defp rela_half(extra) do
+    yaml = @root |> Path.join("rela/schema.yaml") |> File.read!()
+
+    for {_name, %{"on" => on}} <- extra["flows"],
+        is_binary(on),
+        reduce: %{"entities" => %{}, "relations" => %{}} do
+      acc ->
+        block = block(yaml, "relations", on)
+        [to] = list(block, "to")
+
+        fields =
+          Regex.scan(~r/^      ([a-z_]+):/m, block(yaml, "entities", to), capture: :all_but_first)
+
+        props = Map.new(List.flatten(fields), &{&1, %{"type" => "string"}})
+        max = Regex.run(~r/max_outgoing: (\d+)/, block, capture: :all_but_first)
+        relation = %{"from" => list(block, "from"), "to" => [to]}
+
+        relation =
+          if max,
+            do: Map.put(relation, "max_outgoing", String.to_integer(hd(max))),
+            else: relation
+
+        acc
+        |> put_in(["relations", on], relation)
+        |> put_in(["entities", to], %{"properties" => props})
+    end
+  end
+
+  # The lines of `name` under the top-level `section`, up to the next name at its level.
+  defp block(yaml, section, name) do
+    [_, rest] = String.split(yaml, ~r/^#{section}:$/m, parts: 2)
+    [_, rest] = String.split(rest, ~r/^  #{name}:$/m, parts: 2)
+    rest |> String.split(~r/^(  [a-z_]+:|[a-z_]+:)$/m, parts: 2) |> hd()
+  end
+
+  defp list(block, key) do
+    [items] = Regex.run(~r/^    #{key}: \[([^\]]*)\]/m, block, capture: :all_but_first)
+    items |> String.split(",") |> Enum.map(&String.trim/1)
+  end
+
   test "the definitions in rela/atlas.json are sound" do
     extra = @root |> Path.join("rela/atlas.json") |> File.read!() |> JSON.decode!()
     assert map_size(extra["flows"]) > 0
+    description = AtlasState.Description.merge(rela_half(extra), extra)
 
-    assert Enum.all?(Flows.check(extra), fn {_name, problems} -> problems == [] end),
-           inspect(Flows.check(extra))
+    assert Enum.all?(Flows.check(description), fn {_name, problems} -> problems == [] end),
+           inspect(Flows.check(description))
   end
 end

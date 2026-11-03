@@ -13,6 +13,9 @@ defmodule AtlasPlan.Owner do
      requests today; read from rela's description, so a kind added there is included)
      that has no owner yet gets `assigned_to` coordinator.
 
+  Since IS-Atlas-78 `assigned_to` starts at the Assignment, so the facts it reads are the
+  Assignments, and an Assignment without an owner gets the coordinator.
+
   A dry run reads and prints the steps, and writes nothing. A second run finds nothing
   left to do: a fact that has an owner keeps it.
   """

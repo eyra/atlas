@@ -81,6 +81,10 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
 
   step "A new issue under it: Build it again", fn ->
     %{use_case: use_case} = Process.get(:uc27)
+    # Flow writes on the use case's Assignment (IS-Atlas-78); its page is short enough to
+    # show it whole, also with the use case's references grown.
+    open_row(t1, "AS-#{use_case}")
+    see(t1, ~r/Expected\s+Rework/)
 
     {fix, at} =
       atlas_json(i, ["put", "issue", "--in", use_case, "--title", "Fix the footer"])

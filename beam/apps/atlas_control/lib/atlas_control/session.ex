@@ -236,7 +236,7 @@ defmodule AtlasControl.Session do
   defp by_key({:links, "_", key, relation}, state) do
     case kind_holding(key, state) do
       nil -> :unknown
-      kind -> {:links, kind, key, relation}
+      kind -> Pages.resolve({:links, kind, key, relation}, state.description)
     end
   end
 
