@@ -84,6 +84,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
   step "a Accept, y: the use case is Done, accepted by melle; the scene to test", fn ->
     %{scene: scene, use_case: use_case} = Process.get(:uc32)
     open_row(t1, "A use case to accept")
+    see(t1, "Use case #{use_case}: A use case to accept")
     press(t1, "a")
     see(t1, "will be accepted by melle")
     at = press(t1, "y")
@@ -116,6 +117,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     %{use_case: use_case} = Process.get(:uc32)
     open_row(t1, "A scene to accept")
     open_row(t1, "A use case to accept")
+    see(t1, "r Reopen")
     press(t1, "r")
     see(t1, "Reopen #{use_case}")
     type(t1, "Found a bug in the footer")

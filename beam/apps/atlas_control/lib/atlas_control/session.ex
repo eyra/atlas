@@ -504,7 +504,7 @@ defmodule AtlasControl.Session do
     end
   end
 
-  # The kind of fact the client is (a person at a TUI), or nil (an agent, a migration):
+  # The kind of fact the client is (the user at a TUI), or nil (an agent, a migration):
   # the kind whose ids its key fits, when a fact with that key exists.
   defp actor_kind(state) do
     case Pages.resolve({:item, "_", state.by}, state.description) do
