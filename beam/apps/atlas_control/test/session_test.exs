@@ -166,6 +166,33 @@ defmodule AtlasControl.SessionTest do
     assert %{"reason" => "hint", "blocks" => [_, %{"props" => %{"rows" => []}}]} = next(b, "page")
   end
 
+  test "a key made from a property; one that cannot be made is never sent", %{port: port} do
+    FakeStore.link("P-1", "W-1")
+    a = client(port)
+    next(a, "page")
+    put(a, %{"op" => "open", "to" => "/k/tag/new/on_part/P-1"})
+    assert %{"title" => "New tag in P-1"} = next(a, "page")
+
+    put(a, %{"op" => "submit", "to" => "/k/tag/new/on_part/P-1", "values" => %{"name" => "nope"}})
+    assert %{"tone" => "error", "text" => "Not sent: the form says why."} = next(a, "notice")
+
+    assert %{
+             "reason" => "refused",
+             "blocks" => [%{"props" => %{"errors" => ["name must look like #word/1"]}}]
+           } = next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/tag/new/on_part/P-1",
+      "values" => %{"name" => "#x.y/7"}
+    })
+
+    assert %{"tone" => "pending"} = next(a, "notice")
+
+    assert %{"path" => "/k/tag/T-x_y-7", "back" => "/k/part/P-1", "reason" => "stored"} =
+             next(a, "page")
+  end
+
   test "a fact with parts under it is not deleted", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     FakeStore.link("P-1", "W-1")

@@ -271,7 +271,9 @@ defmodule AtlasControl.Pages do
     form_block =
       Blocks.form(
         title: "New #{singular(spec, kind) |> String.downcase()}",
-        inputs: [id_input | inputs(spec, values)],
+        # A kind whose id comes from one of its properties asks for that property only.
+        inputs:
+          if(spec["id_from"], do: inputs(spec, values), else: [id_input | inputs(spec, values)]),
         submit_label: "Create",
         submit_to: path({:new, kind}),
         cancel_to: path({:list, kind}),
@@ -295,7 +297,7 @@ defmodule AtlasControl.Pages do
         form_block =
           Blocks.form(
             title: "Change #{singular(spec, kind) |> String.downcase()} #{key}",
-            inputs: inputs(spec, values),
+            inputs: inputs(spec, values, fixed: id_property(spec)),
             submit_label: "Save",
             submit_to: path({:edit, kind, key}),
             cancel_to: back,
@@ -339,8 +341,7 @@ defmodule AtlasControl.Pages do
             confirm =
               Blocks.confirm(
                 title: "#{key} cannot be deleted",
-                text:
-                  "#{key} still has #{what}. Remove them first; Atlas never deletes them along with it.",
+                text: "#{key} still has #{what}. " <> remove_first(held),
                 cancel_to: back
               )
 
@@ -459,8 +460,49 @@ defmodule AtlasControl.Pages do
 
   # Form inputs from the description
 
-  defp inputs(spec, values) do
-    for {name, prop} <- ordered(spec) do
+  defp remove_first([{_, [_]}]),
+    do: "Remove it first; Atlas never deletes it along with its parent."
+
+  defp remove_first(_held),
+    do: "Remove them first; Atlas never deletes them along with their parent."
+
+  # The property a kind's id comes from (`id_from` in the description), if any.
+  defp id_property(spec), do: get_in(spec, ["id_from", "property"])
+
+  @doc """
+  The key for a new fact of a kind: typed in (`_key`), or made from a property by the
+  kind's `id_from` rule (a pattern and a template, with `{n}` for the n-th group).
+  """
+  def key_for(spec, raw) do
+    case spec["id_from"] do
+      %{"property" => property, "pattern" => pattern, "template" => template} = rule ->
+        value = String.trim(raw[property] || "")
+
+        with {:ok, regex} <- Regex.compile(pattern),
+             [_ | groups] <- Regex.run(regex, value) do
+          groups = Enum.map(groups, &replace_all(&1, rule["replace"] || %{}))
+
+          {:ok,
+           Regex.replace(~r/\{(\d+)\}/, template, fn _, n ->
+             Enum.at(groups, String.to_integer(n) - 1) || ""
+           end)}
+        else
+          _ -> {:error, rule["error"] || "#{property} does not fit #{pattern}"}
+        end
+
+      _ ->
+        {:ok, String.trim(raw["_key"] || "")}
+    end
+  end
+
+  defp replace_all(text, replacements),
+    do: Enum.reduce(replacements, text, fn {from, to}, acc -> String.replace(acc, from, to) end)
+
+  # `fixed`: a property shown in a form but not changed by it (the one the id comes from).
+  defp inputs(spec, values, opts \\ []) do
+    fixed = Keyword.get(opts, :fixed)
+
+    for {name, prop} <- ordered(spec), name != fixed do
       Blocks.input(
         name: name,
         label: humanize(name),
@@ -514,9 +556,10 @@ defmodule AtlasControl.Pages do
 
   # Showing values
 
-  # The primary property first, then choices, then flags, then the rest, so long text ends up last.
+  # The primary property (or the one the id comes from) first, then choices, then flags,
+  # then the rest, so long text ends up last.
   defp ordered(spec) do
-    primary = spec["primary"]
+    primary = spec["primary"] || id_property(spec)
 
     (spec["properties"] || %{})
     |> Enum.sort_by(fn {name, prop} ->
@@ -532,7 +575,8 @@ defmodule AtlasControl.Pages do
     end)
   end
 
-  defp label(spec, fact), do: to_text(fact["values"][spec["primary"]]) |> blank(fact["key"])
+  defp label(spec, fact),
+    do: to_text(fact["values"][spec["primary"] || id_property(spec)]) |> blank(fact["key"])
 
   defp detail(spec, fact) do
     shown =

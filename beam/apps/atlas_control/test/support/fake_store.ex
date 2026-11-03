@@ -32,9 +32,32 @@ defmodule AtlasControl.FakeStore do
           "plural" => "parts",
           "primary" => "title",
           "properties" => %{"title" => %{"type" => "string", "required" => true}}
+        },
+        # A kind whose id comes from a property, as `rela/atlas.json` adds it.
+        "tag" => %{
+          "label" => "Tag",
+          "plural" => "tags",
+          "id_type" => "manual",
+          "properties" => %{
+            "name" => %{"type" => "string", "required" => true},
+            "note" => %{"type" => "string"}
+          },
+          "id_from" => %{
+            "property" => "name",
+            "pattern" => "^#([a-z.]+)/([0-9]+)$",
+            "template" => "T-{1}-{2}",
+            "replace" => %{"." => "_"},
+            "error" => "name must look like #word/1"
+          }
         }
       },
       "relations" => %{
+        "on_part" => %{
+          "label" => "on part",
+          "from" => ["tag"],
+          "to" => ["part"],
+          "max_outgoing" => 1
+        },
         "of_widget" => %{
           "label" => "of widget",
           "from" => ["part"],
@@ -120,7 +143,7 @@ defmodule AtlasControl.FakeStore do
     about = %{"op" => op, "key" => key}
     id = {e.kind, key}
 
-    if op == "create" and c["values"]["title"] in [nil, ""] do
+    if op == "create" and e.kind != "tag" and c["values"]["title"] in [nil, ""] do
       :ok =
         AtlasBus.send(
           Envelope.reply(e, "refused"),

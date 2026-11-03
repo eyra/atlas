@@ -168,6 +168,31 @@ defmodule AtlasControl.PagesTest do
     assert refusal["text"] =~ "still has 1 part."
   end
 
+  test "a kind whose id comes from a property: the key is made, not typed" do
+    tag = @d["entities"]["tag"]
+    assert Pages.key_for(tag, %{"name" => " #a.b/12 "}) == {:ok, "T-a_b-12"}
+    assert Pages.key_for(tag, %{"name" => "a.b"}) == {:error, "name must look like #word/1"}
+    assert Pages.key_for(@d["entities"]["widget"], %{"_key" => " W-1 "}) == {:ok, "W-1"}
+
+    %{blocks: [%{"props" => form}]} = Pages.render({:new, "tag", {"on_part", "P-1"}}, @d, [])
+    assert Enum.map(form["inputs"], & &1["name"]) == ["name", "note"]
+
+    stored = %{
+      "fact" => %{
+        "key" => "T-a-1",
+        "values" => %{"name" => "#a/1"},
+        "links" => %{},
+        "version" => "v1"
+      }
+    }
+
+    %{blocks: [%{"props" => edit}]} = Pages.render({:edit, "tag", "T-a-1"}, @d, [stored])
+    assert Enum.map(edit["inputs"], & &1["name"]) == ["note"]
+
+    %{blocks: [%{"props" => item}]} = Pages.render({:item, "tag", "T-a-1"}, @d, [stored])
+    assert item["title"] == "Tag T-a-1: #a/1"
+  end
+
   test "form text becomes the described types" do
     spec = @d["entities"]["widget"]
 

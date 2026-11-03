@@ -171,27 +171,10 @@ defmodule AtlasControl.Session do
 
   # Writes
 
-  defp submit({:new, kind} = route, raw, state) do
-    key = String.trim(raw["_key"] || "")
-    values = Pages.values_for(spec(state, kind), raw)
-    content = %{"op" => "create", "key" => key, "values" => values, "version" => nil}
-    put_fact(%{state | route: route, form: %{values: raw}}, kind, content, {:item, kind, key})
-  end
+  defp submit({:new, kind} = route, raw, state), do: create(route, kind, raw, %{}, state)
 
-  defp submit({:new, kind, {relation, parent}} = route, raw, state) do
-    key = String.trim(raw["_key"] || "")
-    values = Pages.values_for(spec(state, kind), raw)
-
-    content = %{
-      "op" => "create",
-      "key" => key,
-      "values" => values,
-      "version" => nil,
-      "links" => %{relation => [parent]}
-    }
-
-    put_fact(%{state | route: route, form: %{values: raw}}, kind, content, {:item, kind, key})
-  end
+  defp submit({:new, kind, {relation, parent}} = route, raw, state),
+    do: create(route, kind, raw, %{relation => [parent]}, state)
 
   defp submit({:edit, kind, key} = route, raw, state) do
     values = Pages.values_for(spec(state, kind), raw)
@@ -235,6 +218,24 @@ defmodule AtlasControl.Session do
   end
 
   defp submit(_route, _raw, state), do: notice(state, "error", "Nothing to submit here.")
+
+  defp create(route, kind, raw, links, state) do
+    spec = spec(state, kind)
+    state = %{state | route: route, form: %{values: raw}}
+
+    case Pages.key_for(spec, raw) do
+      {:ok, key} ->
+        values = Pages.values_for(spec, raw)
+        content = %{"op" => "create", "key" => key, "values" => values, "version" => nil}
+        content = if links == %{}, do: content, else: Map.put(content, "links", links)
+        put_fact(state, kind, content, {:item, kind, key})
+
+      # No key, no fact: the form says why, and nothing goes to State.
+      {:error, reason} ->
+        state = notice(state, "error", "Not sent: the form says why.")
+        show(put_in(state.form[:errors], [reason]), route, "refused", nil)
+    end
+  end
 
   defp put_fact(state, kind, content, after_route) do
     envelope = Envelope.new("fact", kind)

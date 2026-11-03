@@ -193,6 +193,26 @@ defmodule AtlasStateTest do
              )
   end
 
+  test "Atlas's additions are merged into the description State answers", %{rela: rela, dir: dir} do
+    extra = Path.join(dir, "atlas.json")
+
+    File.write!(
+      extra,
+      ~s({"_about": "x", "entities": {"widget": {"id_from": {"property": "title"}}}})
+    )
+
+    stop_supervised!(AtlasState.Server)
+
+    start_supervised!(
+      {AtlasState.Server, rela: {FakeRela, rela}, data_dir: dir, description_extra: extra}
+    )
+
+    %{"description" => description} = read("_description")
+    assert description["entities"]["widget"]["id_from"] == %{"property" => "title"}
+    assert description["entities"]["widget"]["plural"] == "widgets"
+    refute Map.has_key?(description, "_about")
+  end
+
   test "a stored fact is a hint to listeners of its kind", _ do
     test = self()
 

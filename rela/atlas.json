@@ -1,0 +1,14 @@
+{
+  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind.",
+  "entities": {
+    "pull_request": {
+      "id_from": {
+        "property": "url",
+        "pattern": "^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([0-9]+)$",
+        "template": "PR-{1}-{2}-{3}",
+        "replace": { ".": "_" },
+        "error": "url must be a GitHub pull request URL, e.g. https://github.com/eyra/atlas/pull/12"
+      }
+    }
+  }
+}
