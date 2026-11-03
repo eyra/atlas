@@ -687,7 +687,7 @@ defmodule AtlasTuiTest do
   end
 
   test "the view knows every block and kind of markup in Control's contract" do
-    schema = AtlasContract.Blocks.__schema__()
+    schema = AtlasBFFContract.Blocks.__schema__()
     known = View.known()
 
     for %{name: name} <- schema.blocks,

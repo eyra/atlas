@@ -54,7 +54,7 @@ An agent that plans gets the same actions as tools: `atlas tools` lists them, ma
 | `clients/tui/` | The TUI, a client of Control. Renders Control's blocks; knows no entity. Not part of the BEAM platform. |
 | `clients/agent/` | The agents' command line (`atlas help/put/set/get/list/tools/plan`), a client of Control like the TUI: it reads pages and fills forms, and knows no entity. The planner boundary (`AtlasAgent.Planner`) is here too. |
 | `tools/plan/` | `atlas load-plan` (UC-Atlas-05): SCENES.md into Atlas through `clients/agent`, with `links.json` for pull requests and stages. |
-| `spec/` | Control's spec, in three parts (ADR 0001): `generator/` (the DSL, the rules of markup, the targets, `mix atlas.gen`; none of Atlas's values), `contract/` (the blocks, models and markup Control sends; only that), `targets/` (generated files: `json/blocks.json` for clients in other languages). Control and the TUI read the contract at compile time. `spec/README.md` has the view model, the wire format and the protocol. |
+| `bff/` | Control's BFF (backend for frontend), in three parts (ADR 0001): `generator/` (the DSL, the rules of markup, the targets, `mix atlas.gen`; none of Atlas's values), `contract/` (the blocks, models and markup Control sends; only that), `targets/` (generated files: `json/blocks.json` for clients in other languages). Control and the TUI read the contract at compile time. `bff/README.md` has the view model, the wire format and the protocol. |
 | `rela/` | rela's description (`schema.yaml`): every entity Atlas knows. `atlas.json` adds what this rela cannot hold, as data per kind: which fields a create asks for, how ids are made, defaults, fields only a connector fills. Plus the scripts that run the rela test instance. |
 | `env/` | One settings file per environment (`test.json`, `prod.json`), read by the core and the clients. Test and prod share no port and no data. |
 | `bin/atlas` | The `atlas` command: starts the environment in the background and opens the TUI. `bin/atlas install` links it into `~/.local/bin` from the main clone. |
@@ -66,7 +66,7 @@ An agent that plans gets the same actions as tools: `atlas tools` lists them, ma
 
 - Layers talk only over the Bus: no layer depends on, calls or names another (`beam/apps/atlas_bus/test/boundary_test.exs`).
 - Nothing on the BEAM side, in the TUI or in the agents' command line names an entity; entities live in `rela/schema.yaml` only (same test).
-- The generated files match the contract, and none is left over (`mix atlas.gen --check` in `spec/contract`).
+- The generated files match the contract, and none is left over (`mix atlas.gen --check` in `bff/contract`).
 - The generator holds none of Atlas's values and compiles without the contract; its targets read only `__schema__/0`.
 
 ## Develop
@@ -75,8 +75,8 @@ An agent that plans gets the same actions as tools: `atlas tools` lists them, ma
 cd beam && mix test          # Bus, State, Control (with a fake rela and a fake State)
 cd clients/tui && mix test   # the TUI
 cd clients/agent && mix test # the agents' command line: tools, planner
-cd spec/generator && mix test   # the DSL, the rules of markup, the targets (on a neutral contract)
-cd spec/contract && mix atlas.gen   # after changing the contract: writes spec/targets/
+cd bff/generator && mix test   # the DSL, the rules of markup, the targets (on a neutral contract)
+cd bff/contract && mix atlas.gen   # after changing the contract: writes bff/targets/
 bin/atlas e2e --env test     # the end-to-end test (needs tmux); never on prod; also: cd e2e && mix atlas.e2e
 cd e2e && mix test           # what bin/atlas refuses or chooses (prod default, --env, ATLAS_ENV_FILE)
 ```

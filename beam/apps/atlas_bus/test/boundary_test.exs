@@ -54,7 +54,7 @@ defmodule AtlasBus.BoundaryTest do
     do:
       sources(dir) ++
         Path.wildcard(
-          Path.join([@root, "spec/{contract,generator}", "{lib,test}", "**", "*.{ex,exs}"])
+          Path.join([@root, "bff/{contract,generator}", "{lib,test}", "**", "*.{ex,exs}"])
         )
 
   defp sources(dir, _own), do: sources(dir)
@@ -132,7 +132,7 @@ defmodule AtlasBus.BoundaryTest do
     test "nothing on the BEAM side or in a client names an entity" do
       dirs = Enum.map(@layers, fn {app, ns} -> {"beam/apps/#{app}", ns} end) ++ @clients
       files = Enum.flat_map(dirs, fn {dir, own} -> sources(dir, own) end)
-      assert Path.join(@root, "spec/contract/lib/blocks.ex") in files
+      assert Path.join(@root, "bff/contract/lib/blocks.ex") in files
       assert length(files) > 20
 
       for file <- files do
