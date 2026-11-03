@@ -14,6 +14,9 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
   row = fn title -> ~r/UC-Atlas-\d+\s+#{Regex.escape(title)}/ end
 
   scene = fn title ->
+    # Both TUIs on the scenes list first, so the new scene shows there by hint.
+    for t <- [t1, t2], do: see(t, ~r/Atlas · test\s+Scenes$/m)
+
     {scene, at} =
       atlas_json(i, ["put", "scene", "--title", title, "--description", "-"], 0, description)
 

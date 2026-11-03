@@ -180,12 +180,16 @@ defmodule AtlasE2E.Scenario do
 
   # Moving around
 
-  @doc "Back to the start page: escape until there is nothing to go back to."
+  @doc """
+  Back to the start page: escape until there is nothing to go back to. An agent's plan
+  counts as something to leave (`↵ close` when it is over, `esc stop` while it runs), so
+  a key that closed a plan but has not been drawn yet does not look like the start page.
+  """
   def home(tui) do
     Enum.reduce_while(1..8, nil, fn _, _ ->
       screen = Tui.screen(tui)
 
-      if screen =~ ~r/esc (back|cancel)|y confirm|↵ back/ do
+      if screen =~ ~r/esc (back|cancel|stop)|y confirm|↵ (back|close)/ do
         Tui.keys(tui, [if(screen =~ "y confirm", do: "n", else: "Escape")])
         wait(tui, @page_wait, &(&1 != screen), "change page")
         {:cont, nil}

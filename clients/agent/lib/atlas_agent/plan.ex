@@ -5,7 +5,8 @@ defmodule AtlasAgent.Plan do
   submits nothing.
 
   A step from a planner: `%{"tool" => "put", "kind", "in", "values", "why"}` or
-  `%{"tool" => "set", "key", "values", "why"}`. Values are text, by field name.
+  `%{"tool" => "set", "key", "values", "why"}` or `%{"tool" => "delete", "key", "why"}`.
+  Values are text, by field name.
 
   A checked step adds:
 
@@ -102,11 +103,27 @@ defmodule AtlasAgent.Plan do
     end
   end
 
+  # A delete is checked against the confirm Control shows before it: the confirm's title is
+  # its label; a confirm that cannot be confirmed says why it cannot run.
+  defp check_step(%{"tool" => "delete", "key" => key} = step, client, _tools)
+       when is_binary(key) do
+    case AtlasAgent.delete_confirm(client, key) do
+      {:ok, %{"confirm_to" => to} = confirm} when is_binary(to) ->
+        Map.merge(step, %{"label" => confirm["title"], "inputs" => [], "problem" => nil})
+
+      {:ok, confirm} ->
+        problem(Map.put(step, "label", confirm["title"]), confirm["text"])
+
+      {:error, text} ->
+        problem(step, text)
+    end
+  end
+
   defp check_step(%{"tool" => tool} = step, _client, _tools) when tool in ["get", "list", "help"],
     do: problem(step, "#{tool} only reads; a plan holds only what changes something")
 
   defp check_step(step, _client, _tools),
-    do: problem(step, "a step is a put of a kind or a set of a key; this one is neither")
+    do: problem(step, "a step is a put of a kind, or a set or delete of a key; this one is none")
 
   # The fact a put goes in exists, and is of the kind the tool says.
   defp parent(_client, nil, nil), do: :ok
@@ -153,6 +170,7 @@ defmodule AtlasAgent.Plan do
     do: "Put #{kind}#{if step["in"], do: " in #{step["in"]}", else: ""}"
 
   defp label(%{"tool" => "set", "key" => key}), do: "Set #{key}"
+  defp label(%{"tool" => "delete", "key" => key}), do: "Delete #{key}"
   defp label(step), do: "#{step["tool"] || "?"}"
 
   defp blank?(value), do: value in [nil, ""]
