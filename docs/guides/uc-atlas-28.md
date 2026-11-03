@@ -35,7 +35,7 @@ A session that is not a person (an agent on the command line, a migration) opens
   - Every word comes from there, so naming these things (d-0022) is a change to `rela/atlas.json` only. No noun is in code.
 - **Control:**
   - For a session whose user is a fact of a kind `assigned_to` points at (a person at the TUI), `/` is what points at it: its Assignments, one kind (IS-Atlas-78).
-  - Each Assignment shows as the fact it belongs to: Control also reads the kinds the component association (`assignment`) starts at, and finds each fact by its link to the Assignment. Completed facts are left out.
+  - Each Assignment shows as the fact it belongs to: Control also reads the kinds the component association (`assignment`) starts at, only the facts whose Assignment points at the user (a `linked` read one step on), and finds each fact by its link to its Assignment. Completed facts are left out.
   - It sorts them by the time of the fact that set the link, newest first.
   - Each row has the fact's title, its expected action (the field the flow writes, on the Assignment since the flow is `on` it), and the since and cause of that link.
   - No kind is named: the relation is the description's `start.assigned.relation`, and the rest follows from the `component` mark.

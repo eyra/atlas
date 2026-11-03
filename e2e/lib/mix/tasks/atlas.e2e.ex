@@ -31,6 +31,11 @@ defmodule Mix.Tasks.Atlas.E2e do
     instance = Instance.start()
     socket = "atlas-e2e-#{System.os_time(:millisecond)}"
 
+    # The TUIs' user exists before they start, as in test and prod: a session knows from its
+    # first page that its user is a person, so `/` is their start page throughout and never
+    # turns from the plan into it halfway through a scenario (IS-Atlas-55).
+    {_, 0, _} = AtlasE2E.Scenario.atlas(instance, ["put", "person", "--name", "Melle"])
+
     IO.puts(
       "atlas e2e: rela on #{instance.settings["rela"]["port"]}, Control on " <>
         "#{instance.settings["control"]["port"]}, build #{build()}"
