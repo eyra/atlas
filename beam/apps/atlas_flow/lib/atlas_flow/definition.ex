@@ -1,0 +1,127 @@
+defmodule AtlasFlow.Definition do
+  @moduledoc """
+  Flow definitions, as rela's description holds them (`flows` in `rela/atlas.json`), and
+  which state a fact is in. Pure; knows no kind by name.
+
+  A definition:
+
+      "flows": {"<name>": {
+        "kinds": [<kind>, ...],            the kinds it runs on
+        "field": "<property>",             where it writes what the owner is expected to do
+        "owner_relation": "<relation>",    where it writes the owner (optional)
+        "states": [                        in order: the first that holds is the state
+          {"name": ..., "when": {...}, "done": true},
+          {"name": ..., "when": {...}, "owner": <key>, "expected": <text>, "why": <text>,
+           "next": [<state>, ...], "every_seconds": <n>}, ...
+          {"name": ..., "owner": ..., ...}        the last holds when nothing else does
+        ]}}
+
+  What a state's `when` can say, of the fact as State answers it:
+
+  - `"completed": true`: it is completed (`completion`);
+  - `"progress": <value>`: its progress has that value (such as to test);
+  - `"reopened": <relation>`: the newest fact about that association removed it, and no
+    fact came under it since (through a parent relation). `{note}` in `expected` is that
+    fact's cause.
+
+  State checks every definition (`flow_problems` in the description it answers): every
+  state that is not done has an owner and a way out to a next state, and every state can
+  reach done. A definition with problems is not run.
+  """
+
+  @doc "The definitions that may run: `%{name => definition}`, without those State refused."
+  def flows(description) do
+    problems = description["flow_problems"] || %{}
+
+    for {name, flow} <- description["flows"] || %{},
+        is_map(flow),
+        (problems[name] || []) == [],
+        into: %{},
+        do: {name, flow}
+  end
+
+  @doc "The definition that runs on `kind`, as `{name, definition}`, or nil."
+  def for_kind(description, kind) do
+    Enum.find(flows(description), fn {_name, flow} -> kind in (flow["kinds"] || []) end)
+  end
+
+  @doc "Every kind a definition runs on."
+  def kinds(description),
+    do: description |> flows() |> Enum.flat_map(fn {_, f} -> f["kinds"] || [] end) |> Enum.uniq()
+
+  @doc """
+  The state `fact` is in: `{state, vars}`, where `vars` fill its texts (`"note"`).
+  `children` are the facts that point at it through a parent relation, as State answers
+  them, with their `origins`; `parents` names those relations.
+  """
+  def state_of(flow, fact, children, parents) do
+    Enum.find_value(flow["states"] || [], {nil, %{}}, fn state ->
+      case holds(state["when"] || %{}, fact, children, parents) do
+        nil -> nil
+        vars -> {state, vars}
+      end
+    end)
+  end
+
+  defp holds(conditions, fact, children, parents) do
+    Enum.reduce_while(conditions, %{}, fn {name, value}, vars ->
+      case condition(name, value, fact, children, parents) do
+        nil -> {:halt, nil}
+        more -> {:cont, Map.merge(vars, more)}
+      end
+    end)
+  end
+
+  defp condition("completed", true, fact, _, _), do: if(fact["completion"], do: %{})
+  defp condition("completed", false, fact, _, _), do: if(!fact["completion"], do: %{})
+
+  defp condition("progress", value, fact, _, _),
+    do: if(get_in(fact, ["progress", "value"]) == value, do: %{})
+
+  defp condition("reopened", relation, fact, children, parents) do
+    case get_in(fact, ["origins", relation]) do
+      %{"keys" => [], "position" => at} = origin when is_integer(at) ->
+        if at > newest_under(children, parents), do: %{"note" => origin["cause"] || ""}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp condition(_name, _value, _fact, _children, _parents), do: nil
+
+  # The position of the newest fact that came under this one (created or moved there).
+  defp newest_under(children, parents) do
+    children
+    |> Enum.flat_map(fn child ->
+      for relation <- parents,
+          at = get_in(child, ["origins", relation, "position"]),
+          is_integer(at),
+          do: at
+    end)
+    |> Enum.max(fn -> 0 end)
+  end
+
+  @doc "What the owner is expected to do in `state`, with `vars` filled in; nil when done."
+  def expected(%{"done" => true}, _vars), do: nil
+
+  def expected(state, vars) do
+    Enum.reduce(vars, state["expected"] || "", fn {name, value}, text ->
+      String.replace(text, "{#{name}}", to_string(value))
+    end)
+    |> String.trim()
+    |> String.trim_trailing(":")
+  end
+
+  @doc "The owner of `state` (a key), or nil when done."
+  def owner(%{"done" => true}), do: nil
+  def owner(state), do: state["owner"]
+
+  @doc "How often a fact in `state` is looked at again, in ms; `default` when it says nothing."
+  def every(state, default) do
+    case state do
+      %{"every_seconds" => s} when is_integer(s) and s > 0 -> s * 1000
+      _ -> default
+    end
+  end
+end
