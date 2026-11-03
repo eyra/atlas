@@ -41,6 +41,53 @@ defmodule AtlasControl.SessionTest do
   defp rows(page),
     do: page["blocks"] |> hd() |> get_in(["props", "rows"]) |> Enum.map(& &1["label"])
 
+  test "a key made from a property: never sent when it cannot be made, never renumbered",
+       %{port: port} do
+    FakeStore.link("P-1", "W-1")
+    a = client(port)
+    next(a, "page")
+    put(a, %{"op" => "open", "to" => "/k/tag/new/on_part/P-1"})
+    assert %{"title" => "New tag in P-1"} = next(a, "page")
+
+    put(a, %{"op" => "submit", "to" => "/k/tag/new/on_part/P-1", "values" => %{"name" => "nope"}})
+    assert %{"tone" => "error", "text" => "Not sent: the form says why."} = next(a, "notice")
+
+    assert %{
+             "reason" => "refused",
+             "blocks" => [%{"props" => %{"errors" => ["name must look like #word/1"]}}]
+           } = next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/tag/new/on_part/P-1",
+      "values" => %{"name" => "#x.y/7"}
+    })
+
+    assert %{"tone" => "pending"} = next(a, "notice")
+
+    assert %{"path" => "/k/tag/T-x_y-7", "back" => "/k/part/P-1", "reason" => "stored"} =
+             next(a, "page")
+
+    # The same name again is the same key: refused as taken, not tried with another number.
+    put(a, %{"op" => "open", "to" => "/k/tag/new/on_part/P-1"})
+    next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/tag/new/on_part/P-1",
+      "values" => %{"name" => "#x.y/7"}
+    })
+
+    assert %{"tone" => "pending"} = next(a, "notice")
+    assert %{"tone" => "error"} = next(a, "notice")
+
+    assert %{
+             "reason" => "refused",
+             "blocks" => [%{"props" => %{"errors" => ["T-x_y-7 is taken"]}}]
+           } =
+             next(a, "page")
+  end
+
   test "a client sees the top list at once", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     c = client(port)

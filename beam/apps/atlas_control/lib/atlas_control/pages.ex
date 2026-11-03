@@ -218,10 +218,13 @@ defmodule AtlasControl.Pages do
           Blocks.item(
             title: "#{singular(spec, kind)} #{key}: #{label(spec, fact)}",
             fields: fields,
-            actions: [
-              Blocks.action(label: "Change", key: "e", to: path({:edit, kind, key})),
-              Blocks.action(label: "Delete", key: "d", to: path({:delete, kind, key}))
-            ]
+            # Nothing to change when a person may set nothing but where the id comes from.
+            actions:
+              if(changeable?(spec),
+                do: [Blocks.action(label: "Change", key: "e", to: path({:edit, kind, key}))],
+                else: []
+              ) ++
+                [Blocks.action(label: "Delete", key: "d", to: path({:delete, kind, key}))]
           )
 
         lists =
@@ -293,11 +296,10 @@ defmodule AtlasControl.Pages do
         form_block =
           Blocks.form(
             title: "Change #{singular(spec, kind) |> String.downcase()} #{key}",
-            # The id is shown, never changed.
-            inputs: [
-              Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key)
-              | inputs(spec, values)
-            ],
+            # The id is shown, never changed; nor is the property it was made from.
+            inputs:
+              [Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key)] ++
+                from_input(spec, values) ++ inputs(spec, values, except: id_property(spec)),
             submit_label: "Save",
             submit_to: path({:edit, kind, key}),
             cancel_to: back,
@@ -480,11 +482,12 @@ defmodule AtlasControl.Pages do
 
   # Form inputs from the description
 
-  # `only`: these properties, in this order. Otherwise every property a person may set.
-  defp inputs(spec, values, opts \\ []) do
+  # `only`: these properties, in this order. Otherwise every property a person may set,
+  # `except` one.
+  defp inputs(spec, values, opts) do
     properties =
       case opts[:only] do
-        nil -> ordered(spec)
+        nil -> for {name, _} = property <- ordered(spec), name != opts[:except], do: property
         names -> for name <- names, prop = spec["properties"][name], do: {name, prop}
       end
 
@@ -499,6 +502,22 @@ defmodule AtlasControl.Pages do
         choices: choices(prop)
       )
     end
+  end
+
+  defp from_input(spec, values) do
+    case id_property(spec) do
+      nil ->
+        []
+
+      name ->
+        [Blocks.input(name: name, label: humanize(name), kind: "readonly", value: values[name])]
+    end
+  end
+
+  defp changeable?(spec) do
+    Enum.any?(spec["properties"] || %{}, fn {name, prop} ->
+      settable?(prop) and name != id_property(spec)
+    end)
   end
 
   defp input_kind(%{"values" => values}) when is_list(values), do: "choice"
@@ -520,8 +539,9 @@ defmodule AtlasControl.Pages do
   @doc """
   How a fact of a kind is created, from the description (`create` in `rela/atlas.json`):
   `ask` (the fields a create form asks for), `id` (`prefix` plus the next free number,
-  zero-padded to `digits`) and `defaults` (values for what it does not ask). Without a
-  rule: every field a person may set, rela's id prefix, no defaults.
+  zero-padded to `digits`; or made `from` a property, see `key_for/2`) and `defaults`
+  (values for what it does not ask). Without a rule: every field a person may set,
+  rela's id prefix, no defaults.
   """
   def create_rule(spec) do
     rule = spec["create"] || %{}
@@ -531,9 +551,41 @@ defmodule AtlasControl.Pages do
       ask: rule["ask"] || for({name, prop} <- ordered(spec), settable?(prop), do: name),
       prefix: get_in(rule, ["id", "prefix"]) || prefix,
       digits: get_in(rule, ["id", "digits"]) || 2,
+      from: get_in(rule, ["id", "from"]),
       defaults: rule["defaults"] || %{}
     }
   end
+
+  @doc "The property a kind's id is made from (`create.id.from`), or nil."
+  def id_property(spec), do: get_in(spec, ["create", "id", "from"])
+
+  @doc """
+  The key of a new fact whose id is made from a property: the rule's `pattern` must
+  match the property's value; `template` puts its groups in (`{1}`, `{2}`, …), after
+  `replace` (`{"from": "to"}`) on each group. `{:error, text}` when it does not match.
+  The same value always makes the same key, so it is never "the next number".
+  """
+  def key_for(spec, raw) do
+    rule = get_in(spec, ["create", "id"]) || %{}
+    name = rule["from"]
+    value = String.trim(raw[name] || "")
+
+    with pattern when is_binary(pattern) <- rule["pattern"],
+         {:ok, regex} <- Regex.compile(pattern),
+         [_ | groups] <- Regex.run(regex, value) do
+      groups = Enum.map(groups, &replace_all(&1, rule["replace"] || %{}))
+
+      {:ok,
+       Regex.replace(~r/\{(\d+)\}/, rule["template"] || "", fn _, n ->
+         Enum.at(groups, String.to_integer(n) - 1) || ""
+       end)}
+    else
+      _ -> {:error, rule["error"] || "#{name} does not fit the rule for its id"}
+    end
+  end
+
+  defp replace_all(text, replacements),
+    do: Enum.reduce(replacements, text, fn {from, to}, acc -> String.replace(acc, from, to) end)
 
   @doc """
   The next free key of a kind: the rule's prefix plus one more than the highest number
@@ -593,9 +645,10 @@ defmodule AtlasControl.Pages do
 
   # Showing values
 
-  # The primary property first, then choices, then flags, then the rest, so long text ends up last.
+  # The primary property (or the one the id is made from) first, then choices, then flags,
+  # then the rest, so long text ends up last.
   defp ordered(spec) do
-    primary = spec["primary"]
+    primary = primary(spec)
 
     (spec["properties"] || %{})
     |> Enum.sort_by(fn {name, prop} ->
@@ -611,12 +664,15 @@ defmodule AtlasControl.Pages do
     end)
   end
 
-  defp label(spec, fact), do: to_text(fact["values"][spec["primary"]]) |> blank(fact["key"])
+  # A kind without a primary property is labelled by the one its id is made from.
+  defp primary(spec), do: spec["primary"] || id_property(spec)
+
+  defp label(spec, fact), do: to_text(fact["values"][primary(spec)]) |> blank(fact["key"])
 
   defp detail(spec, fact) do
     shown =
       for {name, prop} <- ordered(spec),
-          name != spec["primary"],
+          name != primary(spec),
           v = fact["values"][name],
           v not in [nil, "", false] do
         cond do

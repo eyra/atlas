@@ -201,7 +201,9 @@ defmodule AtlasControl.Session do
     do: create(route, kind, raw, %{relation => [parent]}, state)
 
   defp submit({:edit, kind, key} = route, raw, state) do
-    values = Pages.values_for(spec(state, kind), raw)
+    # The property the id was made from is shown, never changed.
+    spec = spec(state, kind)
+    values = Pages.values_for(spec, Map.drop(raw, List.wrap(Pages.id_property(spec))))
 
     content = %{
       "op" => "change",
@@ -248,6 +250,28 @@ defmodule AtlasControl.Session do
   defp create(route, kind, raw, links, state) do
     spec = spec(state, kind)
 
+    if Pages.id_property(spec),
+      do: create_made(route, kind, spec, raw, links, state),
+      else: create_numbered(route, kind, spec, raw, links, state)
+  end
+
+  # An id made from a property: the same value is the same fact, so a taken key is never
+  # retried with another number. When the key cannot be made, nothing goes to State.
+  defp create_made(route, kind, spec, raw, links, state) do
+    state = %{state | route: route, form: %{values: raw}}
+
+    case Pages.key_for(spec, raw) do
+      {:ok, key} ->
+        content = new_fact(spec, key, raw, links)
+        put_fact(state, kind, content, {:item, kind, key})
+
+      {:error, reason} ->
+        state = notice(state, "error", "Not sent: the form says why.")
+        show(put_in(state.form[:errors], [reason]), route, "refused", nil)
+    end
+  end
+
+  defp create_numbered(route, kind, spec, raw, links, state) do
     keys =
       case ask(kind, %{}) do
         %{"facts" => facts} -> Enum.map(facts, & &1["key"])
@@ -255,7 +279,12 @@ defmodule AtlasControl.Session do
       end
 
     {key, number} = Pages.next_key(spec, keys)
+    content = new_fact(spec, key, raw, links)
+    state = %{state | route: route, form: %{values: raw}}
+    put_fact(state, kind, content, {:item, kind, key}, %{number: number, tries: 1, skipped: []})
+  end
 
+  defp new_fact(spec, key, raw, links) do
     content = %{
       "op" => "create",
       "key" => key,
@@ -263,9 +292,7 @@ defmodule AtlasControl.Session do
       "version" => nil
     }
 
-    content = if links == %{}, do: content, else: Map.put(content, "links", links)
-    state = %{state | route: route, form: %{values: raw}}
-    put_fact(state, kind, content, {:item, kind, key}, %{number: number, tries: 1, skipped: []})
+    if links == %{}, do: content, else: Map.put(content, "links", links)
   end
 
   defp retry_create(state, pending) do

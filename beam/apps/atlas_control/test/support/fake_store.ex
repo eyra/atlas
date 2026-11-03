@@ -41,6 +41,26 @@ defmodule AtlasControl.FakeStore do
           "id_prefixes" => ["P-"],
           "primary" => "title",
           "properties" => %{"title" => %{"type" => "string", "required" => true}}
+        },
+        # A kind whose id is made from a property, as `rela/atlas.json` adds it; no primary.
+        "tag" => %{
+          "label" => "Tag",
+          "plural" => "tags",
+          "id_prefixes" => ["T-"],
+          "properties" => %{
+            "name" => %{"type" => "string", "required" => true},
+            "note" => %{"type" => "string", "set_by" => "connector"}
+          },
+          "create" => %{
+            "ask" => ["name"],
+            "id" => %{
+              "from" => "name",
+              "pattern" => "^#([a-z.]+)/([0-9]+)$",
+              "template" => "T-{1}-{2}",
+              "replace" => %{"." => "_"},
+              "error" => "name must look like #word/1"
+            }
+          }
         }
       },
       "relations" => %{
@@ -50,6 +70,13 @@ defmodule AtlasControl.FakeStore do
           "to" => ["widget"],
           "max_outgoing" => 1,
           "inverse" => %{"id" => "parts", "label" => "parts"}
+        },
+        "on_part" => %{
+          "label" => "on part",
+          "from" => ["tag"],
+          "to" => ["part"],
+          "max_outgoing" => 1,
+          "inverse" => %{"id" => "tags", "label" => "tags"}
         }
       }
     }
@@ -136,12 +163,9 @@ defmodule AtlasControl.FakeStore do
     id = {e.kind, key}
 
     cond do
-      op == "create" and c["values"]["title"] in [nil, ""] ->
-        :ok =
-          AtlasBus.send(
-            Envelope.reply(e, "refused"),
-            Map.put(about, "reasons", ["title is required"])
-          )
+      op == "create" and missing(e.kind, c["values"]) != [] ->
+        reasons = for name <- missing(e.kind, c["values"]), do: "#{name} is required"
+        :ok = AtlasBus.send(Envelope.reply(e, "refused"), Map.put(about, "reasons", reasons))
 
         {:noreply, s}
 
@@ -170,5 +194,11 @@ defmodule AtlasControl.FakeStore do
         :ok = AtlasBus.send(Envelope.reply(e, "stored", position: s.position), about)
         {:noreply, s}
     end
+  end
+
+  defp missing(kind, values) do
+    for {name, %{"required" => true}} <- description()["entities"][kind]["properties"],
+        values[name] in [nil, ""],
+        do: name
   end
 end
