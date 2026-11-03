@@ -54,6 +54,35 @@ defmodule AtlasBFF.Targets.Client do
       @doc "The contract's version."
       def version, do: unquote(schema.version)
 
+      @pages unquote(Macro.escape(schema.pages))
+
+      @doc "The pages the contract lists: `[%{name, path, params}]`, as `__schema__/0` has them."
+      def pages, do: @pages
+
+      @doc """
+      The page the contract has for `path`: `{:ok, name, %{param => value}}`, or `:error`
+      for a path that is no page (`AtlasBFF.Paths.match/2`).
+      """
+      def match(path), do: AtlasBFF.Paths.match(@pages, path)
+
+      @doc "The path of page `name` with `params` (`AtlasBFF.Paths.build/3`)."
+      def path(name, params \\ %{}), do: AtlasBFF.Paths.build(@pages, name, params)
+
+      @endpoints unquote(Macro.escape(schema.endpoints))
+
+      @doc """
+      The calls the contract lists, pages' fetches (`call: :open`) included:
+      `[%{name, call, page, path, params, takes, replies}]`, as `__schema__/0` has them.
+      """
+      def endpoints, do: @endpoints
+
+      @doc """
+      The endpoint of `call` (such as `:submit`) that `path` is: `{:ok, name, params}`, or
+      `:error` for a path that is no such endpoint (`AtlasBFF.Paths.match/2`).
+      """
+      def endpoint(call, path),
+        do: AtlasBFF.Paths.match(Enum.filter(@endpoints, &(&1.call == call)), path)
+
       defmodule Fallback do
         @moduledoc false
         defstruct [:type, :reason]

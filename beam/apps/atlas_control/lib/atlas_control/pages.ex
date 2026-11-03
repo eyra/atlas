@@ -55,21 +55,18 @@ defmodule AtlasControl.Pages do
 
   # Routes
 
-  def route("/"), do: :home
-  def route("/_kinds"), do: :kinds
-
+  # The pages are the contract's (`defpage` in AtlasBFFContract.Blocks): Control serves
+  # those and nothing else; a path outside them is no page (`:unknown`).
   def route(path) do
-    case path |> String.trim_leading("/") |> String.split("/") |> Enum.map(&URI.decode/1) do
-      ["k", kind] -> {:list, kind}
-      ["k", kind, "new"] -> {:new, kind}
-      ["k", kind, "new", relation, parent] -> {:new, kind, {relation, parent}}
-      ["k", kind, key] -> {:item, kind, key}
-      ["k", kind, key, "edit"] -> {:edit, kind, key}
-      ["k", kind, key, "delete"] -> {:delete, kind, key}
-      ["k", kind, key, "links", relation] -> {:links, kind, key, relation}
-      ["k", kind, key, "set", relation] -> {:set, kind, key, relation}
-      ["k", kind, key, "remove", relation] -> {:remove, kind, key, relation}
-      _ -> :unknown
+    case Blocks.match(path) do
+      {:ok, :home, _} -> :home
+      {:ok, :kinds, _} -> :kinds
+      {:ok, :list, p} -> {:list, p.kind}
+      {:ok, :new, p} -> {:new, p.kind}
+      {:ok, :new_under, p} -> {:new, p.kind, {p.relation, p.parent}}
+      {:ok, page, p} when page in [:item, :edit, :delete] -> {page, p.kind, p.key}
+      {:ok, page, p} when page in [:links, :set, :remove] -> {page, p.kind, p.key, p.relation}
+      :error -> :unknown
     end
   end
 
@@ -181,21 +178,32 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def path(:kinds), do: "/_kinds"
-  def path({:list, kind}), do: "/k/#{enc(kind)}"
-  def path({:new, kind}), do: "/k/#{enc(kind)}/new"
+  @doc """
+  The route a submit endpoint of the contract (`defendpoint`, call :submit) acts on, from
+  its name and parameters: the page whose form or confirm it comes from.
+  """
+  def submit_route(:create, p), do: {:new, p.kind}
+  def submit_route(:create_under, p), do: {:new, p.kind, {p.relation, p.parent}}
+  def submit_route(:update, p), do: {:edit, p.kind, p.key}
+  def submit_route(:delete, p), do: {:delete, p.kind, p.key}
+  def submit_route(:link, p), do: {:links, p.kind, p.key, p.relation}
+  def submit_route(:accept, p), do: {:set, p.kind, p.key, p.relation}
+  def submit_route(:reopen, p), do: {:remove, p.kind, p.key, p.relation}
+
+  # A route's path, by the contract's page for it.
+  def path(:home), do: Blocks.path(:home)
+  def path(:kinds), do: Blocks.path(:kinds)
+  def path({:list, kind}), do: Blocks.path(:list, kind: kind)
+  def path({:new, kind}), do: Blocks.path(:new, kind: kind)
 
   def path({:new, kind, {relation, parent}}),
-    do: "/k/#{enc(kind)}/new/#{enc(relation)}/#{enc(parent)}"
+    do: Blocks.path(:new_under, kind: kind, relation: relation, parent: parent)
 
-  def path({:item, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}"
-  def path({:edit, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/edit"
-  def path({:delete, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/delete"
+  def path({page, kind, key}) when page in [:item, :edit, :delete],
+    do: Blocks.path(page, kind: kind, key: key)
 
   def path({page, kind, key, relation}) when page in [:links, :set, :remove],
-    do: "/k/#{enc(kind)}/#{enc(key)}/#{page}/#{enc(relation)}"
-
-  defp enc(part), do: URI.encode(part, &URI.char_unreserved?/1)
+    do: Blocks.path(page, kind: kind, key: key, relation: relation)
 
   @doc """
   The name and key of a CRUD operation (`:create`, `:update`, `:delete`) on a kind, as
@@ -507,6 +515,9 @@ defmodule AtlasControl.Pages do
 
     page("Kinds", "/", items)
   end
+
+  def render(:unknown, _description, _answers, _form),
+    do: missing("No such page", "Control serves no page at this path.", "/")
 
   def render(route, description, answers, form) do
     kind = kind_of(route)
