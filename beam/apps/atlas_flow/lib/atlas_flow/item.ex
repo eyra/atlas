@@ -137,11 +137,13 @@ defmodule AtlasFlow.Item do
 
     owner = Definition.owner(current)
     relation = flow["owner_relation"]
+    moved? = values != %{}
 
     links =
-      if relation && (get_in(fact, ["links", relation]) || []) != List.wrap(owner),
-        do: %{relation => List.wrap(owner)},
-        else: %{}
+      if (relation && (get_in(fact, ["links", relation]) || []) != List.wrap(owner)) and
+           (moved? or not by_hand?(fact, relation)) and owner_exists?(current),
+         do: %{relation => List.wrap(owner)},
+         else: %{}
 
     if values != %{} or links != %{} do
       # By flow: Flow passes over the hints of its own writes, on whichever fact.
@@ -163,6 +165,37 @@ defmodule AtlasFlow.Item do
         other ->
           Logger.warning("flow #{name}: #{state.key} not moved: #{inspect(other)}; tried again")
       end
+    end
+  end
+
+  # An owner a user or an agent set stays while the state does not change: Flow moves it
+  # only when the state changes (what is expected changes), or when Flow, a migration or
+  # nobody set it.
+  defp by_hand?(fact, relation) do
+    case get_in(fact, ["origins", relation]) do
+      %{"by" => by} when by not in [nil, "flow", "migration"] -> true
+      _ -> false
+    end
+  end
+
+  # The owner a state names must exist; until it does, only what is expected is written.
+  defp owner_exists?(current) do
+    case {Definition.owner(current), Definition.owner_kind(current)} do
+      {nil, _} ->
+        true
+
+      {key, kind} when is_binary(kind) ->
+        case Talk.read(kind, %{"key" => key, "plain" => true}) do
+          %{"fact" => %{}} ->
+            true
+
+          _ ->
+            Logger.warning("flow: #{kind} #{key} does not exist; the owner waits for it")
+            false
+        end
+
+      _ ->
+        true
     end
   end
 

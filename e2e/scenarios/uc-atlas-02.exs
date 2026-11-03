@@ -24,7 +24,7 @@ scenario "UC-Atlas-02: Manage the use cases of a scene", fn %{t1: t1, t2: t2} ->
     type(t1, "Made by the end-to-end test.")
     at = press(t1, "C-s")
     stored(t1, ~r/✓ Stored as UC-Atlas-\d+/, at)
-    stored(t1, ~r/In scene\s+#{scene}/, at)
+    stored(t1, ~r/In scene[\s─│]+#{scene}/u, at)
     by_hint(t2, "Add the first use case", at)
   end
 

@@ -9,7 +9,8 @@ defmodule AtlasFlow.Engine do
   - It listens to every kind. A hint pokes the processes of the fact it is about and of
     every fact above it (through its parent links, read plainly from State), so those look
     again at once; one that has no process yet gets one. A hint about a delete pokes them
-    all, since what was above it can no longer be read. A hint of Flow's own write is
+    all, since what was above it can no longer be read, and so does a new fact of a kind a
+    flow assigns to (an owner that did not exist yet). A hint of Flow's own write is
     passed over: Flow writes only what no state depends on (State checks that). A lost
     hint only waits for the timer (nobody depends on a hint).
 
@@ -39,6 +40,7 @@ defmodule AtlasFlow.Engine do
      %{
        every: Keyword.get(opts, :every, 60_000),
        kinds: [],
+       owners: [],
        description: %{},
        listening: MapSet.new(),
        timer: nil
@@ -52,12 +54,16 @@ defmodule AtlasFlow.Engine do
   def handle_info(:round, state), do: {:noreply, look_all(state)}
 
   def handle_info({:atlas_bus, %Envelope{class: "stored", kind: kind}, content}, state) do
+    # A delete: what was above it can no longer be read. A new owner (a fact of a kind a
+    # flow assigns to): a fact whose owner waited for it can have it now.
+    all? = content["op"] == "delete" or (content["op"] == "create" and kind in state.owners)
+
     case content do
       # Its own write changes nothing any state depends on.
       %{"by" => "flow"} ->
         :ok
 
-      %{"op" => "delete"} ->
+      _ when all? ->
         for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasFlow.Supervisor),
             is_pid(pid),
             do: Item.poke(pid, state.description)
@@ -105,7 +111,13 @@ defmodule AtlasFlow.Engine do
             end
           end
 
-          %{state | kinds: kinds, description: description, listening: listening}
+          %{
+            state
+            | kinds: kinds,
+              owners: Definition.owner_kinds(description),
+              description: description,
+              listening: listening
+          }
 
         other ->
           Logger.warning("flow has no description yet: #{inspect(other)}")
