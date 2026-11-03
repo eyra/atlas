@@ -417,6 +417,41 @@ defmodule AtlasControl.PagesTest do
                Enum.find(item["fields"], &(&1["label"] == "Progress"))
     end
 
+    test "showing something else while another fact holds: the page says why" do
+      answer = %{
+        "fact" => %{
+          "key" => "P-1",
+          "values" => %{"title" => "Wheel"},
+          "links" => %{"of_widget" => ["W-1"]},
+          "progress" => %{
+            "value" => "fine",
+            "label" => "Fine",
+            "while" => %{
+              "over" => "on_part",
+              "key" => "T-a-1",
+              "field" => "name",
+              "value" => "open"
+            }
+          },
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "part", "P-1"}, @completing, [answer, %{"facts" => []}])
+
+      assert %{"value" => "Fine · T-a-1 open"} =
+               Enum.find(item["fields"], &(&1["label"] == "Progress"))
+
+      while =
+        put_in(@completing, ["entities", "widget", "progress", "while"], [
+          %{"over" => "of_widget"}
+        ])
+
+      assert "part" in Pages.progress_from(while, "widget")
+    end
+
     test "not done, without children: its own field says it; no Progress line" do
       answer = %{
         "fact" => %{
@@ -774,6 +809,46 @@ defmodule AtlasControl.PagesTest do
     assert Pages.shows?({:item, "widget", "W-1"}, @logged, "entry")
   end
 
+  test "actions the description adds, only while a field has one of the values in when" do
+    logged =
+      put_in(@logged, ["entities", "entry", "actions"], [
+        %{"key" => "x", "label" => "Undo", "to" => "agent:undo", "when" => %{"state" => ["done"]}}
+      ])
+
+    page = fn state ->
+      answer = %{"fact" => fact("E-01", %{"title" => "One", "state" => state})}
+
+      %{blocks: [item | _]} =
+        Pages.render({:item, "entry", "E-01"}, logged, [answer, %{"facts" => []}])
+
+      item["props"]["actions"]
+    end
+
+    assert [%{"key" => "x", "label" => "Undo", "to" => "agent:undo"}] = page.("done")
+    assert page.("dropped") == []
+  end
+
+  test "a cause field may name a fact of its own kind" do
+    logged =
+      put_in(@logged, ["entities", "log", "properties", "redoes"], %{
+        "type" => "string",
+        "cause" => "Redone by"
+      })
+
+    assert {"log", %{}} in Pages.reads({:item, "log", "L-01"}, logged)
+    answer = %{"fact" => fact("L-01", %{"title" => "First"})}
+    redo = %{"facts" => [fact("L-02", %{"title" => "Again", "redoes" => "L-01"})]}
+    reads = Pages.reads({:item, "log", "L-01"}, logged)
+
+    answers =
+      for {kind, content} <- tl(reads),
+          do: if(kind == "log" and content == %{}, do: redo, else: %{"facts" => []})
+
+    page = Pages.render({:item, "log", "L-01"}, logged, [answer | answers])
+    redone = Enum.find(page.blocks, &(&1["id"] == "cause:log:redoes"))
+    assert [%{"id" => "L-02"}] = redone["props"]["rows"]
+  end
+
   test "the kinds page names the kinds that hold a record" do
     %{blocks: blocks} =
       Pages.render(:kinds, put_in(@logged, ["entities", "log", "agent"], "request"), [])
@@ -929,6 +1004,115 @@ defmodule AtlasControl.PagesTest do
       links = Enum.find_value(widget["props"]["fields"], &(&1["label"] == "Links" && &1["value"]))
       assert links =~ "checked_by: to member, at most one; set checked_by=<key>"
       assert links =~ "seen_in: to tag; set by a migration, never by hand"
+    end
+  end
+
+  describe "a link only one of its targets sets, to itself: approve and withdraw" do
+    @member %{by: "ada", by_kind: "member"}
+    @agent %{by: "agent", by_kind: nil}
+
+    defp widget(links),
+      do: %{
+        "fact" => %{
+          "key" => "W-1",
+          "values" => %{"title" => "One"},
+          "links" => links,
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+    test "the page offers approve to a member, withdraw once approved; nothing to an agent" do
+      keys = fn page ->
+        %{blocks: [%{"props" => item} | _]} = page
+        for a <- item["actions"], do: {a["key"], a["label"], a["to"]}
+      end
+
+      page = Pages.render({:item, "widget", "W-1"}, @d, [widget(%{}), %{"facts" => []}], @member)
+      assert {"a", "Approve", "/k/widget/W-1/set/approved_by"} in keys.(page)
+
+      approved = widget(%{"approved_by" => ["ada"]})
+      page = Pages.render({:item, "widget", "W-1"}, @d, [approved, %{"facts" => []}], @member)
+      # One action on one key: approve until approved, withdraw after.
+      assert {"a", "Withdraw", "/k/widget/W-1/remove/approved_by"} in keys.(page)
+      refute {"a", "Approve", "/k/widget/W-1/set/approved_by"} in keys.(page)
+
+      page = Pages.render({:item, "widget", "W-1"}, @d, [widget(%{}), %{"facts" => []}], @agent)
+      refute Enum.any?(keys.(page), &(elem(&1, 0) == "a"))
+    end
+
+    test "approve asks first; refused while a fact under it is open, and for an agent" do
+      route = Pages.route("/k/widget/W-1/set/approved_by")
+      assert route == {:set, "widget", "W-1", "approved_by"}
+      assert Pages.resolve(Pages.route("/k/_/W-1/set/approved_by"), @d) == route
+      assert Pages.reads(route, @d) == Pages.reads({:item, "widget", "W-1"}, @d)
+
+      done = Map.put(fact("P-1", %{"title" => "Wheel"}), "completion", %{"done" => true})
+      open = fact("P-2", %{"title" => "Spoke"})
+
+      %{blocks: [%{"props" => confirm}]} =
+        Pages.render(route, @d, [widget(%{}), %{"facts" => [done]}], @member)
+
+      assert confirm["confirm_to"] == "/k/widget/W-1/set/approved_by"
+      assert confirm["text"] =~ "will be approved by ada"
+
+      %{blocks: [%{"props" => confirm}]} =
+        Pages.render(route, @d, [widget(%{}), %{"facts" => [done, open]}], @member)
+
+      assert confirm["text"] == "W-1 has P-2 open"
+      refute confirm["confirm_to"]
+
+      assert Pages.set_problem(@d, route, [widget(%{}), %{"facts" => []}], "agent", nil) =~
+               "only a member approves"
+
+      assert Pages.set_problem(
+               @d,
+               route,
+               [widget(%{"approved_by" => ["ada"]}), %{"facts" => []}],
+               "ada",
+               "member"
+             ) =~
+               "already"
+    end
+
+    test "withdraw asks for a note; an agent cannot" do
+      route = Pages.route("/k/widget/W-1/remove/approved_by")
+      approved = widget(%{"approved_by" => ["ada"]})
+
+      %{blocks: [%{"type" => "form", "props" => form}]} =
+        Pages.render(route, @d, [approved], @member)
+
+      assert form["submit_label"] == "Withdraw"
+
+      assert %{"kind" => "multiline", "required" => true} =
+               Enum.find(form["inputs"], &(&1["name"] == "note"))
+
+      %{blocks: [%{"type" => "confirm", "props" => no}]} =
+        Pages.render(route, @d, [approved], @agent)
+
+      assert no["text"] =~ "only a member approves"
+    end
+
+    test "the links form: only the member itself, or the migration" do
+      route = {:links, "widget", "W-1", "approved_by"}
+
+      %{blocks: [%{"type" => "confirm", "props" => no}]} =
+        Pages.render(route, @d, [widget(%{}), %{"facts" => []}], @agent)
+
+      assert no["text"] == "Approved by is not set here: only a member approves."
+      assert Pages.may_link_to?(@d, "approved_by", "ada", "member", ["ada"])
+      refute Pages.may_link_to?(@d, "approved_by", "ada", "member", ["bob"])
+      assert Pages.may_link_to?(@d, "approved_by", "migration", nil, ["bob"])
+      refute Pages.may_link_to?(@d, "approved_by", "agent", nil, ["ada"])
+    end
+
+    test "nothing new goes under an approved fact" do
+      approved = %{"key" => "W-1", "links" => %{"approved_by" => ["ada"]}}
+
+      assert Pages.closed_problem(@d, "part", "widget", approved) ==
+               "W-1 is approved; withdraw it first, or put this under another widget"
+
+      assert Pages.closed_problem(@d, "part", "widget", %{"key" => "W-1", "links" => %{}}) == nil
     end
   end
 end

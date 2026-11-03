@@ -85,6 +85,7 @@ defmodule AtlasAgent.Tools do
           [name, what] <- [String.split(line, ": ", parts: 2)],
           not String.contains?(what, "never in a form"),
           not String.contains?(what, "never by hand"),
+          not String.contains?(what, "never by an agent"),
           do: %{"name" => name, "takes" => what}
 
     %{

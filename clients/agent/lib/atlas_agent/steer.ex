@@ -10,6 +10,7 @@ defmodule AtlasAgent.Steer do
   | Message | Meaning |
   |---|---|
   | `{"op":"ask","request","on"}` | Plan `request`, made on the page at path `on`. Writes nothing. |
+  | `{"op":"ask","request","on","intent":"overrule"}` | The plan that undoes the step at `on` (`AtlasAgent.Overrule`); it always asks. |
   | `{"op":"run","steps":[{"n","values"}]}` | Run these steps of the proposed plan, in this order, with these values (only the inputs a step has). The rest are dropped. |
   | `{"op":"cancel"}` | Drop the plan, also while it is being made. |
   | `{"op":"stop"}` | Stop a run before its next step; stored steps stay. |
@@ -26,7 +27,7 @@ defmodule AtlasAgent.Steer do
 
   A small plan runs without asking (UC-Atlas-18): at most `agent.ask_above` steps (1 by
   default; 0 asks always), every one of them able to run, none deleting. A plan made
-  after a refusal always asks. Such a plan shows like an accepted one, and its title says
+  after a refusal always asks, and so does an overrule. Such a plan shows like an accepted one, and its title says
   it ran without asking.
 
   To the client: `{"op":"plan","block":<a plan block>}`, the plan as it is now, after
@@ -42,7 +43,7 @@ defmodule AtlasAgent.Steer do
   step, also during that wait (UC-Atlas-18); the steps not run say so.
   """
 
-  alias AtlasAgent.{Client, Plan, Record}
+  alias AtlasAgent.{Client, Overrule, Plan, Record}
 
   def main(env) do
     case AtlasAgent.settings(env) do
@@ -94,6 +95,9 @@ defmodule AtlasAgent.Steer do
   end
 
   # Asking
+
+  defp handle("ask", %{"intent" => "overrule", "request" => request, "on" => on}, state),
+    do: plan(drop(state), request, on, nil, &Overrule.make(&1, on))
 
   defp handle("ask", %{"request" => request, "on" => on}, state) when is_binary(request),
     do: plan(drop(state), request, on, nil)
@@ -159,17 +163,20 @@ defmodule AtlasAgent.Steer do
     limit = get_in(state.settings, ["agent", "ask_above"]) || 1
 
     plan.steps != [] and length(plan.steps) <= limit and plan.before == nil and
+      plan.overrules == nil and
       Enum.all?(plan.steps, &(&1["state"] == "proposed" and &1["tool"] != "delete"))
   end
 
-  defp plan(state, request, on, before) do
+  # `make` makes the plan with a Control client: by default the planner's.
+  defp plan(state, request, on, before, make \\ nil) do
     %{env: env, settings: settings} = state
+    make = make || (&Plan.make(&1, settings, on, request, before))
 
     task =
       Task.async(fn ->
         with {:ok, client} <- AtlasAgent.connect(env) do
           try do
-            Plan.make(client, settings, on, request, before)
+            make.(client)
           after
             Client.close(client)
           end
@@ -182,6 +189,7 @@ defmodule AtlasAgent.Steer do
       before: before && before["text"],
       by_itself: false,
       record: nil,
+      overrules: nil,
       state: "planning",
       summary: nil,
       by: nil,
@@ -198,6 +206,9 @@ defmodule AtlasAgent.Steer do
       end)
 
     plan = %{plan | state: "proposed", summary: made["summary"], by: made["by"], steps: steps}
+
+    # An overrule names its own request and the one it overrules.
+    plan = %{plan | request: made["request"] || plan.request, overrules: made["overrules"]}
 
     if by_itself?(state, plan) do
       plan = Map.put(plan, :by_itself, true)
