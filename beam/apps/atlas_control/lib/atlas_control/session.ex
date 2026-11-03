@@ -186,7 +186,7 @@ defmodule AtlasControl.Session do
 
       true ->
         send_client(state, %{"op" => "welcome", "env" => environment, "spec" => version})
-        state = describe(%{state | hello: true, by: actor(message["client"])})
+        state = describe(%{state | hello: true, by: actor(message["client"], message["as"])})
         {:noreply, show(state, :home, "open", nil)}
     end
   end
@@ -304,9 +304,12 @@ defmodule AtlasControl.Session do
 
   # Who is on this session. A TUI is the environment's TUI user for now; anything else is
   # an agent. No sign-in yet: a client is what its hello says.
-  defp actor("tui"), do: Application.get_env(:atlas_control, :tui_user) || "agent"
-  defp actor("migration"), do: "migration"
-  defp actor(_client), do: "agent"
+  # An agent may say which fact it is (`as`, an agent's key), so it is the owner of what
+  # is assigned to it and sees what to do (IS-Atlas-54).
+  defp actor("tui", _as), do: Application.get_env(:atlas_control, :tui_user) || "agent"
+  defp actor("migration", _as), do: "migration"
+  defp actor(_client, as) when is_binary(as) and as != "", do: as
+  defp actor(_client, _as), do: "agent"
 
   # Writes
 

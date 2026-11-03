@@ -51,3 +51,48 @@ A session that is not a person (an agent on the command line, a migration) opens
 - **TUI:** the header count; long row details; wrapped empty text.
 - **The end-to-end test:** `e2e/scenarios/uc-atlas-28.exs`.
 - **Changes to the e2e for every scenario:** `home()` presses `s` when the start page is the assignments, so every other scenario goes on from the scenes as before. Checks of the header title allow the count before it. UC-32 accepts a `melle` that exists already.
+
+## IS-Atlas-54: What to do, the owner's part of a fact's page
+
+What you can see: open a fact that is yours, from Assigned to you or anywhere. Above its content and references, a part **What to do** says:
+- **What to do: Test it**: what is expected of you;
+- **Why**: why it came to you, the cause of the fact that made you its owner (`Flow test_and_accept: all under it is completed → melle`), with since and by;
+- **How**: the instructions of the state it is in;
+- for a use case to test, **Melle can test**: that section of its description;
+- **Answers**: the keys you can answer with (`a Accept`), which the footer has too.
+
+Nobody else sees the part. `atlas get` shows it to a client that is the owner: an agent says which one it is with `ATLAS_AS`, as in `ATLAS_AS=coordinator atlas get IS-Atlas-NN --env test`.
+
+### Try
+
+| Step | Keys / command | What you should see |
+|---|---|---|
+| A use case to test | a use case whose issues are all done (its pull requests merged); Flow makes it yours | On Assigned to you: `UC-Atlas-NN  …  Test it · since … · Flow test_and_accept: all under it is completed → melle`. |
+| Its page | `↵` on it | **What to do: Test it** first, with Why, How (`Try the test below, then accept it.`), **Melle can test** with the text from its description, and **Answers** `a Accept`. |
+| Not yours | a fact the coordinator owns | No What to do part. |
+| An agent's | `ATLAS_AS=coordinator atlas get IS-Atlas-NN --env test` on an open issue | `What to do: Build it`, `Why: …`, `How: Build it in one pull request and get that merged; link the pull request to it.`, before the issue itself. Without `ATLAS_AS`, no such part. |
+
+### How it works
+
+- **The flow definitions say it all** (`rela/atlas.json`, `flows`):
+  - each definition has `state_field`, the field it writes the state's name in (`flow_state`, on the Assignment);
+  - each open state has `todo`: `instructions`, `section` (`{field, heading}`: the fact's field and the heading the text starts at, to the next `#` heading) and `answers` (`[{key, label}]`);
+  - the part's own words are the top-level `todo` (`title`, `why`, `instructions`, `answers`).
+- **Flow** writes the state's name on the Assignment with what is expected, `by: flow`. Writing only the name never counts as a move, so an owner a person set stays.
+- **State** checks that a definition's `state_field` exists on the kind it writes on.
+- **Control:**
+  - It shows the part when the client is the owner (the flow's `owner_relation` on the Assignment points at it) and the state has a `todo`.
+  - The part is an `item` block in a `part` of role `todo`, first in the page's markup.
+  - The state's field is not shown as a field.
+- **Contract 0.12.0:** the role `todo`, and `as` in hello: the fact an agent client is. The TUI gives the todo part its room first.
+- **No kind is named** in BEAM, the TUI or the agent; no new page or endpoint.
+
+### What changed for this
+
+- **rela:** `flow_state` on the Assignment.
+- **rela/atlas.json:** `state_field` and `todo` in the three flow definitions; the top-level `todo` words.
+- **Flow:** writes the state's name. **State:** checks `state_field`.
+- **Control:** the What to do part; `as` in hello.
+- **Contract:** 0.12.0. **TUI:** room for the todo part first. **Agent:** `ATLAS_AS`; `atlas get` prints the part first and has `todo` in `--json`.
+- **The end-to-end test:** `e2e/scenarios/uc-atlas-28-todo.exs`.
+- **Prod at merge:** restart rela and the core (rela gets `flow_state`; `atlas restart` does both). Flow writes each state's name within its first round.

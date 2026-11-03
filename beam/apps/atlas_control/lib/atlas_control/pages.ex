@@ -904,9 +904,9 @@ defmodule AtlasControl.Pages do
 
         fields =
           [Blocks.pair(label: "Id", value: key)] ++
-            own_fields(spec, fact) ++
-            Enum.flat_map(parts, fn {_kind, part_spec, part, made} ->
-              own_fields(part_spec, part, made)
+            own_fields(spec, fact, state_fields(description, kind)) ++
+            Enum.flat_map(parts, fn {part_kind, part_spec, part, made} ->
+              own_fields(part_spec, part, made ++ state_fields(description, part_kind))
             end) ++
             Enum.map(parents(description, kind, fact), fn {label, keys} ->
               Blocks.pair(label: label, value: Enum.join(keys, ", "))
@@ -979,6 +979,20 @@ defmodule AtlasControl.Pages do
           end
 
         content = [{"item", item} | for({id, {_title, list}} <- references, do: {id, list})]
+
+        # Its owner's part first: what to do (IS-Atlas-54).
+        {content, markup} =
+          case todo(description, kind, fact, parts, form) do
+            nil ->
+              {content, markup}
+
+            todo ->
+              title = todo_label(description, "title")
+
+              {[{"todo", todo} | content],
+               [Blocks.part("todo", "todo", title: title, role: "todo") | markup]}
+          end
+
         page("#{singular(spec, kind)} #{key}", back, content, markup)
 
       %{"error" => _} = failed ->
@@ -1573,7 +1587,7 @@ defmodule AtlasControl.Pages do
 
   # The fields a page shows of a fact: those a user may set, and the others once they have a
   # value. `made` names those a component's values are made from (the fact's key): not shown.
-  defp own_fields(spec, fact, made \\ []) do
+  defp own_fields(spec, fact, made) do
     Enum.flat_map(ordered(spec), fn {name, prop} ->
       value = fact["values"][name]
 
@@ -1587,6 +1601,132 @@ defmodule AtlasControl.Pages do
         ],
         else: []
     end)
+  end
+
+  # What its owner is to do, for a client that is the owner (IS-Atlas-54): from the flow
+  # definition on the fact's kind, the state it is in (its `state_field`, which Flow
+  # writes) and that state's `todo`: what is expected, why it came to them, the
+  # instructions, the section of the fact they name, and the answers they can give. Every
+  # word is the description's (the labels: its top-level `todo`) or the fact's.
+  defp todo(description, kind, fact, parts, form) do
+    with {_name, flow} <- flow_of(description, kind),
+         %{} = written <- written_fact(description, flow, fact, parts),
+         by when is_binary(by) <- form[:by],
+         true <- by in (get_in(written, ["links", flow["owner_relation"]]) || []),
+         name when name not in [nil, ""] <- get_in(written, ["values", flow["state_field"]]),
+         %{"todo" => %{} = todo} = state <-
+           Enum.find(flow["states"] || [], &(&1["name"] == name)) do
+      origin = get_in(written, ["origins", flow["owner_relation"]]) || %{}
+      expected = to_text(get_in(written, ["values", flow["field"]]))
+
+      section =
+        case todo["section"] do
+          %{"field" => field, "heading" => heading} ->
+            case section(to_text(fact["values"][field]), heading) do
+              nil -> []
+              text -> [Blocks.pair(label: heading, value: text)]
+            end
+
+          _ ->
+            []
+        end
+
+      answers =
+        for %{"key" => key, "label" => label} <- todo["answers"] || [], do: "#{key} #{label}"
+
+      fields =
+        [
+          Blocks.pair(
+            label: todo_label(description, "why"),
+            value: origin["cause"] || state["why"] || "—",
+            origin: origin["since"] && Blocks.origin(since: origin["since"], by: origin["by"])
+          )
+        ] ++
+          if(todo["instructions"],
+            do: [
+              Blocks.pair(
+                label: todo_label(description, "instructions"),
+                value: todo["instructions"]
+              )
+            ],
+            else: []
+          ) ++
+          section ++
+          if(answers == [],
+            do: [],
+            else: [
+              Blocks.pair(
+                label: todo_label(description, "answers"),
+                value: Enum.join(answers, "   ")
+              )
+            ]
+          )
+
+      Blocks.item(title: "#{todo_label(description, "title")}: #{expected}", fields: fields)
+    else
+      _ -> nil
+    end
+  end
+
+  defp todo_label(description, name), do: to_text(get_in(description, ["todo", name]))
+
+  # The flow definition that runs on `kind`, as `{name, definition}`, or nil.
+  defp flow_of(description, kind) do
+    Enum.find(Enum.sort(description["flows"] || %{}), fn {_name, flow} ->
+      is_map(flow) and kind in (flow["kinds"] || [])
+    end)
+  end
+
+  # The fact the flow writes on: the component its `on` relation points at, or the fact.
+  defp written_fact(description, flow, fact, parts) do
+    case flow["on"] && get_in(description, ["relations", flow["on"], "to"]) do
+      [to] -> Enum.find_value(parts, fn {kind, _spec, part, _made} -> kind == to && part end)
+      _ -> fact
+    end
+  end
+
+  # The fields a flow keeps its state in, on `kind`: shown in What to do, not as fields.
+  defp state_fields(description, kind) do
+    for {_name, %{"state_field" => field} = flow} <- description["flows"] || %{},
+        is_binary(field),
+        kind in written_kinds(description, flow),
+        do: field
+  end
+
+  defp written_kinds(description, flow) do
+    case flow["on"] && get_in(description, ["relations", flow["on"], "to"]) do
+      [to] -> [to]
+      _ -> flow["kinds"] || []
+    end
+  end
+
+  @doc """
+  The section of `text` under `heading`: from the line that starts with it ("Melle can
+  test: …", or "## Melle can test") to the next heading line ("#" first), without the
+  heading itself. Nil when there is none.
+  """
+  def section(text, heading) do
+    lines = String.split(text || "", "\n")
+    starts? = &String.starts_with?(String.downcase(&1), String.downcase(heading))
+
+    unheaded = fn line ->
+      line |> String.trim_leading() |> String.trim_leading("#") |> String.trim_leading()
+    end
+
+    case Enum.split_while(lines, &(not starts?.(unheaded.(&1)))) do
+      {_, []} ->
+        nil
+
+      {_, [first | rest]} ->
+        first = first |> unheaded.() |> String.slice(String.length(heading)..-1//1)
+        first = first |> String.trim_leading(":") |> String.trim()
+        body = Enum.take_while(rest, &(not String.match?(&1, ~r/^\s*#/)))
+
+        case [first | body] |> Enum.join("\n") |> String.trim() do
+          "" -> nil
+          text -> text
+        end
+    end
   end
 
   # The components State answered (one that is not there yet shows nothing): `[{kind, spec,

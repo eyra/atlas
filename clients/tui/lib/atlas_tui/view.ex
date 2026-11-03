@@ -209,7 +209,7 @@ defmodule AtlasTui.View do
       {lines, Enum.any?(columns, fn {{_, cut}, _} -> cut end)}
     else
       needs = for {_i, node} <- drawn, do: length(part_lines(node, model, width)) + 2
-      heights = share(needs, room, related_part(parts) || lists_part(model))
+      heights = share(needs, room, todo_part(parts) || related_part(parts) || lists_part(model))
 
       drawn =
         for {{i, node}, h} <- Enum.zip(drawn, heights),
@@ -260,6 +260,10 @@ defmodule AtlasTui.View do
       if room - Enum.sum(given) == left, do: given, else: equal(needs, room, given)
     end
   end
+
+  # The owner's part (what to do, IS-Atlas-54), if any: given room first, before the lists.
+  defp todo_part(parts),
+    do: Enum.find_index(parts, &match?({:markup, %{"value" => %Part{role: "todo"}}, _}, &1))
 
   # The part whose role is related (what the page links to), if any: given room first.
   defp related_part(parts) do

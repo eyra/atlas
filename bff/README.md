@@ -46,7 +46,7 @@ Change the contract, run `cd bff/contract && mix atlas.gen`, commit the contract
 
 The DSL is plain macros, not Spark: a contract of a few blocks, models and kinds of markup needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency.
 
-## View model (contract 0.11.0)
+## View model (contract 0.12.0)
 
 Control sends a view model, not a data model: its **content**, a flat list of blocks, and its **markup**, entries that cover a stretch of those blocks. Every block has an id, stable for as long as the page shows the same thing; markup points at ids, never at positions, so inserting, deleting or moving a block (or a hint that changes one) never shifts other markup.
 
@@ -74,7 +74,7 @@ Markup says what a stretch of blocks means, never how it looks. Each client turn
 
 | Kind | Props | Means | The TUI draws |
 |---|---|---|---|
-| `part` | `title`, `role` (`main`, `related`) | a top-level division of a view: `main` is the item itself, `related` what it links to. Parts do not nest in parts; sections nest in parts | a box with its title. Two or more parts over a whole page: side by side from 120 columns, else one above the other with the related part given room first; each with its own room and scrolling, tab moves the focus between them |
+| `part` | `title`, `role` (`main`, `related`, `todo`) | a top-level division of a view: `main` is the item itself, `related` what it links to, `todo` what its owner is to do (only for the owner, first; IS-Atlas-54). Parts do not nest in parts; sections nest in parts | a box with its title. Two or more parts over a whole page: side by side from 120 columns, else one above the other with the related part given room first; each with its own room and scrolling, tab moves the focus between them |
 | `section` | `title`, `collapsible` | a titled stretch | a heading with a rule, above its blocks |
 | `highlight` | `tone` (info, ok, error, pending) | the blocks in a tone | not yet: its blocks show as they are |
 
@@ -88,7 +88,7 @@ All markup nests, of every kind, as in XML: two entries share no block, or one c
 - `move/4`: a moved block keeps an entry only while it stays inside the stretch, and joins those it lands inside; markup of the block alone moves with it.
 - `place/3`: adds an entry, split into grouped pieces where it would cross.
 
-An item page is in two parts (IS-Atlas-48, IS-Atlas-66): a `part` with role `main` titled "Content" over the item (later also what is said about it, such as comments) and a `part` with role `related` titled "References" over its related lists and the facts it points at, each list in a `section` carrying its title (a scene: the scene in Content; its "Use cases" in References; a use case also lists "In scene" there, to open its scene from). The rows of all lists on a page are one selection.
+An item page is in two parts (IS-Atlas-48, IS-Atlas-66), and for its owner a third one first, `todo` titled "What to do" (IS-Atlas-54): a `part` with role `main` titled "Content" over the item (later also what is said about it, such as comments) and a `part` with role `related` titled "References" over its related lists and the facts it points at, each list in a `section` carrying its title (a scene: the scene in Content; its "Use cases" in References; a use case also lists "In scene" there, to open its scene from). The rows of all lists on a page are one selection.
 
 The names (view model, markup) live in one place: `AtlasBFF.Names`, plus the `defmarkup` macro and the module name `AtlasBFF.Markup`.
 
@@ -100,7 +100,7 @@ Client to Control:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"hello","env":"test","client":"tui","spec":"0.11.0"}` | First message, with the contract version the client implements. Control of another environment answers `bye` and closes; so does Control on a newer contract than the client's (or when the client says none): `This client implements contract 0.10.0; Control test speaks 0.11.0. It is too old: …`. A newer client is welcomed: it shows what it knows, the rest as fallbacks. |
+| `{"op":"hello","env":"test","client":"tui","spec":"0.12.0"}` | First message, with the contract version the client implements; an agent may add `"as"`: the key of the fact it is (`coordinator`), so it is the owner of what is assigned to it (IS-Atlas-54; `ATLAS_AS` for `atlas`). Control of another environment answers `bye` and closes; so does Control on a newer contract than the client's (or when the client says none): `This client implements contract 0.10.0; Control test speaks 0.11.0. It is too old: …`. A newer client is welcomed: it shows what it knows, the rest as fallbacks. |
 | `{"op":"open","to":"/k/<kind>/<key>"}` | Show the page at this path. |
 | `{"op":"submit","endpoint":"update","params":{"kind":"issue","key":"IS-Atlas-01"},"values":{...}}` | Submit a form or a confirm: the endpoint and params its `submit_to` or `confirm_to` (a `call`) names, one of the contract's submit endpoints (create, create_under, update, delete, link, accept, reopen); values travel as text. A client that knows only paths may send `"to"` with the endpoint's path instead. Anything else is refused, unsent. |
 | `{"op":"refresh"}` | Reconcile: read the page again from State. Clients send it on an interval. |
@@ -109,7 +109,7 @@ Control to client:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"welcome","env":"test","spec":"0.11.0"}` | Answer to hello, with Control's contract version. |
+| `{"op":"welcome","env":"test","spec":"0.12.0"}` | Answer to hello, with Control's contract version. |
 | `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. On a page without a form, a `refused` page also has `refused`: State's reasons. When the client's user has a start page of assignments, every page has `count`: what waits for them, in the description's words, for the header. |
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |
