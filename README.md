@@ -26,7 +26,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-30.md`: move an item to another parent, in the TUI and with `atlas set` (UC-Atlas-30, IS-Atlas-59).
 - `docs/guides/uc-atlas-31.md`: an issue has one open or merged pull request; a second is refused, and says why (UC-Atlas-31, IS-Atlas-60).
 - `docs/guides/uc-atlas-35.md`: the BFF contract lists every page and endpoint Control serves; an old client is told it is too old (UC-Atlas-35).
-- `docs/guides/uc-atlas-27.md`: every fact has an owner (`assigned_to` a person or an agent, with since, by and cause; `atlas migrate-owner`, IS-Atlas-52), and Flow, first slice: one process per open fact moves it on, from a flow definition, and says what its owner is expected to do (IS-Atlas-53) (UC-Atlas-27).
+- `docs/guides/uc-atlas-27.md`: every fact has an owner (`assigned_to` a person or an agent, with since, by and cause; `atlas migrate-owner`, IS-Atlas-52; a done fact has none, `atlas migrate-done-owner`, IS-Atlas-88), and Flow, first slice: one process per open fact moves it on, from a flow definition, and says what its owner is expected to do (IS-Atlas-53) (UC-Atlas-27).
 - `docs/guides/uc-atlas-32.md`: completed means accepted or merged; completable is an association, shown with the fact that set it (UC-Atlas-32).
 
 ```sh

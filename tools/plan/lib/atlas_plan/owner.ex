@@ -124,7 +124,8 @@ defmodule AtlasPlan.Owner do
   defp apply_step(client, {:assign, key, owner}),
     do: AtlasAgent.set(client, key, %{@relation => owner}, @cause)
 
-  defp read(url, plurals) do
+  @doc false
+  def read(url, plurals) do
     Enum.reduce_while(plurals, {:ok, %{}}, fn plural, {:ok, acc} ->
       case list(url, plural, 1, []) do
         {:ok, facts} -> {:cont, {:ok, Map.put(acc, plural, facts)}}
@@ -147,7 +148,8 @@ defmodule AtlasPlan.Owner do
     end
   end
 
-  defp get(url, path) do
+  @doc false
+  def get(url, path) do
     address = String.to_charlist("#{url}/#{path}")
 
     case :httpc.request(:get, {address, [{~c"accept", ~c"application/json"}]}, [timeout: 10_000],
