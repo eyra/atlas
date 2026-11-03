@@ -115,7 +115,7 @@ defmodule AtlasControl.FakeStore do
           "only_target" => %{"error" => "only a member approves", "also" => ["migration"]},
           "actions" => %{
             "set" => %{"label" => "Approve", "key" => "a"},
-            "remove" => %{"label" => "Withdraw", "key" => "r"}
+            "remove" => %{"label" => "Withdraw", "key" => "a"}
           },
           "requires_completed_children" => "{key} has {children} open",
           "closes_parent" =>

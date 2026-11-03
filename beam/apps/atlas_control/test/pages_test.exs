@@ -857,11 +857,12 @@ defmodule AtlasControl.PagesTest do
 
       approved = widget(%{"approved_by" => ["ada"]})
       page = Pages.render({:item, "widget", "W-1"}, @d, [approved, %{"facts" => []}], @member)
-      assert {"r", "Withdraw", "/k/widget/W-1/remove/approved_by"} in keys.(page)
-      refute Enum.any?(keys.(page), &(elem(&1, 0) == "a"))
+      # One action on one key: approve until approved, withdraw after.
+      assert {"a", "Withdraw", "/k/widget/W-1/remove/approved_by"} in keys.(page)
+      refute {"a", "Approve", "/k/widget/W-1/set/approved_by"} in keys.(page)
 
       page = Pages.render({:item, "widget", "W-1"}, @d, [widget(%{}), %{"facts" => []}], @agent)
-      refute Enum.any?(keys.(page), &(elem(&1, 0) in ["a", "r"]))
+      refute Enum.any?(keys.(page), &(elem(&1, 0) == "a"))
     end
 
     test "approve asks first; refused while a fact under it is open, and for an agent" do

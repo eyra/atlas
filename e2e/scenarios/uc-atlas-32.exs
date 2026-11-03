@@ -5,7 +5,7 @@
 # IS-Atlas-63: State works out completed: an issue when its pull request is merged (on
 # the stand-in GitHub), a use case when it is accepted; a parent is to test, never done,
 # because its children are.
-# IS-Atlas-64: Accept (a) and Reopen (r), in the TUI, for a person only; an agent is
+# IS-Atlas-64: Accept and Reopen, one action on a, in the TUI, for a person only; an agent is
 # refused; nothing new goes under an accepted use case.
 import AtlasE2E.Scenario
 
@@ -89,8 +89,8 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     see(t1, "will be accepted by melle")
     at = press(t1, "y")
     stored(t1, ~r/Accepted by ─+(.|\n)*melle  Person/, at)
-    see(t1, "r Reopen")
-    refute_see(t1, "r refresh")
+    see(t1, "a Reopen")
+    see(t1, "r refresh")
 
     {got, _} = atlas_json(i, ["get", use_case])
     progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
@@ -113,12 +113,12 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
       raise why
   end
 
-  step "r Reopen asks for a note; the use case is to test again, with the note", fn ->
+  step "a Reopen asks for a note; the use case is to test again, with the note", fn ->
     %{use_case: use_case} = Process.get(:uc32)
     open_row(t1, "A scene to accept")
     open_row(t1, "A use case to accept")
-    see(t1, "r Reopen")
-    press(t1, "r")
+    see(t1, "a Reopen")
+    press(t1, "a")
     see(t1, "Reopen #{use_case}")
     type(t1, "Found a bug in the footer")
     at = press(t1, "C-s")

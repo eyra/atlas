@@ -824,9 +824,7 @@ defmodule AtlasTui.View do
     move = if Model.parts(model) != [], do: move <> "   tab next part", else: move
     move = if long, do: move <> "   pgup/pgdn scroll", else: move
     back = if model.back, do: "   esc back", else: ""
-    # A page's own action on r (Reopen, say) wins; refreshing then comes with the reconcile.
-    refresh = if Enum.any?(Model.actions(model), &(&1.key == "r")), do: "", else: "   r refresh"
-    move <> refresh <> "   : ask" <> back <> "   q quit"
+    move <> "   r refresh   : ask" <> back <> "   q quit"
   end
 
   defp notice(%Model{notice: nil}), do: []
