@@ -1487,6 +1487,91 @@ defmodule AtlasControl.PagesTest do
     end
   end
 
+  # Answers (IS-Atlas-56): approve sets checked_by, a widget association; send back removes
+  # it, also when it is not set.
+  @answering @todo
+             |> put_in(["flows", "f", "states"], [
+               %{
+                 "name" => "check",
+                 "todo" => %{
+                   "answers" => [
+                     %{"key" => "v", "label" => "Approve", "set" => "checked_by"},
+                     %{"key" => "z", "label" => "Send back", "remove" => "checked_by"}
+                   ]
+                 }
+               }
+             ])
+             |> put_in(["relations", "checked_by", "actions"], %{
+               "set" => %{"label" => "Check", "key" => "v"}
+             })
+
+  defp answering_reads(route, card_owner) do
+    widget = fact("W-1", %{"title" => "One"}) |> Map.put("links", %{"card" => ["C-W-1"]})
+
+    card =
+      fact("C-W-1", %{"of" => "W-1", "todo" => "Check it", "step" => "check"})
+      |> Map.put("links", %{"held_by" => [card_owner]})
+
+    for read <- Pages.reads(route, @answering) do
+      case read do
+        {"widget", %{"key" => _}} -> %{"fact" => widget}
+        {"card", _} -> %{"fact" => card}
+        _ -> %{"facts" => []}
+      end
+    end
+  end
+
+  test "the owner's answers are actions, in place of one on the same key; nobody else's" do
+    route = {:item, "widget", "W-1"}
+
+    page =
+      Pages.render(route, @answering, answering_reads(route, "ada"), %{
+        by: "ada",
+        by_kind: "member"
+      })
+
+    item = Enum.find(page.blocks, &(&1["id"] == "item"))["props"]
+
+    assert [
+             %{"key" => "v", "label" => "Approve", "to" => "/k/widget/W-1/set/checked_by"},
+             %{"key" => "z", "label" => "Send back", "to" => "/k/widget/W-1/remove/checked_by"}
+             | rest
+           ] = item["actions"]
+
+    refute Enum.any?(rest, &(&1["key"] in ["v", "z"]))
+
+    page =
+      Pages.render(route, @answering, answering_reads(route, "bob"), %{
+        by: "ada",
+        by_kind: "member"
+      })
+
+    item = Enum.find(page.blocks, &(&1["id"] == "item"))["props"]
+    # The association's own action, as before; no answers.
+    assert %{"key" => "v", "label" => "Check", "to" => "/k/widget/W-1/set/checked_by"} in item[
+             "actions"
+           ]
+
+    refute Enum.any?(item["actions"], &(&1["label"] == "Send back"))
+  end
+
+  test "an answer that removes asks for a note, also when nothing is set; else it is refused" do
+    route = {:remove, "widget", "W-1", "checked_by"}
+    form = %{by: "ada", by_kind: "member"}
+
+    %{blocks: [%{"type" => "form", "props" => send_back}]} =
+      Pages.render(route, @answering, answering_reads(route, "ada"), form)
+
+    assert send_back["title"] == "Send back W-1"
+    assert [%{"name" => "_key"}, %{"name" => "note", "kind" => "multiline"}] = send_back["inputs"]
+
+    # Not the owner: nothing to remove, as before.
+    %{blocks: [%{"type" => "confirm", "props" => refused}]} =
+      Pages.render(route, @answering, answering_reads(route, "bob"), form)
+
+    assert refused["text"] == "W-1 has no checked by."
+  end
+
   test "the section a heading names: to the next heading" do
     assert Pages.section("Melle can test: open it.\nThen look.", "Melle can test") ==
              "open it.\nThen look."
