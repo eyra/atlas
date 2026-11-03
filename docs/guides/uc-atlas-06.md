@@ -89,3 +89,29 @@ It is description, plus one general rule in Control. The association `assigned_t
 | Ada's count | `g` | `ada  Ada  N assigned`, one more |
 
 `e2e/scenarios/uc-atlas-06.exs` follows these steps.
+
+## IS-Atlas-84: a scene with nothing under it is to be broken down
+
+A scene with no use cases is in the scene flow's new first open state, `break_down`. It stays there until something comes under it:
+- **Expected:** "Break it down into use cases and issues".
+- **Owner:** whoever it was handed to (Hand to…), else the coordinator.
+
+This is "the state its process records" in UC-Atlas-06. Once a use case is under it, the scene is in `building` ("Build it"). A new state moves the owner, so the owner becomes the coordinator. What happens in between (the agent breaking it down) is UC-Atlas-08.
+
+It is description, plus one general condition in Flow:
+
+- **`rela/atlas.json`** (flow `test_and_accept`): `break_down` comes before `building`, with `when: {empty: in_scene}`.
+- **Flow:** `empty: <relation>` holds when nothing is under the fact through that parent relation. It never holds for a kind nothing belongs under through it. So a use case (nothing is `in_scene` under a use case) is never in `break_down`, and a use case without issues stays "Build it".
+- **State's check:** an `empty` must name a parent relation that puts something under one of the flow's kinds.
+
+In prod, after the merge, every scene without use cases moves from "Build it" to "Break it down into use cases and issues". The owner stays the coordinator, or whoever it was handed to.
+
+### Try
+
+| Step | Keys / command | What you should see |
+|---|---|---|
+| A new scene | `c` on the scenes list | **Expected** `Break it down into use cases and issues`, **Assigned to** coordinator (`atlas get SC-Atlas-NN --env test`) |
+| Hand it to Ada | `h`, `ada`, `ctrl-s` | Ada, and still Break it down |
+| A use case under it | `c` on the scene | **Expected** `Build it`, **Assigned to** coordinator (Flow test_and_accept: not all under it is completed) |
+
+`e2e/scenarios/uc-atlas-06.exs` follows these steps.

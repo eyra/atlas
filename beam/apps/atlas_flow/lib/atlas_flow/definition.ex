@@ -102,6 +102,14 @@ defmodule AtlasFlow.Definition do
     end
   end
 
+  # Nothing is under the fact through `relation`, a relation by which facts belong under
+  # its kind (one of `parents`); for a kind nothing belongs under through it, never.
+  defp condition("empty", relation, _fact, children, parents) do
+    if relation in parents and
+         not Enum.any?(children, &((get_in(&1, ["links", relation]) || []) != [])),
+       do: %{}
+  end
+
   defp condition("values", values, fact, _, _) when is_map(values) do
     if Enum.all?(values, fn {name, allowed} -> fact["values"][name] in List.wrap(allowed) end),
       do: %{}
