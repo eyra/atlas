@@ -22,6 +22,12 @@ defmodule AtlasAgent.Tools do
   @doc "Every tool Control offers now: `{:ok, tools}`."
   def list(client) do
     with {:ok, kinds} <- AtlasAgent.kinds(client) do
+      # The kinds the agent keeps its own record in are not tools (AtlasAgent.Record).
+      kinds =
+        Enum.reject(kinds, fn kind ->
+          Enum.any?(kind["fields"], &match?(["Agent record", _], &1))
+        end)
+
       writes =
         Enum.reduce_while(kinds, {:ok, []}, fn kind, {:ok, acc} ->
           case AtlasAgent.create_form(client, kind["kind"]) do
