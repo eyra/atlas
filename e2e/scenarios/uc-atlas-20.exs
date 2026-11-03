@@ -39,10 +39,10 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
   step "Save: the page shows the lines, blank lines and sections; TUI 2 by hint", fn ->
     at = press(t1, "C-s")
     stored(t1, ~r/✓ Stored as SC-Atlas-\d+/, at)
-    page = stored(t1, ~r/Description\s+## Why\n\s*\n\s+Because a scene/, at)
+    page = stored(t1, ~r/Description\s+## Why[\s│]*\n[\s│]*\n[\s│]+Because a scene/u, at)
 
     page =~
-      ~r/## What\n\s+- the title wraps\n\s+- the description keeps its lines\n\s*\n\s+## Done when/ ||
+      ~r/## What[\s│]*\n[\s│]+- the title wraps[\s│]*\n[\s│]+- the description keeps its lines[\s│]*\n[\s│]*\n[\s│]+## Done when/u ||
       raise "the sections are not shown as written:\n#{page}"
 
     by_hint(t2, "Melle writes a scene with a title longer", at)
@@ -66,9 +66,9 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
 
   step "TUI 2 opens it with the same lines", fn ->
     open_row(t2, "Melle writes a scene")
-    see(t2, ~r/Description\s+## Why\n\s*\n\s+Because a scene/)
+    see(t2, ~r/Description\s+## Why[\s│]*\n[\s│]*\n[\s│]+Because a scene/u)
     # The long title wraps on the page too.
-    see(t2, ~r/Title\s+Melle writes a scene.*\n\s+.*second row/)
+    see(t2, ~r/Title\s+Melle writes a scene.*\n[\s│]+.*second row/u)
   end
 
   step "Change: a line on top; arrows move; TUI 2 by hint", fn ->
@@ -83,9 +83,9 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     press(t1, ["Down", "Down", "Down", "Down", "End"])
     type(t1, " (and how)")
     at = press(t1, "C-s")
-    stored(t1, ~r/Description\s+Intro\n\s+## Why/, at)
-    stored(t1, ~r/^\s+## What \(and how\)$/m, at)
-    by_hint(t2, ~r/Description\s+Intro\n\s+## Why/, at)
+    stored(t1, ~r/Description\s+Intro[\s│]*\n[\s│]+## Why/u, at)
+    stored(t1, ~r/^[\s│]+## What \(and how\)[\s│]*$/mu, at)
+    by_hint(t2, ~r/Description\s+Intro[\s│]*\n[\s│]+## Why/u, at)
   end
 
   step "A description longer than the screen scrolls around the cursor", fn ->
