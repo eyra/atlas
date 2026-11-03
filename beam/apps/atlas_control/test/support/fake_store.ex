@@ -24,7 +24,15 @@ defmodule AtlasControl.FakeStore do
               "labels" => %{"light" => "Light", "dark" => "Dark"}
             },
             "done" => %{"type" => "boolean", "default" => "false"},
-            "notes" => %{"type" => "string", "description" => "Free text"}
+            "notes" => %{"type" => "string", "description" => "Free text"},
+            # Only a connector fills it, as `rela/atlas.json` marks it.
+            "ext_ref" => %{"type" => "string", "set_by" => "connector"}
+          },
+          # As `rela/atlas.json` adds it.
+          "create" => %{
+            "ask" => ["title", "notes"],
+            "id" => %{"prefix" => "W-", "digits" => 2},
+            "defaults" => %{"shade" => "light", "done" => false}
           }
         },
         "part" => %{
@@ -50,10 +58,13 @@ defmodule AtlasControl.FakeStore do
   def link(part, widget), do: GenServer.call(__MODULE__, {:link, part, widget})
   def silent(on?), do: GenServer.call(__MODULE__, {:silent, on?})
 
+  @doc "Make a key taken without listing it, as rela does for a key deleted a moment ago."
+  def reserve(key), do: GenServer.call(__MODULE__, {:reserve, key})
+
   @impl true
   def init(:ok) do
     :ok = AtlasBus.attach(AtlasBus.store())
-    {:ok, %{facts: %{}, links: %{}, position: 0, silent: false}}
+    {:ok, %{facts: %{}, links: %{}, position: 0, silent: false, reserved: MapSet.new()}}
   end
 
   @impl true
@@ -64,6 +75,9 @@ defmodule AtlasControl.FakeStore do
     do: {:reply, :ok, put_in(s.links[part], widget)}
 
   def handle_call({:silent, on?}, _from, s), do: {:reply, :ok, %{s | silent: on?}}
+
+  def handle_call({:reserve, key}, _from, s),
+    do: {:reply, :ok, %{s | reserved: MapSet.put(s.reserved, key)}}
 
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do
@@ -111,6 +125,12 @@ defmodule AtlasControl.FakeStore do
             Map.put(about, "reasons", ["title is required"])
           )
 
+        {:noreply, s}
+
+      op == "create" and (Map.has_key?(s.facts, key) or key in s.reserved) ->
+        code = if key in s.reserved, do: "reserved", else: "exists"
+        refusal = Map.merge(about, %{"reasons" => ["#{key} is taken"], "code" => code})
+        :ok = AtlasBus.send(Envelope.reply(e, "refused"), refusal)
         {:noreply, s}
 
       true ->

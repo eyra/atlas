@@ -160,6 +160,22 @@ defmodule AtlasTuiTest do
     assert screen(m) =~ "[" <> String.slice(long, 0, 29) <> "…]"
   end
 
+  test "a read-only input is shown but never takes focus or typing" do
+    page =
+      update_in(@form, ["blocks", Access.at(0), "props", "inputs"], fn inputs ->
+        [
+          %{"name" => "_key", "label" => "Id", "kind" => "readonly", "value" => "T-01"}
+          | tl(inputs)
+        ]
+      end)
+
+    {m, _} = press(model(page), [{:char, "x"}])
+    assert screen(m) =~ ~r/Id\s+T-01/
+    assert m.values["_key"] == "T-01"
+    assert m.values["state"] == ""
+    assert Model.focusable(Model.form(m)) |> hd() |> Map.get(:name) == "state"
+  end
+
   test "q is text in a form, not quit" do
     {m, effects} = press(model(@form), [{:char, "q"}])
     assert effects == []

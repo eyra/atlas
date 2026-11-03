@@ -22,7 +22,7 @@ bin/atlas tui --env test   # a TUI; open a second one beside it
 | `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. |
 | `clients/tui/` | The TUI, a client of Control. Renders Control's blocks; knows no entity. Not part of the BEAM platform. |
 | `spec/control/` | Control's spec: blocks, wire format, protocol. The spec itself is Elixir in `atlas_control`; `mix atlas.gen` makes server and client code from it. |
-| `rela/` | rela's description (`schema.yaml`): every entity Atlas knows. Plus the scripts that run the rela test instance. |
+| `rela/` | rela's description (`schema.yaml`): every entity Atlas knows. `atlas.json` adds what this rela cannot hold, as data per kind: which fields a create asks for, how ids are made, defaults, fields only a connector fills. Plus the scripts that run the rela test instance. |
 | `env/` | One settings file per environment (`test.json`), read by the core and the clients. |
 | `bin/atlas` | Starts the environment and the TUI. |
 | `docs/guides/` | How to try each use case. |

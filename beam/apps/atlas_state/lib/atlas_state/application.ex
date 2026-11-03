@@ -9,7 +9,8 @@ defmodule AtlasState.Application do
         [
           {AtlasState.Server,
            rela: {AtlasState.Rela.Http, Application.fetch_env!(:atlas_state, :rela_url)},
-           data_dir: Application.fetch_env!(:atlas_state, :data_dir)}
+           data_dir: Application.fetch_env!(:atlas_state, :data_dir),
+           description_extra: Application.get_env(:atlas_state, :description_extra)}
         ]
       else
         []

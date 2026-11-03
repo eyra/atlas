@@ -60,7 +60,7 @@ defmodule AtlasStateTest do
     {:ok, _} = FakeRela.create(rela, "widgets", "W-1", %{"title" => "One"})
     assert {"stored", _, 1} = fact("create", "W-1", %{"title" => "One"})
 
-    assert {"refused", %{"reasons" => ["W-1 already exists"]}, nil} =
+    assert {"refused", %{"reasons" => ["W-1 already exists"], "code" => "exists"}, nil} =
              fact("create", "W-1", %{"title" => "Other"})
   end
 
@@ -118,7 +118,10 @@ defmodule AtlasStateTest do
     fact("create", "W-1", %{"title" => "One"})
     assert {"stored", %{"op" => "delete"}, _} = fact("delete", "W-1")
     assert {"stored", _, _} = fact("delete", "W-1")
-    assert {"refused", %{"reasons" => [reason]}, nil} = fact("create", "W-1", %{"title" => "One"})
+
+    assert {"refused", %{"reasons" => [reason], "code" => "reserved"}, nil} =
+             fact("create", "W-1", %{"title" => "One"})
+
     assert reason =~ "deleted a moment ago"
   end
 
@@ -150,6 +153,26 @@ defmodule AtlasStateTest do
 
     assert %{"fact" => nil} = read("widget", %{"key" => "W-9"})
     assert %{"error" => "rela does not describe \"gadget\""} = read("gadget")
+  end
+
+  test "Atlas's additions are merged into the description State answers", %{rela: rela, dir: dir} do
+    extra = Path.join(dir, "atlas.json")
+
+    File.write!(
+      extra,
+      ~s({"_about": "x", "entities": {"widget": {"create": {"ask": ["title"]}}}})
+    )
+
+    stop_supervised!(AtlasState.Server)
+
+    start_supervised!(
+      {AtlasState.Server, rela: {FakeRela, rela}, data_dir: dir, description_extra: extra}
+    )
+
+    %{"description" => description} = read("_description")
+    assert description["entities"]["widget"]["create"] == %{"ask" => ["title"]}
+    assert description["entities"]["widget"]["plural"] == "widgets"
+    refute Map.has_key?(description, "_about")
   end
 
   test "a stored fact is a hint to listeners of its kind", _ do
