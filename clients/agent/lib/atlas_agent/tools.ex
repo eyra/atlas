@@ -85,7 +85,7 @@ defmodule AtlasAgent.Tools do
     }
   end
 
-  # The update action as Control names it on every page ("Update use case"); the command's
+  # The update action as Control names it on every page ("Update <kind>"); the command's
   # own verb when Control names none.
   defp update_label(kind) do
     Enum.find_value(

@@ -69,9 +69,27 @@ defmodule AtlasControl.PagesTest do
     } =
       Pages.render({:item, "widget", "W-1"}, @d, [answer, parts])
 
-    # The fact in a border, the related list in a section that carries its title.
+    # Two parts side by side: the content (the fact) and its references (the related
+    # list, in a section that carries its title).
     assert [
-             %{"kind" => "border", "start" => "item", "end" => "item", "props" => %{}},
+             %{
+               "kind" => "columns",
+               "start" => "item",
+               "end" => "list:of_widget",
+               "props" => %{"count" => 2}
+             },
+             %{
+               "kind" => "border",
+               "start" => "item",
+               "end" => "item",
+               "props" => %{"title" => "Content"}
+             },
+             %{
+               "kind" => "border",
+               "start" => "list:of_widget",
+               "end" => "list:of_widget",
+               "props" => %{"title" => "References"}
+             },
              %{
                "kind" => "section",
                "start" => "list:of_widget",
@@ -112,10 +130,18 @@ defmodule AtlasControl.PagesTest do
       }
     }
 
-    %{back: "/k/widget/W-1", blocks: [%{"props" => item}]} =
+    %{back: "/k/widget/W-1", blocks: [%{"props" => item}, parent], markup: markup} =
       Pages.render({:item, "part", "P-1"}, @d, [part])
 
     assert {"Of widget", "W-1"} in Enum.map(item["fields"], &{&1["label"], &1["value"]})
+
+    # Among its references, to open it from.
+    assert %{"id" => "parent:of_widget", "type" => "list", "props" => %{"rows" => rows}} = parent
+    assert [%{"label" => "W-1", "detail" => "Widget", "to" => "/k/widget/W-1"}] = rows
+
+    assert %{"kind" => "section", "props" => %{"title" => "Of widget"}} =
+             Enum.find(markup, &(&1["start"] == "parent:of_widget" and &1["kind"] == "section"))
+
     assert Pages.after_delete(@d, "part", part) == {:item, "widget", "W-1"}
     assert Pages.after_delete(@d, "widget", %{"fact" => fact("W-1", %{})}) == {:list, "widget"}
   end
@@ -190,7 +216,7 @@ defmodule AtlasControl.PagesTest do
     assert labels.(list["actions"]) == [{"c", "Create widget"}]
     assert list["empty"] == "No widgets yet. Press c to create one."
 
-    %{blocks: [%{"props" => item}, %{"props" => tags}]} =
+    %{blocks: [%{"props" => item}, %{"props" => tags} | _]} =
       Pages.render({:item, "part", "P-1"}, @d, [%{"fact" => part}, %{"facts" => []}])
 
     assert labels.(item["actions"]) == [{"u", "Update part"}, {"d", "Delete part"}]

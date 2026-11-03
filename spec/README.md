@@ -46,7 +46,7 @@ Change the contract, run `cd spec/contract && mix atlas.gen`, commit the contrac
 
 The DSL is plain macros, not Spark: a contract of a few blocks, models and kinds of markup needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency.
 
-## View model (spec 0.4.0)
+## View model (spec 0.5.0)
 
 Control sends a view model, not a data model: its **content**, a flat list of blocks, and its **markup**, entries that cover a stretch of those blocks. Every block has an id, stable for as long as the page shows the same thing; markup points at ids, never at positions, so inserting, deleting or moving a block (or a hint that changes one) never shifts other markup.
 
@@ -58,7 +58,7 @@ Control sends a view model, not a data model: its **content**, a flat list of bl
 | `item` | a title and labelled values | run an action (change, delete), open a link |
 | `form` | a title, inputs (text, multiline, choice, boolean, readonly), errors | fill it in, submit or cancel; a long text wraps; a multiline input takes several lines (enter starts a new line); a readonly input is shown, never changed |
 | `confirm` | a question, or without `confirm_to` only why something cannot be done | confirm or go back |
-| `plan` | what an agent proposes for a request, and then does: the request, who planned, what it says, its steps; a `title` that says how far it is | keep, edit or drop each proposed step, run the kept ones, cancel, stop a run |
+| `plan` | what an agent proposes for a request, and then does: the request, who planned, what it says, its steps; a `title` that says how far it is; `before`, what became of the previous plan after a refusal | keep, edit or drop each proposed step, run the kept ones, cancel, stop a run |
 
 Models that blocks hold: `action` (label, key, to), `link` (label, key, url), `row`, `pair`, `input`, `choice`, `step` (n, label: the title of the form it fills, state, why, detail, inputs: that form's inputs with the step's values). No block holds another block; grouping is markup.
 
@@ -72,7 +72,7 @@ On the wire a block is `{"id": "item", "type": "list", "props": {...}}`. An opti
 |---|---|---|
 | `section` | `title`, `collapsible` | a heading with a rule, above its blocks |
 | `border` | `title` (optional) | a box around its blocks |
-| `columns` | `count` | not yet: its blocks show one under the other |
+| `columns` | `count` | over a whole page, its parts: side by side from 120 columns, else one above the other; each part with its own room and scrolling, tab moves the focus between them. Elsewhere not yet: its blocks show one under the other |
 | `highlight` | `tone` (info, ok, error, pending) | not yet: its blocks show as they are |
 
 On the wire an entry is `{"kind": "section", "start": "<block id>", "end": "<block id>", "props": {...}}`, covering `start` to `end`, both included, with `"group"` on the pieces of split markup.
@@ -85,7 +85,7 @@ All markup nests, of every kind, as in XML: two entries share no block, or one c
 - `move/4`: a moved block keeps an entry only while it stays inside the stretch, and joins those it lands inside; markup of the block alone moves with it.
 - `place/3`: adds an entry, split into grouped pieces where it would cross.
 
-Today an item page puts the item in a `border` and each related list in a `section` carrying its title (a scene: the scene in a border, then a "Use cases" section).
+An item page is in two parts (IS-Atlas-48): `columns` over the whole page, then a `border` titled "Content" around the item (later also what is said about it, such as comments) and a `border` titled "References" around its related lists and the facts it points at, each list in a `section` carrying its title (a scene: the scene in Content; its "Use cases" in References; a use case also lists "In scene" there, to open its scene from). The rows of all lists on a page are one selection.
 
 The names (view model, markup) live in one place: `AtlasSpec.Names`, plus the `defmarkup` macro and the module name `AtlasSpec.Markup`.
 
@@ -97,7 +97,7 @@ Client to Control:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"hello","env":"test","client":"tui","spec":"0.4.0"}` | First message. Control of another environment answers `bye` and closes. |
+| `{"op":"hello","env":"test","client":"tui","spec":"0.5.0"}` | First message. Control of another environment answers `bye` and closes. |
 | `{"op":"open","to":"/k/<kind>/<key>"}` | Show the page at this path. |
 | `{"op":"submit","to":"<form submit_to or confirm_to>","values":{...}}` | Submit a form or a confirm. Values travel as text. |
 | `{"op":"refresh"}` | Reconcile: read the page again from State. Clients send it on an interval. |
@@ -106,7 +106,7 @@ Control to client:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"welcome","env":"test","spec":"0.4.0"}` | Answer to hello. |
+| `{"op":"welcome","env":"test","spec":"0.5.0"}` | Answer to hello. |
 | `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. |
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |

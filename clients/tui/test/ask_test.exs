@@ -169,6 +169,16 @@ defmodule AtlasTui.AskTest do
     assert Model.agent(m, plan("proposed", [step(1, "One")])).plan == nil
   end
 
+  test "a plan after a refusal says what happened before" do
+    {m, _} = asked()
+    before = "Step 2 (New part in T-1) was refused: T-1 does not exist."
+    m = Model.agent(m, plan("planning", [], %{"before" => before}))
+    assert screen(m) =~ "Before          Step 2 (New part in T-1) was refused"
+    m = Model.agent(m, plan("proposed", [step(1, "Three")], %{"before" => before}))
+    assert screen(m) =~ "T-1 does not exist."
+    assert {_, [{:agent, %{"op" => "run"}}]} = press(m, [:enter])
+  end
+
   test "when the agent stops, a plan it was making says so" do
     {m, _} = asked()
     m = Model.agent_gone(m, "it exited with 1")

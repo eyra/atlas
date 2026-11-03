@@ -122,7 +122,7 @@ defmodule AtlasControl.Pages do
 
   @doc """
   The name and key of a CRUD operation (`:create`, `:update`, `:delete`) on a kind, as
-  every page, form and agent tool shows it: `{"Create use case", "c"}`. The one place an
+  every page, form and agent tool shows it: `{"Create <kind>", "c"}`. The one place an
   action gets its words and key; with `nil` for the kind, only the verb (`"Update"`), as a
   form's button says it.
   """
@@ -413,12 +413,27 @@ defmodule AtlasControl.Pages do
              child_list(description, {relation, from, rel_spec}, key, child_answer, create_key)}
           end)
 
-        # The fact in a border; each related list in a section that carries its title.
-        markup =
-          [Blocks.border("item", "item")] ++
-            for {id, {title, _list}} <- lists, do: Blocks.section(id, id, title: title)
+        # Two parts, side by side where there is room: the content (the fact itself, and
+        # later what is said about it) and its references (the related lists, then the
+        # facts it points at). Each list in a section that carries its title.
+        references = lists ++ parent_lists(description, kind, fact)
+        ids = for {id, _} <- references, do: id
 
-        content = [{"item", item} | for({id, {_title, list}} <- lists, do: {id, list})]
+        markup =
+          case ids do
+            [] ->
+              [Blocks.border("item", "item", title: "Content")]
+
+            [first | _] ->
+              [
+                Blocks.columns("item", List.last(ids), count: 2),
+                Blocks.border("item", "item", title: "Content"),
+                Blocks.border(first, List.last(ids), title: "References")
+              ] ++
+                for {id, {title, _list}} <- references, do: Blocks.section(id, id, title: title)
+          end
+
+        content = [{"item", item} | for({id, {_title, list}} <- references, do: {id, list})]
         page("#{singular(spec, kind)} #{key}", back, content, markup)
 
       %{"error" => error} ->
@@ -627,6 +642,24 @@ defmodule AtlasControl.Pages do
         keys = get_in(fact, ["links", relation]) || [],
         keys != [],
         do: {String.capitalize(spec["label"] || relation), keys}
+  end
+
+  # The facts this one points at, as lists to open them from: `[{id, {title, list}}]`.
+  defp parent_lists(description, kind, fact) do
+    for {relation, spec} <- Enum.sort(description["relations"] || %{}),
+        kind in (spec["from"] || []),
+        [to] <- [spec["to"]],
+        keys = get_in(fact, ["links", relation]) || [],
+        keys != [] do
+      to_spec = get_in(description, ["entities", to]) || %{}
+
+      rows =
+        for key <- Enum.sort(keys),
+            do: Blocks.row(label: key, detail: singular(to_spec, to), to: path({:item, to, key}))
+
+      {"parent:" <> relation,
+       {String.capitalize(spec["label"] || relation), Blocks.list(rows: rows)}}
+    end
   end
 
   # The fact's web address, opened outside the client: its first field whose type the
@@ -1043,7 +1076,7 @@ defmodule AtlasControl.Pages do
   defp count(keys), do: Integer.to_string(length(keys))
 
   defp singular(spec, kind), do: spec["label"] || humanize(kind)
-  # A kind as an action names it: "use case".
+  # A kind as an action names it: its label in lower case.
   defp noun(spec, kind), do: spec |> singular(kind) |> String.downcase()
   defp plural(spec, kind), do: humanize(spec["plural"] || kind <> "s")
 
