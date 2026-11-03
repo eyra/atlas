@@ -67,7 +67,10 @@ defmodule Mix.Tasks.Atlas.E2e do
 
     case result do
       :ok ->
-        File.rm_rf!(instance.dir)
+        # DIAGNOSTICS (IS-Atlas-80, temporary): keep the logs of a passing run too.
+        dir = Path.join(artifacts, "passed")
+        File.mkdir_p!(dir)
+        for log <- Instance.logs(instance), do: File.cp!(log, Path.join(dir, Path.basename(log)))
 
         IO.puts(
           "\natlas e2e: #{length(scenarios)} scenarios, #{steps} steps, all passed in #{took} s"

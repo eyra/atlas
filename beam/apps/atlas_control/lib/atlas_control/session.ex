@@ -63,6 +63,13 @@ defmodule AtlasControl.Session do
   def handle_info({:tcp, _socket, line}, state) do
     case JSON.decode(line) do
       {:ok, %{"op" => op} = message} ->
+        {:message_queue_len, q} = Process.info(self(), :message_queue_len)
+        require Logger
+
+        Logger.info(
+          "SESSION #{inspect(self())} op #{op} #{inspect(Map.take(message, ["to", "path", "endpoint"]))} queue #{q}"
+        )
+
         handle_op(op, message, state)
 
       _ ->
@@ -76,6 +83,12 @@ defmodule AtlasControl.Session do
   def handle_info({:atlas_bus, %Envelope{class: class, id: id} = envelope, content}, state)
       when is_map_key(state.pending, id) and class in ["stored", "refused"] do
     {pending, rest} = Map.pop(state.pending, id)
+    require Logger
+
+    Logger.info(
+      "SESSION #{inspect(self())} #{class} for #{pending.content["key"]} #{pending.content["op"]}"
+    )
+
     Process.cancel_timer(pending.timer)
     state = %{state | pending: rest}
 
@@ -553,6 +566,8 @@ defmodule AtlasControl.Session do
     content = if state.cause, do: Map.put(content, "cause", state.cause), else: content
     envelope = Envelope.new("fact", kind)
     :ok = AtlasBus.send(envelope, content)
+    require Logger
+    Logger.info("SESSION #{inspect(self())} sent fact #{kind} #{content["key"]} #{content["op"]}")
     timer = Process.send_after(self(), {:resend, envelope.id}, @first_resend)
 
     pending = %{
@@ -679,6 +694,10 @@ defmodule AtlasControl.Session do
   end
 
   defp send_client(state, message) do
+    Logger.info(
+      "SESSION #{inspect(self())} to client #{message["op"]} #{message["reason"]} #{message["path"]} #{inspect(message["notice"] || message["text"])}"
+    )
+
     case :gen_tcp.send(state.socket, [JSON.encode!(message), "\n"]) do
       :ok -> :ok
       {:error, reason} -> Logger.debug("Control could not reach its client: #{inspect(reason)}")

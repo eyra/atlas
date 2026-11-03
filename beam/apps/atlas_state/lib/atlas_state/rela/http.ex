@@ -147,7 +147,15 @@ defmodule AtlasState.Rela.Http do
 
     options = [timeout: 5_000, connect_timeout: 2_000]
 
-    case :httpc.request(method, request, options, body_format: :binary) do
+    t0 = System.monotonic_time(:microsecond)
+    r = :httpc.request(method, request, options, body_format: :binary)
+    require Logger
+
+    Logger.info(
+      "HTTP #{method} #{url} #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms #{elem(r, 0)}"
+    )
+
+    case r do
       {:ok, {{_, status, _}, headers, raw}} ->
         headers = Map.new(headers, fn {k, v} -> {to_string(k), to_string(v)} end)
         {:ok, status, decode(raw), headers}

@@ -63,6 +63,19 @@ defmodule AtlasState.Server do
   end
 
   @impl true
+  def handle_info({:atlas_bus, %Envelope{class: c} = envelope, content} = m, state)
+      when c in ["fact", "read"] and not is_map_key(state, :timing) do
+    t0 = System.monotonic_time(:microsecond)
+    {:message_queue_len, q} = Process.info(self(), :message_queue_len)
+    {:noreply, s2} = handle_info(m, Map.put(state, :timing, true))
+
+    Logger.info(
+      "TIMING #{c} #{envelope.kind} from #{envelope.sender} #{inspect(Map.take(content || %{}, ["key", "op", "linked", "plain", "by"]))} took #{div(System.monotonic_time(:microsecond) - t0, 1000)}ms queue #{q}"
+    )
+
+    {:noreply, Map.delete(s2, :timing)}
+  end
+
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = envelope, content}, state) do
     case Ledger.answer(state.ledger, envelope.id) do
       {class, answer, position} ->

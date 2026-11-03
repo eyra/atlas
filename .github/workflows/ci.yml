@@ -104,6 +104,11 @@ jobs:
   e2e:
     name: End to end (rela, core, two TUIs)
     runs-on: ubuntu-latest
+    # DIAGNOSTICS (IS-Atlas-80, temporary): six runs side by side, logs always kept.
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5, 6]
     env:
       TERM: xterm-256color
       ATLAS_E2E_RELA_BIN: ${{ github.workspace }}/.rela-bin
@@ -125,10 +130,10 @@ jobs:
       - run: mix test
         working-directory: e2e
       - run: bin/atlas e2e --env test
-      - if: failure()
+      - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-screens
+          name: e2e-screens-${{ matrix.run }}
           path: e2e/artifacts
 
   # A merge to develop deploys test on Fly (d-0014, IS-Atlas-26): rela first, then the core,
