@@ -67,7 +67,8 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     pull = %{"title" => "Its only issue", "state" => "open", "merged" => false, "html_url" => url}
     GitHub.put(url, pull)
     {_, at} = atlas_json(i, ["put", "pull_request", "--url", url, "--in", issue])
-    by_hint(t1, ~r/#{issue}\s+Its only issue\s+Specification/, at)
+    # While its pull request is open it shows Development (IS-Atlas-61).
+    by_hint(t1, ~r/#{issue}\s+Its only issue\s+Development/, at)
 
     GitHub.put(url, %{pull | "state" => "closed", "merged" => true})
     see(t1, ~r/#{issue}\s+Its only issue\s+Done/, connector_wait)
