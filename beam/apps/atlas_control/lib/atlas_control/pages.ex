@@ -99,6 +99,16 @@ defmodule AtlasControl.Pages do
 
   def resolve(route, _description), do: route
 
+  @doc """
+  The kinds whose ids have no prefix (made from a name, say). A key no prefix claims is of
+  one of them; when there are several, Control asks State which one has it.
+  """
+  def unprefixed_kinds(description) do
+    for {kind, spec} <- Enum.sort(description["entities"] || %{}),
+        unprefixed?(spec),
+        do: kind
+  end
+
   defp kind_of_key(description, key) do
     matches =
       for {kind, spec} <- description["entities"] || %{},
@@ -272,11 +282,17 @@ defmodule AtlasControl.Pages do
   spec}]`. A fact's page lists those facts; under a parent relation it can add one.
   """
   def child_relations(description, kind) do
-    for {relation, %{"to" => to, "from" => [from]} = spec} <-
+    # A relation from several kinds (what is assigned to someone, say) is one list per kind.
+    for {relation, %{"to" => to, "from" => [_ | _] = froms} = spec} <-
           Enum.sort(description["relations"] || %{}),
         kind in to,
+        from <- froms,
         do: {relation, from, spec}
   end
+
+  # The id of a related list on a page; one per kind for a relation from several.
+  defp list_id(relation, from, %{"from" => [_, _ | _]}), do: "list:#{relation}:#{from}"
+  defp list_id(relation, _from, _spec), do: "list:" <> relation
 
   @doc "The reads a route needs: `[{kind, content}]`."
   def reads(:home, description) do
@@ -311,12 +327,10 @@ defmodule AtlasControl.Pages do
 
   def reads({_, kind, key}, _), do: [{kind, %{"key" => key}}]
 
-  # The fact, and the facts it may point at.
+  # The fact, and the facts it may point at: of each kind the relation points at.
   def reads({:links, kind, key, relation}, description) do
-    case get_in(description, ["relations", relation, "to"]) do
-      [to] -> [{kind, %{"key" => key}}, {to, %{}}]
-      _ -> [{kind, %{"key" => key}}]
-    end
+    tos = get_in(description, ["relations", relation, "to"]) || []
+    [{kind, %{"key" => key}} | for(to <- tos, do: {to, %{}})]
   end
 
   def reads(:unknown, _), do: []
@@ -603,7 +617,7 @@ defmodule AtlasControl.Pages do
             create_key == nil and match?(%{"facts" => []}, answer)
           end)
           |> Enum.map(fn {{{relation, from, rel_spec}, child_answer}, create_key} ->
-            {"list:" <> relation,
+            {list_id(relation, from, rel_spec),
              child_list(description, {relation, from, rel_spec}, key, child_answer, create_key)}
           end)
 
@@ -845,7 +859,9 @@ defmodule AtlasControl.Pages do
     keys
   end
 
-  defp link_input(%{"max_outgoing" => 1}, value, [%{"facts" => facts}]) do
+  defp link_input(%{"max_outgoing" => 1}, value, [_ | _] = targets) do
+    facts = Enum.flat_map(targets, &(&1["facts"] || []))
+
     Blocks.input(
       name: "to",
       label: "To",
@@ -878,6 +894,12 @@ defmodule AtlasControl.Pages do
   defp child_list(description, {relation, from, rel_spec}, key, answer, create_key) do
     from_spec = description["entities"][from] || %{}
     title = String.capitalize(get_in(rel_spec, ["inverse", "label"]) || plural(from_spec, from))
+
+    # One list per kind for a relation from several: the kind says which.
+    title =
+      if length(rel_spec["from"] || []) > 1,
+        do: "#{title}: #{plural(from_spec, from)}",
+        else: title
 
     rows =
       case answer do
@@ -996,14 +1018,23 @@ defmodule AtlasControl.Pages do
   defp parent_lists(description, kind, fact) do
     for {relation, spec} <- Enum.sort(description["relations"] || %{}),
         kind in (spec["from"] || []),
-        [to] <- [spec["to"]],
+        tos = spec["to"] || [],
+        tos != [],
         keys = get_in(fact, ["links", relation]) || [],
         keys != [] do
-      to_spec = get_in(description, ["entities", to]) || %{}
+      # A relation that points at several kinds: State says which kind each key is.
+      kind_of = fn key ->
+        case tos do
+          [to] -> to
+          _ -> get_in(fact, ["link_kinds", relation, key])
+        end
+      end
 
       rows =
-        for key <- Enum.sort(keys),
-            do: Blocks.row(id: key, label: singular(to_spec, to), to: path({:item, to, key}))
+        for key <- Enum.sort(keys), to = kind_of.(key), to != nil do
+          to_spec = get_in(description, ["entities", to]) || %{}
+          Blocks.row(id: key, label: singular(to_spec, to), to: path({:item, to, key}))
+        end
 
       {"parent:" <> relation,
        {String.capitalize(spec["label"] || relation), Blocks.list(rows: rows)}}

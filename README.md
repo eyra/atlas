@@ -22,6 +22,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
 - `docs/guides/uc-atlas-25.md`: how far a scene and its use cases are, from the issues under them (UC-Atlas-25).
 - `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
+- `docs/guides/uc-atlas-27.md`: every fact has an owner: `assigned_to` a person or an agent, with since, by and cause; `atlas migrate-owner` (UC-Atlas-27).
 - `docs/guides/uc-atlas-30.md`: move an item to another parent, in the TUI and with `atlas set` (UC-Atlas-30, IS-Atlas-59).
 - `docs/guides/uc-atlas-31.md`: an issue has one open or merged pull request; a second is refused, and says why (UC-Atlas-31, IS-Atlas-60).
 - `docs/guides/uc-atlas-32.md`: completed means accepted or merged; completable is an association, shown with the fact that set it (UC-Atlas-32).

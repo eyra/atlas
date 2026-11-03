@@ -204,7 +204,38 @@ defmodule AtlasControl.Session do
   defp handle_op(op, _message, state),
     do: {:noreply, notice(state, "error", "Unknown op #{inspect(op)}")}
 
-  defp route(to, state), do: to |> Pages.route() |> Pages.resolve(state.description)
+  defp route(to, state) do
+    route = Pages.route(to)
+
+    case Pages.resolve(route, state.description) do
+      :unknown -> by_key(route, state)
+      resolved -> resolved
+    end
+  end
+
+  # `_` in place of a kind, for a key no id prefix claims: the kind without a prefix that
+  # has it, asked of State (ids made from a name have no prefix).
+  defp by_key({page, "_", key}, state) when page in [:item, :edit, :delete] do
+    case kind_holding(key, state) do
+      nil -> :unknown
+      kind -> {page, kind, key}
+    end
+  end
+
+  defp by_key({:links, "_", key, relation}, state) do
+    case kind_holding(key, state) do
+      nil -> :unknown
+      kind -> {:links, kind, key, relation}
+    end
+  end
+
+  defp by_key(_route, _state), do: :unknown
+
+  defp kind_holding(key, state) do
+    Enum.find(Pages.unprefixed_kinds(state.description), fn kind ->
+      match?(%{"fact" => %{}}, ask(kind, %{"key" => key}))
+    end)
+  end
 
   # Who is on this session. A TUI is the environment's TUI user for now; anything else is
   # an agent. No sign-in yet: a client is what its hello says.

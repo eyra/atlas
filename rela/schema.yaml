@@ -198,6 +198,19 @@ entities:
       values: { type: string, description: "The values it gave, as JSON" }
       was: { type: string, description: "For a change: the values it replaced, as JSON" }
 
+  # Who may own a fact, besides a person: an agent (the coordinator for now). Agents and
+  # roles come with Organisation (SC-Atlas-02). Not part of the plan; reached through
+  # what points at it, as a person is.
+  agent:
+    label: Agent
+    plural: agents
+    id_type: manual
+    description: |
+      An agent that works with Atlas. The id is short and lower case, made from the
+      name, e.g. coordinator.
+    properties:
+      name: { type: string, required: true, description: "As it is shown" }
+
 relations:
   in_scene:
     label: in scene
@@ -251,3 +264,14 @@ relations:
     to: [agent_request]
     max_outgoing: 1
     inverse: { id: steps, label: steps }
+
+  # The owner (IS-Atlas-52, UC-Atlas-27): whoever is next in line to do something with a
+  # fact, one, always. A kind is assignable when it is in this relation's `from`. The
+  # link has no attributes: when, by whom and why are the fact that set it.
+  assigned_to:
+    label: assigned to
+    description: Who is next in line to do something with it; one, a person or an agent.
+    from: [scene, use_case, issue, pull_request]
+    to: [person, agent]
+    max_outgoing: 1
+    inverse: { id: assignments, label: assignments }
