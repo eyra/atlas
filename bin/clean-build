@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# clean-build: remove the build output a renamed or moved Mix app leaves behind, so Mix
+# never tries to start an app that no mix.exs declares any more (IS-Atlas-67). bin/atlas
+# runs it before it compiles or starts anything.
+#
+#   clean-build <root>            stale _build entries
+#   clean-build <root> --moved    also untracked folders that hold only build output
+#                                 (bin/atlas, after it updated the main clone)
+#
+# A _build entry is stale when its app is declared by no tracked mix.exs and is not a
+# fetched dependency (deps/). Every entry whose .app names a stale app goes too: Mix does
+# not rebuild an app only because a dependency was renamed, and would try to start the
+# old one. Each removal is said in one line. Nothing tracked is ever touched.
+set -euo pipefail
+
+root="$(cd "$1" && pwd -P)"
+moved="${2:-}"
+
+declared="$(
+  { git -C "$root" ls-files -z -- '*mix.exs' 2>/dev/null || true; } |
+    while IFS= read -r -d '' file; do
+      grep -oE '(^|[^a-z_])app: :[a-z0-9_]+' "$root/$file" || true
+    done | sed 's/.*app: ://' | sort -u
+)"
+
+# Without the list of apps, nothing can be told stale: leave everything as it is.
+[ -n "$declared" ] || exit 0
+
+say() { echo "atlas: $*"; }
+
+# Untracked folders with only build output in them (_build, deps, .DS_Store): what is left
+# of a project after it moved. The outermost such folder goes, as one.
+if [ "$moved" = --moved ]; then
+  find "$root" \( -name .git -o -name _build -o -name deps \) -prune -o -type d -print |
+    while IFS= read -r dir; do
+      [ "$dir" != "$root" ] || continue
+      [ -d "$dir/_build" ] || [ -d "$dir/deps" ] || continue
+
+      top=""
+      candidate="$dir"
+      while [ "$candidate" != "$root" ] && [ -z "$(git -C "$root" ls-files -- "${candidate#"$root"/}" | head -1)" ]; do
+        other="$(find "$candidate" \( -name _build -o -name deps \) -prune -o -type f ! -name .DS_Store -print | head -1)"
+        [ -z "$other" ] || break
+        top="$candidate"
+        candidate="$(dirname "$candidate")"
+      done
+
+      if [ -n "$top" ] && [ -d "$top" ]; then
+        rm -rf "$top"
+        say "removed ${top#"$root"/}/, which held only build output (its project moved)"
+      fi
+    done
+fi
+
+# Stale entries in every project's _build.
+find "$root" \( -name .git -o -name deps \) -prune -o -type d -name _build -print -prune |
+  while IFS= read -r build; do
+    project="$(dirname "$build")"
+    fetched="$(ls "$project/deps" 2>/dev/null || true)"
+
+    for lib in "$build"/*/lib; do
+      [ -d "$lib" ] || continue
+      stale=()
+
+      for entry in "$lib"/*/; do
+        [ -d "$entry" ] || continue
+        app="$(basename "$entry")"
+        if ! grep -qx "$app" <<<"$declared" && ! grep -qx "$app" <<<"$fetched"; then
+          stale+=("$app")
+        fi
+      done
+
+      [ ${#stale[@]} -gt 0 ] || continue
+      dependents=()
+
+      for app in "${stale[@]}"; do
+        rm -rf "${lib:?}/$app"
+        for file in "$lib"/*/ebin/*.app; do
+          [ -f "$file" ] || continue
+          if grep -qw "$app" "$file"; then
+            dependent="$(basename "$(dirname "$(dirname "$file")")")"
+            rm -rf "${lib:?}/$dependent"
+            dependents+=("$dependent")
+          fi
+        done
+      done
+
+      where="${lib#"$root"/}"
+      line="removed the build output of ${stale[*]} in $where: no mix.exs declares it any more"
+      [ ${#dependents[@]} -eq 0 ] || line="$line; ${dependents[*]} named it, and is built again"
+      say "$line"
+    done
+  done
