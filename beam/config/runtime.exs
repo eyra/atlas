@@ -37,4 +37,7 @@ if config_env() != :test do
     port: settings["control"]["port"],
     # Who uses a TUI of this environment (a key), until Control has sign-in.
     tui_user: settings["tui_user"]
+
+  # Flow looks at each open fact again this often, and at once on a hint.
+  config :atlas_flow, tick_seconds: get_in(settings, ["flow", "tick_seconds"]) || 60
 end

@@ -24,6 +24,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
 - `docs/guides/uc-atlas-30.md`: move an item to another parent, in the TUI and with `atlas set` (UC-Atlas-30, IS-Atlas-59).
 - `docs/guides/uc-atlas-31.md`: an issue has one open or merged pull request; a second is refused, and says why (UC-Atlas-31, IS-Atlas-60).
+- `docs/guides/uc-atlas-27.md`: Flow, first slice: one process per open fact moves it on, from a flow definition, and says what its owner is expected to do (UC-Atlas-27, IS-Atlas-53).
 - `docs/guides/uc-atlas-32.md`: completed means accepted or merged; completable is an association, shown with the fact that set it (UC-Atlas-32).
 
 ```sh
@@ -51,7 +52,7 @@ An agent that plans gets the same actions as tools: `atlas tools` lists them, ma
 
 | Path | What |
 |---|---|
-| `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. Connectors to outside systems sit at State's edge, in `atlas_state`; GitHub, read-only, is the first. |
+| `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_flow`, `atlas_control`. Layers depend on the Bus only and talk only over it. Connectors to outside systems sit at State's edge, in `atlas_state`; GitHub, read-only, is the first. |
 | `clients/tui/` | The TUI, a client of Control. Renders Control's blocks; knows no entity. Not part of the BEAM platform. |
 | `clients/agent/` | The agents' command line (`atlas help/put/set/get/list/tools/plan`), a client of Control like the TUI: it reads pages and fills forms, and knows no entity. The planner boundary (`AtlasAgent.Planner`) is here too. |
 | `tools/plan/` | `atlas load-plan` (UC-Atlas-05): SCENES.md into Atlas through `clients/agent`, with `links.json` for pull requests and stages. |
