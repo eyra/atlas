@@ -280,7 +280,7 @@ defmodule AtlasE2E.Scenario do
           {:halt, :ok}
 
         true ->
-          Tui.keys(tui, ["Down"])
+          Tui.keys(tui, [toward(screen, text)])
           wait(tui, @page_wait, &(&1 != screen), "move to #{inspect(text)}", true)
           {:cont, nil}
       end
@@ -289,6 +289,23 @@ defmodule AtlasE2E.Scenario do
       :ok -> :ok
       _ -> fail(tui, "has no row #{inspect(text)}", settled(tui))
     end
+  end
+
+  # Up when the row shows above the selection: back on a page, the selection stays on the
+  # row that was opened, which may be below the one asked for. Down otherwise, also for a
+  # row below the screen.
+  defp toward(screen, text) do
+    lines = String.split(screen, "\n")
+    selected = Enum.find_index(lines, &(&1 =~ ~r/› /))
+    # A row as an unselected one shows: indented, not a title that repeats its text.
+    row =
+      lines
+      |> Enum.with_index()
+      |> Enum.filter(fn {line, _} -> line =~ ~r/(^|│)   \S/ and String.contains?(line, text) end)
+      |> List.last()
+      |> then(&(&1 && elem(&1, 1)))
+
+    if selected && row && row < selected, do: "Up", else: "Down"
   end
 
   # Waiting

@@ -72,7 +72,11 @@ defmodule AtlasFlow.FakeState do
 
   def set_description(description), do: GenServer.call(__MODULE__, {:description, description})
 
-  @doc "How many reads were answered so far, and of those how many plain."
+  @doc """
+  How many of Flow's reads were answered so far, and of those how many plain. Only reads
+  from Flow's endpoints count: the Bus is shared, and a process another test left behind
+  (a Control session still asking, in the same VM) reads from whatever the store is now.
+  """
   def reads, do: GenServer.call(__MODULE__, :reads)
 
   @impl true
@@ -85,6 +89,7 @@ defmodule AtlasFlow.FakeState do
        sent: [],
        reads: {0, 0},
        position: 0,
+       busy: MapSet.new(),
        description: Keyword.get(opts, :description, description())
      }}
   end
@@ -103,10 +108,16 @@ defmodule AtlasFlow.FakeState do
   def handle_call({:drop, kind, key}, _from, s),
     do: {:reply, :ok, %{s | facts: Map.delete(s.facts, {kind, key})}}
 
+  # A read of this fact gets State's answer when it could not read it, until `{:free, …}`.
+  def handle_call({:busy, kind, key}, _from, s),
+    do: {:reply, :ok, %{s | busy: MapSet.put(s.busy, {kind, key})}}
+
+  def handle_call({:free, kind, key}, _from, s),
+    do: {:reply, :ok, %{s | busy: MapSet.delete(s.busy, {kind, key})}}
+
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do
-    {all, plain} = s.reads
-    s = %{s | reads: {all + 1, plain + if(content["plain"] == true, do: 1, else: 0)}}
+    s = if flow?(e.sender), do: %{s | reads: count(s.reads, content)}, else: s
 
     answer =
       case {e.kind, content} do
@@ -114,7 +125,9 @@ defmodule AtlasFlow.FakeState do
           %{"description" => s.description}
 
         {kind, %{"key" => key}} ->
-          %{"fact" => s.facts[{kind, key}]}
+          if MapSet.member?(s.busy, {kind, key}),
+            do: %{"error" => "State did not answer"},
+            else: %{"fact" => s.facts[{kind, key}]}
 
         {kind, %{"linked" => linked}} ->
           facts =
@@ -155,4 +168,9 @@ defmodule AtlasFlow.FakeState do
   end
 
   def handle_info(_message, s), do: {:noreply, s}
+
+  defp flow?(sender), do: sender == "flow" or String.starts_with?(sender || "", "flow/")
+
+  defp count({all, plain}, content),
+    do: {all + 1, plain + if(content["plain"] == true, do: 1, else: 0)}
 end

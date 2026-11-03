@@ -212,3 +212,31 @@ So a new scene, use case, issue or pull request gets its owner within moments of
 | Reopen | `a`, a note, `ctrl-s` | The coordinator, with `Rework: <the note>`. |
 
 `e2e/scenarios/uc-atlas-27.exs` follows these steps. `uc-atlas-27-owner.exs` checks that a new fact gets its owner from Flow, and that `atlas migrate-owner` leaves it alone.
+
+## IS-Atlas-88: a done fact has no owner (`atlas migrate-done-owner`)
+
+Facts that were done before IS-Atlas-75 kept the coordinator the IS-Atlas-52 migration gave them. A done fact has no Flow process, so Flow never took it away. In prod the coordinator's row in the agents list (IS-Atlas-17) counted 163, mostly done work.
+
+`atlas migrate-done-owner` removes those owners. One change per Assignment, by `migration`, with the cause "done: no owner (IS-Atlas-75's rule)".
+
+- **Done is what Flow says.** Flow writes Expected on every open fact and clears it once the fact is done. So an Assignment with an owner and nothing expected belongs to a done fact.
+- **Only an owner a migration set goes.** One set by hand or by Flow stays.
+  - The IS-Atlas-78 migration moved every owner onto its Assignment, by `migration`, and kept who had set it in its cause ("moved from X, set … by who"). That earlier setter counts.
+  - An owner whose cause does not say who set it is kept, and the run lists it as `kept`.
+- **Nothing is lost if an open fact is caught** (Flow had not done its round yet): Flow gives it its owner again on its next look.
+- **A rerun has 0 steps.**
+
+The coordinator runs it after the merge, after a backup, on test and prod:
+
+```sh
+atlas migrate-done-owner --env prod --dry-run   # prints every step; writes nothing
+atlas migrate-done-owner --env prod             # writes them through Control, as the migration
+atlas migrate-done-owner --env prod --dry-run   # again: 0 steps
+```
+
+Afterwards the coordinator's count in the agents list (`g`) is its open work only.
+
+`e2e/scenarios/uc-atlas-27-done-owner.exs` follows this:
+1. A merged pull request and its issue are left with nobody by Flow.
+2. A migration gives the issue the coordinator, and a user gives the pull request one.
+3. The one-off removes only the issue's owner, and a rerun has 0 steps.

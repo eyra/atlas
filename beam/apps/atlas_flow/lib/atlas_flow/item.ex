@@ -142,32 +142,43 @@ defmodule AtlasFlow.Item do
     # it stays.
     moved? = values != %{} and blank(fact["values"][field]) != nil
 
-    links =
+    owner? =
       if (relation && (get_in(fact, ["links", relation]) || []) != List.wrap(owner)) and
-           (moved? or not by_hand?(fact, relation)) and owner_exists?(current),
-         do: %{relation => List.wrap(owner)},
-         else: %{}
+           (moved? or not by_hand?(fact, relation)),
+         do: owner_exists(current),
+         else: :no
 
-    if values != %{} or links != %{} do
-      # By flow: Flow passes over the hints of its own writes, on whichever fact.
-      content = %{
-        "op" => "change",
-        "key" => fact["key"],
-        "values" => values,
-        "version" => nil,
-        "by" => "flow",
-        "cause" => cause(name, current, owner)
-      }
+    links = if owner? == :yes, do: %{relation => List.wrap(owner)}, else: %{}
 
-      content = if links == %{}, do: content, else: Map.put(content, "links", links)
+    cond do
+      # State did not say whether the owner exists: write nothing now, rather than what
+      # is expected without its owner; the timer tries again.
+      owner? == :unknown ->
+        Logger.warning("flow #{name}: #{state.key} not moved: State did not answer; tried again")
 
-      case Talk.put(kind, content) do
-        {:stored, _} ->
-          Logger.info("flow #{name}: #{state.key} #{current["name"]} (#{inspect(values)})")
+      values != %{} or links != %{} ->
+        # By flow: Flow passes over the hints of its own writes, on whichever fact.
+        content = %{
+          "op" => "change",
+          "key" => fact["key"],
+          "values" => values,
+          "version" => nil,
+          "by" => "flow",
+          "cause" => cause(name, current, owner)
+        }
 
-        other ->
-          Logger.warning("flow #{name}: #{state.key} not moved: #{inspect(other)}; tried again")
-      end
+        content = if links == %{}, do: content, else: Map.put(content, "links", links)
+
+        case Talk.put(kind, content) do
+          {:stored, _} ->
+            Logger.info("flow #{name}: #{state.key} #{current["name"]} (#{inspect(values)})")
+
+          other ->
+            Logger.warning("flow #{name}: #{state.key} not moved: #{inspect(other)}; tried again")
+        end
+
+      true ->
+        :ok
     end
   end
 
@@ -182,23 +193,24 @@ defmodule AtlasFlow.Item do
   end
 
   # The owner a state names must exist; until it does, only what is expected is written.
-  defp owner_exists?(current) do
+  # :yes, :no (State says there is no such fact), or :unknown (State did not answer).
+  defp owner_exists(current) do
     case {Definition.owner(current), Definition.owner_kind(current)} do
-      {nil, _} ->
-        true
-
-      {key, kind} when is_binary(kind) ->
+      {key, kind} when is_binary(key) and is_binary(kind) ->
         case Talk.read(kind, %{"key" => key, "plain" => true}) do
           %{"fact" => %{}} ->
-            true
+            :yes
+
+          %{"fact" => nil} ->
+            Logger.warning("flow: #{kind} #{key} does not exist; the owner waits for it")
+            :no
 
           _ ->
-            Logger.warning("flow: #{kind} #{key} does not exist; the owner waits for it")
-            false
+            :unknown
         end
 
       _ ->
-        true
+        :yes
     end
   end
 
