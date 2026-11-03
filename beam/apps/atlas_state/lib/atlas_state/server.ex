@@ -35,7 +35,7 @@ defmodule AtlasState.Server do
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Components, Copies, Description, Flows, Ledger, Links, Progress, Rela}
+  alias AtlasState.{Components, Copies, Description, Flows, Late, Ledger, Links, Progress, Rela}
 
   @description "_description"
 
@@ -312,7 +312,13 @@ defmodule AtlasState.Server do
     }
 
     wired = if fact[:progress], do: Map.put(wired, "progress", fact.progress), else: wired
-    if fact[:completion], do: Map.put(wired, "completion", fact.completion), else: wired
+    wired = if fact[:completion], do: Map.put(wired, "completion", fact.completion), else: wired
+
+    # Late is worked out on every read, plain ones too: it costs no read.
+    case Late.of(state.description, kind, fact[:properties]) do
+      nil -> wired
+      late -> Map.put(wired, "late", late)
+    end
   end
 
   # Facts
