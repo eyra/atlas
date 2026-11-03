@@ -243,24 +243,47 @@ defmodule AtlasE2E.Scenario do
 
       if screen =~ ~r/esc (back|cancel|stop)|y confirm|↵ (back|close)/ do
         Tui.keys(tui, [if(screen =~ "y confirm", do: "n", else: "Escape")])
-        wait(tui, @page_wait, &(&1 != screen), "change page")
+        # The page, not just the status line (a reconcile redraws that): a second key on
+        # the same page would go back one page too far, and arrive late.
+        wait(
+          tui,
+          @page_wait,
+          &(header(&1) != header(screen) or not (&1 =~ "esc ")),
+          "change page",
+          true
+        )
+
         {:cont, nil}
       else
         {:halt, nil}
       end
     end)
 
-    screen = see(tui, @first_page)
+    see(tui, @first_page)
+    scenes(tui, 3)
+  end
 
-    # The user is a person: the start page is what is assigned to them (IS-Atlas-55), and
-    # the scenes are one key away. Scenarios go on from the scenes, as before.
-    if screen =~ "s Scenes" do
-      Tui.keys(tui, ["s"])
-      see(tui, ~r/Atlas · test.*\sScenes$/m)
-    else
-      screen
+  # The user is a person: the start page is what is assigned to them (IS-Atlas-55), and
+  # the scenes are one key away. Scenarios go on from the scenes, as before; a page still
+  # on its way from before (the start page) is waited out and `s` pressed again.
+  defp scenes(tui, tries) do
+    screen = settled(tui)
+
+    cond do
+      screen =~ "s Scenes" and tries > 0 ->
+        Tui.keys(tui, ["s"])
+        see(tui, ~r/Atlas · test.*\sScenes$/m)
+        Process.sleep(@settle_wait)
+        scenes(tui, tries - 1)
+
+      true ->
+        screen
     end
   end
+
+  # The header line: the environment, the count and the page's title.
+  defp header(screen),
+    do: screen |> String.split("\n") |> Enum.find("", &String.contains?(&1, "Atlas · "))
 
   @doc """
   Connected, and the first page is on screen. "● connected" alone shows as soon as
