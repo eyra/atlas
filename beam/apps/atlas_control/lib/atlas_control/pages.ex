@@ -295,7 +295,9 @@ defmodule AtlasControl.Pages do
   end
 
   def shows?({:list, of} = route, description, kind),
-    do: kind == kind_of(route) or kind in progress_from(description, of)
+    do:
+      kind == kind_of(route) or kind in progress_from(description, of) or
+        kind in for({_relation, from, _text} <- counts(description, of), do: from)
 
   def shows?(route, _description, kind), do: kind == kind_of(route)
 
@@ -370,7 +372,17 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def reads({:list, kind}, _), do: [{kind, %{}}]
+  # A kind whose rows count what points at it (`counts`) also reads, plainly, every fact of
+  # each kind those relations start at.
+  def reads({:list, kind}, description),
+    do: [
+      {kind, %{}}
+      | for(
+          {_relation, from, _text} <- counts(description, kind),
+          do: {from, %{"linked" => %{}, "plain" => true}}
+        )
+    ]
+
   def reads({:new, _}, _), do: []
   def reads({:new, _, _}, _), do: []
 
@@ -411,6 +423,16 @@ defmodule AtlasControl.Pages do
 
   def reads(:unknown, _), do: []
   def reads(:kinds, _), do: []
+
+  # What a list row of `kind` counts (`counts` in the description: relation, text with
+  # {count}): `[{relation, from, text}]`, one per kind the relation starts at.
+  defp counts(description, kind) do
+    for %{"relation" => relation, "text" => text} <-
+          get_in(description, ["entities", kind, "counts"]) || [],
+        kind in (get_in(description, ["relations", relation, "to"]) || []),
+        from <- get_in(description, ["relations", relation, "from"]) || [],
+        do: {relation, from, text}
+  end
 
   @doc """
   The relations marked `component` that start at `kind` (`rela/atlas.json`): the one fact
@@ -649,12 +671,14 @@ defmodule AtlasControl.Pages do
     ])
   end
 
-  defp page({:list, kind}, kind, spec, description, [answer], _form) do
+  defp page({:list, kind}, kind, spec, description, [answer | count_answers], _form) do
     # The only top kind's list is the start page; there is nothing to go back to.
     start? = top_kinds(description) == [kind]
 
     case answer do
       %{"facts" => facts} ->
+        counted = counted(description, kind, count_answers)
+
         rows =
           facts
           |> sort_facts(spec)
@@ -662,7 +686,7 @@ defmodule AtlasControl.Pages do
             Blocks.row(
               id: fact["key"],
               label: label(spec, fact),
-              detail: detail(description, spec, fact),
+              detail: join_detail(detail(description, spec, fact), counted.(fact["key"])),
               to: path({:item, kind, fact["key"]}),
               links: links(description, spec, fact)
             )
@@ -1893,6 +1917,36 @@ defmodule AtlasControl.Pages do
       parts -> Enum.join(parts, " · ")
     end
   end
+
+  # For a key, its row's counts as text ("3 assigned"), from the answers to the reads
+  # `counts/2` adds: the facts of each kind that point at it through the relation, added up
+  # over those kinds. A count whose read failed is left out, never shown as 0.
+  defp counted(description, kind, answers) do
+    found =
+      description
+      |> counts(kind)
+      |> Enum.zip(answers)
+      |> Enum.group_by(fn {{relation, _from, text}, _} -> {relation, text} end, &elem(&1, 1))
+      |> Enum.flat_map(fn {{relation, text}, answers} ->
+        if Enum.all?(answers, &match?(%{"facts" => _}, &1)),
+          do: [{relation, text, Enum.flat_map(answers, & &1["facts"])}],
+          else: []
+      end)
+
+    fn key ->
+      texts =
+        for {relation, text, facts} <- found do
+          n = Enum.count(facts, &(key in (get_in(&1, ["links", relation]) || [])))
+          String.replace(text, "{count}", Integer.to_string(n))
+        end
+
+      if texts == [], do: nil, else: Enum.join(texts, " · ")
+    end
+  end
+
+  defp join_detail(nil, more), do: more
+  defp join_detail(detail, nil), do: detail
+  defp join_detail(detail, more), do: detail <> " · " <> more
 
   defp progress_text(%{"label" => label, "count" => count, "of" => of}),
     do: "#{label} · #{count}/#{of}"
