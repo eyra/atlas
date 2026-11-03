@@ -89,6 +89,7 @@ defmodule AtlasFlow.FakeState do
        sent: [],
        reads: {0, 0},
        position: 0,
+       busy: MapSet.new(),
        description: Keyword.get(opts, :description, description())
      }}
   end
@@ -107,6 +108,13 @@ defmodule AtlasFlow.FakeState do
   def handle_call({:drop, kind, key}, _from, s),
     do: {:reply, :ok, %{s | facts: Map.delete(s.facts, {kind, key})}}
 
+  # A read of this fact gets State's answer when it could not read it, until `{:free, …}`.
+  def handle_call({:busy, kind, key}, _from, s),
+    do: {:reply, :ok, %{s | busy: MapSet.put(s.busy, {kind, key})}}
+
+  def handle_call({:free, kind, key}, _from, s),
+    do: {:reply, :ok, %{s | busy: MapSet.delete(s.busy, {kind, key})}}
+
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do
     s = if flow?(e.sender), do: %{s | reads: count(s.reads, content)}, else: s
@@ -117,7 +125,9 @@ defmodule AtlasFlow.FakeState do
           %{"description" => s.description}
 
         {kind, %{"key" => key}} ->
-          %{"fact" => s.facts[{kind, key}]}
+          if MapSet.member?(s.busy, {kind, key}),
+            do: %{"error" => "State did not answer"},
+            else: %{"fact" => s.facts[{kind, key}]}
 
         {kind, %{"linked" => linked}} ->
           facts =
