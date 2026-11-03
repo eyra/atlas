@@ -132,6 +132,18 @@ defmodule AtlasBusTest do
     assert {:error, :not_an_envelope} = AtlasBus.send(%{id: "1"}, %{})
   end
 
+  test "a prod Bus refuses test messages, and never drops a hint", c do
+    Application.put_env(:atlas_bus, :environment, "prod")
+    on_exit(fn -> Application.put_env(:atlas_bus, :environment, "test") end)
+    sender = endpoint(c.sender)
+
+    assert {:error, {:other_environment, "test"}} =
+             send_from(sender, Envelope.new("fact", "thing", environment: "test"))
+
+    assert :ok = send_from(sender, Envelope.new("fact", "thing"))
+    assert {:error, :prod} = AtlasBus.drop_hints(1)
+  end
+
   test "a dropped hint still acknowledges the sender", c do
     store = endpoint(c.store)
     sender = endpoint(c.sender)

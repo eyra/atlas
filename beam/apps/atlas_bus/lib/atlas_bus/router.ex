@@ -41,8 +41,11 @@ defmodule AtlasBus.Router do
     end
   end
 
-  def drop_hints(count) when is_integer(count) and count >= 0,
-    do: GenServer.call(__MODULE__, {:drop_hints, count})
+  def drop_hints(count) when is_integer(count) and count >= 0 do
+    if AtlasBus.environment() == "prod",
+      do: {:error, :prod},
+      else: GenServer.call(__MODULE__, {:drop_hints, count})
+  end
 
   @impl true
   def init(:ok), do: {:ok, %{drop_hints: 0}}

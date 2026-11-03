@@ -5,7 +5,7 @@ What you can do: in a use case, add, open, change and remove issues. A second TU
 ## Start
 
 ```sh
-atlas tui
+atlas tui --env test
 ```
 
 Run it again in a second terminal for TUI 2 (see `docs/guides/uc-atlas-01.md` for what it starts).

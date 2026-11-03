@@ -1,8 +1,9 @@
 defmodule AtlasE2E.Instance do
   @moduledoc """
-  A private Atlas test instance for one run (always `--env test`, never the default): a fresh, empty rela dataset on free ports,
-  and the core, both started with the `atlas` command through `ATLAS_ENV_FILE`. It never
-  uses the ports or data of `env/test.json` (Melle's instance) or the live store.
+  A private Atlas test instance for one run: a fresh, empty rela dataset on free ports,
+  and the core, both started with the `atlas` command through `ATLAS_ENV_FILE`, always
+  with `--env test`. It never uses the ports or data of `env/test.json` or
+  `env/prod.json` (Melle's instances) or the live store.
 
   rela's binaries are shared between runs (`ATLAS_E2E_RELA_BIN`, by default the test
   instance's `~/.local/share/atlas/test/bin`); `rela/scripts/start-test.sh` downloads the

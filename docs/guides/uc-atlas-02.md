@@ -2,7 +2,7 @@
 
 What you can do: in a scene, add, open, change and remove use cases. A second TUI shows each change without refreshing.
 
-Start: `atlas tui` in one terminal, and again in a second one (see `docs/guides/uc-atlas-01.md`).
+Start: `atlas tui --env test` in one terminal, and again in a second one (see `docs/guides/uc-atlas-01.md`).
 
 ## Try
 

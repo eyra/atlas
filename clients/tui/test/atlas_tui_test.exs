@@ -80,6 +80,16 @@ defmodule AtlasTuiTest do
     assert Keys.parse("\e[H\e[F\e[1~\e[4~") == {[:home, :end, :home, :end], ""}
   end
 
+  test "the header names the environment; prod stands out in white on red" do
+    ansi = fn env ->
+      env |> Model.new() |> View.render(90, 20, 5) |> View.to_ansi() |> IO.iodata_to_binary()
+    end
+
+    assert ansi.("prod") =~ "\e[0;1;97;41m Atlas · prod"
+    assert ansi.("test") =~ "\e[0;1m Atlas · test"
+    refute ansi.("test") =~ "41m"
+  end
+
   test "an unknown or broken block becomes a fallback, and the rest still renders" do
     assert %Blocks.Fallback{type: "chart"} = Blocks.decode(%{"type" => "chart", "props" => %{}})
 
