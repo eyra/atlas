@@ -11,10 +11,12 @@
 #   atlas where        the folder the build comes from
 #   atlas install      link `atlas` into ~/.local/bin (from the main clone only)
 #   atlas up           run the core in the foreground (what `atlas` starts in the background)
+#   atlas e2e [uc-atlas-01 ...]  the end-to-end test, on a private instance of its own
 #   atlas rela-status, atlas rela-stop
 #
 # Every command takes --env test, the default; prod is not built yet. ATLAS_ENV_FILE
 # runs a private instance (other ports and data), so an agent's run never meets Melle's.
+# ATLAS_NO_UPDATE=1 keeps `atlas tui` from updating the main clone first.
 set -euo pipefail
 
 # The repository this script lives in, also when it is called through a link.
@@ -24,10 +26,12 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd)"
-usage() { sed -n '2,17p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,19p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
 cmd=tui
 case "${1:-}" in -*|"") ;; *) cmd="$1"; shift ;; esac
+# The end-to-end test makes its own private instance; it never reads env/<env>.json.
+if [ "$cmd" = e2e ]; then cd "$root/e2e" && exec mix atlas.e2e "$@"; fi
 env=test
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,7 +47,12 @@ settings="${ATLAS_ENV_FILE:-$root/env/$env.json}"
 [ -f "$settings" ] || { echo "atlas: no environment '$env' (no $settings)" >&2; exit 1; }
 export ATLAS_ROOT="$root" ATLAS_ENV="$env"
 
-setting() { v="$(plutil -extract "$1" raw -o - "$settings")"; echo "${v/#\~/$HOME}"; }
+# A value from the settings file: plutil on macOS, jq elsewhere (CI).
+setting() {
+  local v
+  if command -v plutil >/dev/null; then v="$(plutil -extract "$1" raw -o - "$settings")"; else v="$(jq -er ".$1" "$settings")"; fi
+  echo "${v/#\~/$HOME}"
+}
 rela_url="$(setting rela.url)"
 port="$(setting control.port)"
 # The rela scripts take their port, data and binaries from these.
@@ -107,6 +116,7 @@ ensure_core() {
 
 # The main clone follows develop: take the newest build before trying it.
 update_build() {
+  [ -z "${ATLAS_NO_UPDATE:-}" ] || return 0
   if [ "$(main_clone)" = "$root" ] && [ "$(git -C "$root" branch --show-current)" = develop ]; then
     git -C "$root" pull --ff-only -q || echo "atlas: could not update develop; trying the build as it is" >&2
   fi
