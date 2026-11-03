@@ -5,13 +5,15 @@ defmodule AtlasFlowTest do
 
   setup do
     Application.put_env(:atlas_bus, :store, "state-#{System.unique_integer([:positive])}")
+
+    # A fresh supervisor for the facts' processes: none is left from another test, and one
+    # killed in an earlier test does not count against the restarts it allows.
+    :ok = Supervisor.terminate_child(AtlasFlow.Root, AtlasFlow.Supervisor)
+    {:ok, _} = Supervisor.restart_child(AtlasFlow.Root, AtlasFlow.Supervisor)
+    # Registry drops a stopped process's name a moment later; till then the engine finds it.
+    eventually(fn -> Registry.count(AtlasFlow.Items) == 0 end)
+
     start_supervised!(FakeState)
-
-    on_exit(fn ->
-      for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasFlow.Supervisor),
-          do: DynamicSupervisor.terminate_child(AtlasFlow.Supervisor, pid)
-    end)
-
     :ok
   end
 
@@ -148,12 +150,14 @@ defmodule AtlasFlowTest do
     test "the hint of Flow's own write is passed over; a walk up reads plainly" do
       FakeState.put("box", %{"key" => "B-1", "progress" => %{"value" => "check"}})
       FakeState.put("crate", %{"key" => "C-1", "links" => %{"in_box" => ["B-1"]}})
-      engine()
+      server = engine()
       eventually(fn -> FakeState.get("box", "B-1")["values"]["todo"] == "Check it" end)
-      Process.sleep(150)
+      # The write was Flow's last read or write; the engine has its hint by now.
+      _ = :sys.get_state(server)
       {settled, _} = FakeState.reads()
 
-      # Flow's own write came back as a hint: nothing read again for it.
+      # Flow's own write came back as a hint: nothing read again for it, not even after a
+      # poke's settle time (50 ms).
       Process.sleep(150)
       assert {^settled, _} = FakeState.reads()
 
