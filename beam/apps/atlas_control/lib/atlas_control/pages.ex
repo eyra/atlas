@@ -11,9 +11,14 @@ defmodule AtlasControl.Pages do
   | `/k/<kind>`               | list of facts of a kind                           |
   | `/k/<kind>/new`           | form to create one                                |
   | `/k/<kind>/new/<rel>/<p>` | form to create one that points at `p` via `rel`   |
+  | `/k/<kind>/new/_parent/<p>` | the same, for a client that knows only `p`: `rel` |
+  |                           | is the kind's one at-most-one relation (`resolve/2`) |
+  | `/k/_/<key>` (and `/edit`, `/delete`) | one fact, for a client that knows only its key: |
+  |                           | the kind whose id prefix it has (`resolve/2`)     |
   | `/k/<kind>/<key>`         | one fact, with a list per relation pointing at it |
   | `/k/<kind>/<key>/edit`    | form to change it                                 |
   | `/k/<kind>/<key>/delete`  | confirm deleting it, or why it cannot be deleted  |
+  | `/_kinds`                 | every kind: what a create asks, its id, its parent, its fields |
 
   A top kind is one that does not belong to a parent: it is not the `from` of a relation
   with `max_outgoing: 1`. Kinds that belong to a parent are reached through it: a fact's
@@ -28,6 +33,7 @@ defmodule AtlasControl.Pages do
   # Routes
 
   def route("/"), do: :home
+  def route("/_kinds"), do: :kinds
 
   def route(path) do
     case path |> String.trim_leading("/") |> String.split("/") |> Enum.map(&URI.decode/1) do
@@ -41,6 +47,58 @@ defmodule AtlasControl.Pages do
     end
   end
 
+  @doc """
+  A route as the description makes it concrete, for a client that knows only keys, such
+  as an agent:
+
+  - `_parent` in place of a relation (`/k/<kind>/new/_parent/<p>`) becomes the relation
+    by which the kind belongs to a parent (its one relation with `max_outgoing: 1`).
+  - `_` in place of a kind (`/k/_/<key>`, `.../edit`, `.../delete`) becomes the kind
+    whose id prefix the key has; the longest prefix wins.
+
+  When the description gives no single answer, the page does not exist.
+  """
+  def resolve({:new, kind, {"_parent", parent}}, description) do
+    case parent_relations(description, kind) do
+      [relation] -> {:new, kind, {relation, parent}}
+      _ -> :unknown
+    end
+  end
+
+  def resolve({page, "_", key}, description) when page in [:item, :edit, :delete] do
+    case kind_of_key(description, key) do
+      nil -> :unknown
+      kind -> {page, kind, key}
+    end
+  end
+
+  def resolve(route, _description), do: route
+
+  defp kind_of_key(description, key) do
+    matches =
+      for {kind, spec} <- description["entities"] || %{},
+          prefix <- [create_rule(spec).prefix | spec["id_prefixes"] || []],
+          prefix not in [nil, ""] and String.starts_with?(key, prefix),
+          do: {String.length(prefix), kind}
+
+    case matches |> Enum.uniq() |> Enum.sort(:desc) do
+      [{longest, kind} | rest] ->
+        if Enum.any?(rest, fn {length, other} -> length == longest and other != kind end),
+          do: nil,
+          else: kind
+
+      [] ->
+        nil
+    end
+  end
+
+  defp parent_relations(description, kind) do
+    for {relation, %{"max_outgoing" => 1} = spec} <- Enum.sort(description["relations"] || %{}),
+        kind in (spec["from"] || []),
+        do: relation
+  end
+
+  def path(:kinds), do: "/_kinds"
   def path({:list, kind}), do: "/k/#{enc(kind)}"
   def path({:new, kind}), do: "/k/#{enc(kind)}/new"
 
@@ -56,6 +114,7 @@ defmodule AtlasControl.Pages do
   @doc "The kind a route is about."
   def kind_of(:home), do: :all
   def kind_of(:unknown), do: nil
+  def kind_of(:kinds), do: nil
   def kind_of(route), do: elem(route, 1)
 
   @doc "Whether a hint of `kind` can change what `route` shows."
@@ -100,6 +159,7 @@ defmodule AtlasControl.Pages do
 
   def reads({_, kind, key}, _), do: [{kind, %{"key" => key}}]
   def reads(:unknown, _), do: []
+  def reads(:kinds, _), do: []
 
   def top_kinds(description) do
     children =
@@ -123,6 +183,49 @@ defmodule AtlasControl.Pages do
       [kind] -> %{render({:list, kind}, description, answers, form) | back: nil}
       kinds -> home(description, kinds)
     end
+  end
+
+  # What a client can create and where, for one that has no screen to find out on, such
+  # as an agent (`atlas help`): one item per kind, from the description alone.
+  def render(:kinds, description, [], _form) do
+    entities = description["entities"] || %{}
+
+    items =
+      for {kind, spec} <- Enum.sort(entities) do
+        rule = create_rule(spec)
+
+        parents =
+          for relation <- parent_relations(description, kind),
+              do: parent_of(description, relation)
+
+        children = for {_relation, from, _} <- child_relations(description, kind), do: from
+
+        fields =
+          for {name, prop} <- ordered(spec), do: "#{name}: #{field_text(prop, name in rule.ask)}"
+
+        {"kind:#{kind}",
+         Blocks.item(
+           title: "#{singular(spec, kind)} (#{kind})",
+           fields: [
+             Blocks.pair(label: "Kind", value: kind),
+             Blocks.pair(label: "About", value: String.trim(spec["description"] || "")),
+             Blocks.pair(label: "Create asks", value: Enum.join(rule.ask, ", ")),
+             Blocks.pair(label: "Id", value: id_text(spec, rule)),
+             Blocks.pair(
+               label: "Belongs under",
+               value:
+                 if(parents == [], do: "nothing; a top kind", else: Enum.join(parents, " or "))
+             ),
+             Blocks.pair(
+               label: "Has under it",
+               value: if(children == [], do: "nothing", else: Enum.join(children, ", "))
+             ),
+             Blocks.pair(label: "Fields", value: Enum.join(fields, "\n"))
+           ]
+         )}
+      end
+
+    page("Kinds", "/", items)
   end
 
   def render(route, description, answers, form) do
@@ -617,6 +720,40 @@ defmodule AtlasControl.Pages do
 
   # A field a person may set; not one only a connector or the system fills.
   defp settable?(prop), do: not Map.has_key?(prop, "set_by")
+
+  defp parent_of(description, relation),
+    do: description |> get_in(["relations", relation, "to"]) |> List.wrap() |> Enum.join(" or ")
+
+  defp id_text(spec, rule) do
+    case get_in(spec, ["create", "id"]) do
+      %{"from" => from, "template" => template} ->
+        "made from #{from}: #{template}"
+
+      _ ->
+        "made: #{rule.prefix} and the next number (#{rule.prefix}#{String.duplicate("N", rule.digits)})"
+    end
+  end
+
+  defp field_text(prop, asked?) do
+    what =
+      cond do
+        is_list(prop["values"]) -> "one of " <> Enum.join(prop["values"], ", ")
+        prop["type"] == "boolean" -> "true or false"
+        prop["type"] == "integer" -> "a whole number"
+        prop["multiline"] -> "text of several lines"
+        true -> "text"
+      end
+
+    notes =
+      [
+        prop["required"] && "required",
+        asked? && "asked on create",
+        Map.has_key?(prop, "set_by") && "set by a #{prop["set_by"]}, never in a form"
+      ]
+      |> Enum.filter(& &1)
+
+    Enum.join([what | notes], "; ")
+  end
 
   @doc """
   Turn a form's text values into the described types, for a fact. Unknown names are

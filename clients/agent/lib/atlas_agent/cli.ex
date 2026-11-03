@@ -1,0 +1,230 @@
+defmodule AtlasAgent.CLI do
+  @moduledoc """
+  `atlas put|set|get|list --env <env> ...` (or `mix atlas.agent ...` in clients/agent):
+
+      atlas put  <kind> [--in <key>] --<field> <text> ...  create; prints the new item
+      atlas set  <key> <field>=<text> ...                  change; prints the item
+      atlas get  <key>                                     one item, with what hangs under it
+      atlas list <kind> [--in <key>]                       the items of a kind (under <key>)
+
+  Every command takes --json: it then prints one JSON value on stdout, the item, the
+  list, or `{"refused": [reasons]}` / `{"error": text}`. Without it, short text.
+  A value of `-` is read from stdin; `--<field>-file <path>` (put) and `<field>=@<path>`
+  (set) read it from a file, for text of several lines. Which kinds exist and which
+  fields a form asks for come from Control; a wrong one is answered with what it asks.
+
+  Exit status: 0 done, 1 refused (the reasons also on stderr), 2 a usage or connection
+  error. prod is the default environment, as for `atlas`.
+  """
+
+  def main(args) do
+    {env, args} = take_flag(args, "--env", "prod")
+    {json, args} = take_switch(args, "--json")
+
+    result =
+      with {:ok, command} <- parse(args),
+           {:ok, client} <- AtlasAgent.connect(env) do
+        try do
+          run(command, client)
+        after
+          AtlasAgent.Client.close(client)
+        end
+      end
+
+    show(result, json)
+  end
+
+  # Commands
+
+  # Help asks Control what can be made: the kinds come from rela's description, never
+  # from this code. `atlas help [<kind>]`, `atlas <command> [<kind>] --help`.
+  # `atlas help` prints bin/atlas's own usage first, so only the kinds come from here.
+  defp parse(["help" | rest]), do: {:ok, {:help, List.first(rest), false}}
+
+  defp parse([command | rest]) when command in ~w(put set get list) do
+    if "--help" in rest or "-h" in rest,
+      do:
+        {:ok,
+         {:help, if(command in ~w(put list), do: List.first(rest -- ["--help", "-h"])), true}},
+      else: parse_command([command | rest])
+  end
+
+  defp parse(_), do: {:error, usage()}
+
+  defp parse_command(["put", kind | rest]) do
+    {parent, rest} = take_flag(rest, "--in", nil)
+    with {:ok, values} <- options(rest, %{}), do: {:ok, {:put, kind, values, parent}}
+  end
+
+  defp parse_command(["set", key | assignments]) when assignments != [] do
+    with {:ok, values} <- assignments(assignments, %{}), do: {:ok, {:set, key, values}}
+  end
+
+  defp parse_command(["get", key]), do: {:ok, {:get, key}}
+
+  defp parse_command(["list", kind | rest]) do
+    case take_flag(rest, "--in", nil) do
+      {parent, []} -> {:ok, {:list, kind, parent}}
+      {_, more} -> {:error, "unexpected #{Enum.join(more, " ")}\n" <> usage()}
+    end
+  end
+
+  defp parse_command(_), do: {:error, usage()}
+
+  # A write answers with the item as it is now stored.
+  defp run({:put, kind, values, parent}, client),
+    do: client |> AtlasAgent.put(kind, values, parent) |> then_get(client)
+
+  defp run({:set, key, values}, client),
+    do: client |> AtlasAgent.set(key, values) |> then_get(client)
+
+  defp run({:get, key}, client), do: client |> AtlasAgent.get(key) |> as(:item)
+
+  defp run({:help, kind, usage?}, client) do
+    with {:ok, kinds} <- AtlasAgent.kinds(client) do
+      chosen = if kind, do: Enum.filter(kinds, &(&1["kind"] == kind)), else: kinds
+
+      if kind && chosen == [] do
+        names = Enum.map_join(kinds, ", ", & &1["kind"])
+        {:error, "Atlas has no kind #{inspect(kind)}; it has #{names}"}
+      else
+        {:help, chosen, usage?}
+      end
+    end
+  end
+
+  defp run({:list, kind, parent}, client),
+    do: client |> AtlasAgent.list(kind, parent) |> as(:list)
+
+  defp then_get({:ok, key}, client), do: client |> AtlasAgent.get(key) |> as(:item)
+  defp then_get(other, _client), do: other
+
+  defp as({:ok, value}, what), do: {what, value}
+  defp as(other, _what), do: other
+
+  # Output
+
+  defp show({:item, item}, true), do: json(item, 0)
+  defp show({:list, rows}, true), do: json(rows, 0)
+  defp show({:help, kinds, _usage?}, true), do: json(kinds, 0)
+  defp show({:help, kinds, usage?}, false), do: IO.puts(help(kinds, usage?)) && 0
+  defp show({:item, item}, false), do: IO.puts(text(item)) && 0
+
+  defp show({:list, rows}, false) do
+    Enum.each(rows, &IO.puts("#{&1["key"]}  #{&1["label"]}"))
+    0
+  end
+
+  defp show({:refused, reasons}, json?) do
+    IO.puts(:stderr, "refused: " <> Enum.join(reasons, "; "))
+    if json?, do: json(%{"refused" => reasons}, 1), else: 1
+  end
+
+  defp show({:error, text}, json?) do
+    IO.puts(:stderr, "atlas: " <> text)
+    if json?, do: json(%{"error" => text}, 2), else: 2
+  end
+
+  defp json(value, status) do
+    IO.puts(JSON.encode!(value))
+    status
+  end
+
+  defp text(item) do
+    fields =
+      Enum.map(item["fields"], fn [label, value] ->
+        case String.split(value || "", "\n") do
+          [line] ->
+            "  #{label}: #{line}"
+
+          lines ->
+            "  #{label}:\n" <> Enum.map_join(lines, "\n", &String.trim_trailing("    " <> &1))
+        end
+      end)
+
+    lists =
+      Enum.map(item["lists"], fn list ->
+        rows = Enum.map(list["rows"], &"  #{&1["key"]}  #{&1["label"]}")
+        rows = if rows == [], do: ["  (none)"], else: rows
+        Enum.join(["#{list["title"] || "Under it"}:" | rows], "\n")
+      end)
+
+    Enum.join([item["title"] | fields] ++ lists, "\n")
+  end
+
+  defp help(kinds, usage?) do
+    sections =
+      for kind <- kinds do
+        fields =
+          Enum.map(kind["fields"], fn [label, value] ->
+            case String.split(value || "", "\n") do
+              [line] -> "  #{label}: #{line}"
+              lines -> "  #{label}:\n" <> Enum.map_join(lines, "\n", &("    " <> &1))
+            end
+          end)
+
+        Enum.join([kind["title"] | fields], "\n")
+      end
+
+    heading = "Kinds (from rela's description, through Control):"
+    Enum.join(if(usage?, do: [usage(), heading], else: [heading]) ++ sections, "\n\n")
+  end
+
+  # Arguments
+
+  defp take_flag(args, flag, default) do
+    case Enum.split_while(args, &(&1 != flag and not String.starts_with?(&1, flag <> "="))) do
+      {before, [^flag, value | rest]} -> {value, before ++ rest}
+      {before, [arg | rest]} -> {String.replace_prefix(arg, flag <> "=", ""), before ++ rest}
+      {args, []} -> {default, args}
+    end
+  end
+
+  defp take_switch(args, switch), do: {switch in args, List.delete(args, switch)}
+
+  defp options(["--" <> name, value | rest], values) do
+    case String.split(name, ~r/-file$/) do
+      [field, ""] ->
+        with {:ok, text} <- read_file(value), do: options(rest, Map.put(values, field, text))
+
+      [field] ->
+        with {:ok, text} <- read(value), do: options(rest, Map.put(values, field, text))
+    end
+  end
+
+  defp options([], values), do: {:ok, values}
+
+  defp options(args, _values),
+    do: {:error, "expected --<field> <text>, got #{Enum.join(args, " ")}"}
+
+  defp assignments([assignment | rest], values) do
+    case String.split(assignment, "=", parts: 2) do
+      [field, "@" <> path] ->
+        with {:ok, text} <- read_file(path), do: assignments(rest, Map.put(values, field, text))
+
+      [field, value] when field != "" ->
+        with {:ok, text} <- read(value), do: assignments(rest, Map.put(values, field, text))
+
+      _ ->
+        {:error, "expected <field>=<text>, got #{assignment}"}
+    end
+  end
+
+  defp assignments([], values), do: {:ok, values}
+
+  defp read("-"), do: {:ok, :stdio |> IO.read(:eof) |> eof() |> String.trim_trailing("\n")}
+  defp read(value), do: {:ok, value}
+
+  defp eof(:eof), do: ""
+  defp eof(text) when is_binary(text), do: text
+
+  # A relative path is the caller's, not this project's folder `atlas` runs it from.
+  defp read_file(path) do
+    case path |> Path.expand(AtlasAgent.caller_cwd()) |> File.read() do
+      {:ok, text} -> {:ok, String.trim_trailing(text, "\n")}
+      {:error, reason} -> {:error, "cannot read #{path}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  defp usage, do: @moduledoc |> String.split("\n\n") |> Enum.at(1) |> String.trim_trailing()
+end

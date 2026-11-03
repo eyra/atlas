@@ -7,14 +7,16 @@ defmodule AtlasBus.BoundaryTest do
      Checked three ways: the umbrella dependencies in each layer's mix.exs, the remote
      calls in each layer's compiled code, and the module names in its source.
   2. Nothing outside rela's description knows an entity: no source of the Bus, State,
-     Control or the TUI names one. Entities live in `rela/schema.yaml` only.
+     Control or a client (the TUI, the agents' command line) names one. Entities live in
+     `rela/schema.yaml` only.
   """
   use ExUnit.Case, async: true
 
   @root Path.expand("../../../..", __DIR__)
 
   @layers %{atlas_bus: "AtlasBus", atlas_state: "AtlasState", atlas_control: "AtlasControl"}
-  @client {"clients/tui", "AtlasTui"}
+  # Clients of Control: the TUI, and the command line agents drive Atlas with.
+  @clients [{"clients/tui", "AtlasTui"}, {"clients/agent", "AtlasAgent"}]
 
   # Names of the entities rela describes today. Extend it when rela describes more.
   @entities ~r/\b(scenes?|use[ _-]?cases?|issues?|pull[ _-]?requests?)\b/i
@@ -117,7 +119,7 @@ defmodule AtlasBus.BoundaryTest do
     end
 
     test "no layer or client names another layer in its source" do
-      dirs = Enum.map(@layers, fn {app, ns} -> {"beam/apps/#{app}", ns} end) ++ [@client]
+      dirs = Enum.map(@layers, fn {app, ns} -> {"beam/apps/#{app}", ns} end) ++ @clients
 
       for {dir, own} <- dirs, file <- sources(dir, own) do
         names = foreign_names(File.read!(file), own)
@@ -127,8 +129,8 @@ defmodule AtlasBus.BoundaryTest do
       end
     end
 
-    test "nothing on the BEAM side or in the TUI names an entity" do
-      dirs = Enum.map(@layers, fn {app, ns} -> {"beam/apps/#{app}", ns} end) ++ [@client]
+    test "nothing on the BEAM side or in a client names an entity" do
+      dirs = Enum.map(@layers, fn {app, ns} -> {"beam/apps/#{app}", ns} end) ++ @clients
       files = Enum.flat_map(dirs, fn {dir, own} -> sources(dir, own) end)
       assert Path.join(@root, "spec/contract/lib/blocks.ex") in files
       assert length(files) > 20

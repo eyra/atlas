@@ -108,4 +108,12 @@ Control to client:
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |
 
-Paths are Control's own (`/`, `/k/<kind>`, `/k/<kind>/new`, `/k/<kind>/<key>`, `.../edit`, `.../delete`); a client only follows them.
+Paths are Control's own (`/`, `/k/<kind>`, `/k/<kind>/new`, `/k/<kind>/<key>`, `.../edit`, `.../delete`); a client with a screen only follows them.
+
+A client without a screen, such as the agents' command line (`clients/agent`), knows only codes. Three paths are for such a client, and Control works out the rest from rela's description:
+
+- `/k/_/<key>` (and `/edit`, `/delete`): the fact with that key. Its kind is the one whose id prefix the key has.
+- `/k/<kind>/new/_parent/<key>`: the create form under the fact with that key, through the kind's one at-most-one relation.
+- `/_kinds`: one `item` per kind, with what a create asks, how its id is made, what it belongs under, what hangs under it and its fields.
+
+The page Control answers has the concrete path, such as `/k/issue/IS-Atlas-01`.

@@ -57,6 +57,44 @@ defmodule AtlasE2E.Scenario do
 
   def type(tui, text), do: Tui.type(tui, text)
 
+  # The command line
+
+  @doc """
+  Run `atlas <args> --env test` on the private instance, as an agent would, with
+  `input` on stdin. Returns `{stdout, exit status, at}`; `at` is for `by_hint/3`: its
+  1 second starts when the command has answered (it answers once State stored).
+  """
+  def atlas(instance, args, input \\ "") do
+    clock = clock()
+    stdin = Path.join(instance.dir, "stdin-#{System.unique_integer([:positive])}")
+    File.write!(stdin, input)
+
+    {out, status} =
+      System.cmd(
+        "sh",
+        ["-c", ~s|exec "$0" "$@" < "#{stdin}"|, Path.join(instance.root, "bin/atlas")] ++
+          args ++ ["--env", "test"],
+        env: instance.env,
+        cd: instance.dir
+      )
+
+    File.rm(stdin)
+    {out, status, %{ms: now(), clock: clock}}
+  end
+
+  @doc "`atlas/3` with `--json`, decoded; fails the step on another exit status than `status`."
+  def atlas_json(instance, args, status \\ 0, input \\ "") do
+    {out, got, at} = atlas(instance, args ++ ["--json"], input)
+
+    if got != status,
+      do:
+        raise(Failure,
+          message: "atlas #{Enum.join(args, " ")} exited #{got}, not #{status}: #{out}"
+        )
+
+    {JSON.decode!(out), at}
+  end
+
   # Seeing
 
   @doc "Wait until the screen matches (a string or a regex); returns the screen."
