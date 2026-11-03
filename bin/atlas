@@ -9,6 +9,7 @@
 #   atlas status       what runs, and which build
 #   atlas logs         follow the core's log
 #   atlas where        the folder the build comes from
+#   atlas main-clone   the main clone, which `atlas tui` updates to the newest develop
 #   atlas env          the environment a command works on, and its settings file
 #   atlas install      link `atlas` into ~/.local/bin (from the main clone only)
 #   atlas up           run the core in the foreground (what `atlas` starts in the background)
@@ -28,8 +29,8 @@ while [ -L "$src" ]; do
   target="$(readlink "$src")"
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
-root="$(cd "$(dirname "$src")/.." && pwd)"
-usage() { sed -n '2,22p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+root="$(cd "$(dirname "$src")/.." && pwd -P)"
+usage() { sed -n '2,23p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
 no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
 
@@ -147,8 +148,13 @@ update_build() {
   fi
 }
 
-# The repository's main clone (not a worktree of it).
-main_clone() { (cd "$(git -C "$root" rev-parse --git-common-dir)/.." && pwd); }
+# The repository's main clone (not a worktree of it). git answers an absolute path, so
+# this works from any folder, also from / or from inside another repository.
+main_clone() {
+  local common
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  (cd "$common/.." && pwd -P)
+}
 
 case "$cmd" in
   tui)
@@ -193,6 +199,7 @@ case "$cmd" in
     ;;
   logs) exec tail -f "$log" ;;
   where) echo "$root" ;;
+  main-clone) main_clone ;;
   env) echo "$env $settings" ;;
   install)
     # Only the main clone: a worktree goes away, and its build is not develop.
