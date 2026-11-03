@@ -16,6 +16,48 @@ defmodule AtlasState.Description do
   end
 
   @doc """
+  The links a new fact of `kind` asks for (`%{relation => [keys]}`), checked against the
+  description and resolved to `%{relation => {target kind, keys}}` for rela.
+  """
+  def targets(description, kind, links) when is_map(links) do
+    relations = description["relations"] || %{}
+
+    Enum.reduce(links, {:ok, %{}}, fn {relation, keys}, acc ->
+      spec = relations[relation]
+
+      problem =
+        cond do
+          spec == nil ->
+            "#{relation} is not described"
+
+          kind not in (spec["from"] || []) ->
+            "#{relation} does not start at #{kind}"
+
+          not (is_list(keys) and Enum.all?(keys, &(is_binary(&1) and &1 != ""))) ->
+            "#{relation} needs a list of keys"
+
+          length(spec["to"] || []) != 1 ->
+            "#{relation} has no single kind to point at"
+
+          is_integer(spec["max_outgoing"]) and length(keys) > spec["max_outgoing"] ->
+            "#{relation} allows at most #{spec["max_outgoing"]}"
+
+          true ->
+            nil
+        end
+
+      case {acc, problem} do
+        {{:ok, targets}, nil} -> {:ok, Map.put(targets, relation, {hd(spec["to"]), keys})}
+        {{:ok, _}, problem} -> {:error, [problem]}
+        {{:error, problems}, nil} -> {:error, problems}
+        {{:error, problems}, problem} -> {:error, problems ++ [problem]}
+      end
+    end)
+  end
+
+  def targets(_description, _kind, _links), do: {:error, ["links must be a map"]}
+
+  @doc """
   Check `values` against the description of `kind` before rela sees them, because the
   current rela stores invalid values and only warns. `mode` is `:create` or `:change`.
   `nil` clears an optional value.

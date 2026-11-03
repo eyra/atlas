@@ -36,6 +36,7 @@ defmodule AtlasControl.FakeStore do
       },
       "relations" => %{
         "of_widget" => %{
+          "label" => "of widget",
           "from" => ["part"],
           "to" => ["widget"],
           "max_outgoing" => 1,
@@ -46,22 +47,22 @@ defmodule AtlasControl.FakeStore do
   end
 
   def start_link(_), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
-  def put(key, values), do: GenServer.call(__MODULE__, {:put, key, values})
-  def link(part, widget), do: GenServer.call(__MODULE__, {:link, part, widget})
+
+  def put(key, values, kind \\ "widget", links \\ %{}),
+    do: GenServer.call(__MODULE__, {:put, kind, key, values, links})
+
+  def link(part, widget), do: put(part, %{"title" => part}, "part", %{"of_widget" => [widget]})
   def silent(on?), do: GenServer.call(__MODULE__, {:silent, on?})
 
   @impl true
   def init(:ok) do
     :ok = AtlasBus.attach(AtlasBus.store())
-    {:ok, %{facts: %{}, links: %{}, position: 0, silent: false}}
+    {:ok, %{facts: %{}, position: 0, silent: false}}
   end
 
   @impl true
-  def handle_call({:put, key, values}, _from, s),
-    do: {:reply, :ok, put_in(s.facts[key], {values, 0})}
-
-  def handle_call({:link, part, widget}, _from, s),
-    do: {:reply, :ok, put_in(s.links[part], widget)}
+  def handle_call({:put, kind, key, values, links}, _from, s),
+    do: {:reply, :ok, put_in(s.facts[{kind, key}], {values, 0, links})}
 
   def handle_call({:silent, on?}, _from, s), do: {:reply, :ok, %{s | silent: on?}}
 
@@ -72,25 +73,40 @@ defmodule AtlasControl.FakeStore do
         {"_description", _} ->
           %{"description" => description()}
 
-        {"widget", %{"key" => key}} ->
-          case s.facts[key] do
+        {kind, %{"key" => key}} ->
+          case s.facts[{kind, key}] do
             nil ->
               %{"fact" => nil}
 
-            {values, n} ->
-              parts = for {part, ^key} <- s.links, do: part
+            {values, n, links} ->
+              incoming =
+                for {relation, %{"to" => to}} <- description()["relations"],
+                    kind in to,
+                    into: %{} do
+                  {relation,
+                   for({{_, k}, {_, _, l}} <- s.facts, key in (l[relation] || []), do: k)}
+                end
 
               %{
-                "fact" => %{"key" => key, "values" => values, "version" => "v#{n}"},
-                "incoming" => %{"of_widget" => parts}
+                "fact" => %{
+                  "key" => key,
+                  "values" => values,
+                  "links" => links,
+                  "version" => "v#{n}"
+                },
+                "incoming" => incoming
               }
           end
 
-        {"widget", _} ->
-          %{
-            "facts" =>
-              for({k, {v, _}} <- s.facts, do: %{"key" => k, "values" => v, "version" => nil})
-          }
+        {kind, content} ->
+          linked = content["linked"] || %{}
+
+          facts =
+            for {{^kind, k}, {v, _, l}} <- Enum.sort(s.facts),
+                Enum.all?(linked, fn {rel, parent} -> parent in (l[rel] || []) end),
+                do: %{"key" => k, "values" => v, "links" => l, "version" => nil}
+
+          %{"facts" => facts}
       end
 
     :ok = AtlasBus.send(Envelope.reply(e, "answer"), Map.put(answer, "position", s.position))
@@ -102,32 +118,32 @@ defmodule AtlasControl.FakeStore do
 
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = e, %{"op" => op, "key" => key} = c}, s) do
     about = %{"op" => op, "key" => key}
+    id = {e.kind, key}
 
-    cond do
-      op == "create" and c["values"]["title"] in [nil, ""] ->
-        :ok =
-          AtlasBus.send(
-            Envelope.reply(e, "refused"),
-            Map.put(about, "reasons", ["title is required"])
-          )
+    if op == "create" and c["values"]["title"] in [nil, ""] do
+      :ok =
+        AtlasBus.send(
+          Envelope.reply(e, "refused"),
+          Map.put(about, "reasons", ["title is required"])
+        )
 
-        {:noreply, s}
+      {:noreply, s}
+    else
+      facts =
+        case op do
+          "delete" ->
+            Map.delete(s.facts, id)
 
-      true ->
-        facts =
-          case op do
-            "delete" ->
-              Map.delete(s.facts, key)
+          "create" ->
+            Map.put(s.facts, id, {c["values"], 0, c["links"] || %{}})
 
-            _ ->
-              Map.update(s.facts, key, {c["values"], 0}, fn {old, n} ->
-                {Map.merge(old, c["values"]), n + 1}
-              end)
-          end
+          "change" ->
+            Map.update!(s.facts, id, fn {old, n, l} -> {Map.merge(old, c["values"]), n + 1, l} end)
+        end
 
-        s = %{s | facts: facts, position: s.position + 1}
-        :ok = AtlasBus.send(Envelope.reply(e, "stored", position: s.position), about)
-        {:noreply, s}
+      s = %{s | facts: facts, position: s.position + 1}
+      :ok = AtlasBus.send(Envelope.reply(e, "stored", position: s.position), about)
+      {:noreply, s}
     end
   end
 end

@@ -56,12 +56,23 @@ defmodule AtlasState.Rela.Http do
   end
 
   @impl true
-  def check_create(base, plural, key, props),
-    do: write(:post, "#{base}/#{plural}?dry_run=true", %{id: key, properties: props})
+  def check_create(base, plural, key, props, targets),
+    do: write(:post, "#{base}/#{plural}?dry_run=true", body(key, props, targets))
 
   @impl true
-  def create(base, plural, key, props),
-    do: write(:post, "#{base}/#{plural}", %{id: key, properties: props})
+  def create(base, plural, key, props, targets),
+    do: write(:post, "#{base}/#{plural}", body(key, props, targets))
+
+  defp body(key, props, targets) when targets == %{}, do: %{id: key, properties: props}
+
+  defp body(key, props, targets) do
+    relations =
+      Map.new(targets, fn {relation, {kind, keys}} ->
+        {relation, %{data: Enum.map(keys, &%{type: kind, id: &1})}}
+      end)
+
+    %{id: key, properties: props, relations: relations}
+  end
 
   @impl true
   def change(base, plural, key, props, version) do
@@ -87,7 +98,12 @@ defmodule AtlasState.Rela.Http do
   defp if_match(version), do: [{"if-match", version}]
 
   defp fact(body, version) do
-    %{key: body["id"], properties: body["properties"] || %{}, version: version}
+    links =
+      for {relation, keys} when is_list(keys) <- body["relations"] || %{},
+          into: %{},
+          do: {relation, keys}
+
+    %{key: body["id"], properties: body["properties"] || %{}, links: links, version: version}
   end
 
   defp warnings(%{"warnings" => warnings}) when is_list(warnings) do
@@ -107,6 +123,10 @@ defmodule AtlasState.Rela.Http do
 
   defp failure({:ok, _status, _body, _}), do: {:error, :unavailable}
   defp failure({:error, _} = error), do: error
+
+  # rela puts a JSON path in `detail` for some refusals; the message is then in `title`.
+  defp problem(%{"detail" => "/" <> _, "title" => title}, _status) when is_binary(title),
+    do: title
 
   defp problem(%{"detail" => detail}, _status) when is_binary(detail), do: detail
   defp problem(%{"title" => title}, _status) when is_binary(title), do: title

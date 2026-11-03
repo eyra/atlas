@@ -22,7 +22,9 @@ defmodule AtlasState.FakeRela do
         },
         "part" => %{"plural" => "parts", "properties" => %{"title" => %{"type" => "string"}}}
       },
-      "relations" => %{"of_widget" => %{"from" => ["part"], "to" => ["widget"]}}
+      "relations" => %{
+        "of_widget" => %{"from" => ["part"], "to" => ["widget"], "max_outgoing" => 1}
+      }
     }
   end
 
@@ -60,8 +62,11 @@ defmodule AtlasState.FakeRela do
   @impl true
   def list(pid, _plural) do
     call(pid, fn s ->
-      {{:ok, for({k, {p, _}} <- Enum.sort(s.facts), do: %{key: k, properties: p, version: nil})},
-       s}
+      facts =
+        for {k, {p, _}} <- Enum.sort(s.facts),
+            do: %{key: k, properties: p, links: links_of(s, k), version: nil}
+
+      {{:ok, facts}, s}
     end)
   end
 
@@ -69,8 +74,11 @@ defmodule AtlasState.FakeRela do
   def get(pid, _plural, key) do
     call(pid, fn s ->
       case s.facts[key] do
-        {p, n} -> {{:ok, %{key: key, properties: p, version: "v#{n}"}}, s}
-        nil -> {{:error, :not_found}, s}
+        {p, n} ->
+          {{:ok, %{key: key, properties: p, links: links_of(s, key), version: "v#{n}"}}, s}
+
+        nil ->
+          {{:error, :not_found}, s}
       end
     end)
   end
@@ -81,18 +89,32 @@ defmodule AtlasState.FakeRela do
   end
 
   @impl true
-  def check_create(pid, _plural, _key, props), do: call(pid, &{{:ok, warnings(props)}, &1})
+  def check_create(pid, _plural, _key, props, _targets),
+    do: call(pid, &{{:ok, warnings(props)}, &1})
 
   @impl true
-  def create(pid, _plural, key, props) do
+  def create(pid, _plural, key, props, targets) do
     call(pid, fn s ->
-      if Map.has_key?(s.facts, key) or key in s.reserved do
-        {{:error, :exists}, s}
-      else
-        {{:ok, warnings(props)}, %{s | facts: Map.put(s.facts, key, {props, s.n}), n: s.n + 1}}
+      cond do
+        Map.has_key?(s.facts, key) or key in s.reserved ->
+          {{:error, :exists}, s}
+
+        Enum.any?(targets, fn {_, {_, keys}} ->
+          Enum.any?(keys, &(not Map.has_key?(s.facts, &1)))
+        end) ->
+          {{:error, {:invalid, ["the fact it points at does not exist"]}}, s}
+
+        true ->
+          links =
+            for {"of_widget", {_, [widget]}} <- targets, into: s.links, do: {key, widget}
+
+          {{:ok, warnings(props)},
+           %{s | facts: Map.put(s.facts, key, {props, s.n}), n: s.n + 1, links: links}}
       end
     end)
   end
+
+  defp links_of(s, key), do: if(w = s.links[key], do: %{"of_widget" => [w]}, else: %{})
 
   @impl true
   def change(pid, _plural, key, props, version) do

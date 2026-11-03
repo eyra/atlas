@@ -67,7 +67,10 @@ defmodule AtlasTui.View do
   end
 
   defp body(%Model{blocks: []}, _width), do: [[], [{:dim, " Waiting for Control…"}]]
-  defp body(model, width), do: Enum.flat_map(model.blocks, &block(&1, model, width))
+
+  defp body(model, width) do
+    model.blocks |> Enum.map(&block(&1, model, width)) |> Enum.intersperse([[]]) |> Enum.concat()
+  end
 
   defp block(%ListBlock{} = list, model, _width) do
     rows =

@@ -45,14 +45,24 @@ defmodule AtlasControl.PagesTest do
     assert [%{"key" => "n", "to" => "/k/widget/new", "label" => "New widget"}] = list["actions"]
   end
 
-  test "an item shows every described property and how many facts hang under it" do
+  test "an item shows every described property, and a list of the facts that point at it" do
     answer = %{
       "fact" => fact("W-1", %{"title" => "One", "shade" => "light"}),
-      "incoming" => %{"of_widget" => ["P-1", "P-2"]}
+      "incoming" => %{"of_widget" => ["P-1"]}
     }
 
-    %{blocks: [%{"type" => "item", "props" => item}]} =
-      Pages.render({:item, "widget", "W-1"}, @d, [answer])
+    parts = %{"facts" => [fact("P-1", %{"title" => "Wheel"})]}
+
+    assert Pages.reads({:item, "widget", "W-1"}, @d) == [
+             {"widget", %{"key" => "W-1"}},
+             {"part", %{"linked" => %{"of_widget" => "W-1"}}}
+           ]
+
+    %{
+      back: "/k/widget",
+      blocks: [%{"type" => "item", "props" => item}, %{"type" => "list", "props" => list}]
+    } =
+      Pages.render({:item, "widget", "W-1"}, @d, [answer, parts])
 
     assert item["title"] == "Widget W-1: One"
 
@@ -61,9 +71,53 @@ defmodule AtlasControl.PagesTest do
              {"Title", "One"},
              {"Shade", "Light"},
              {"Done", "no"},
-             {"Notes", "—"},
-             {"Parts", "2"}
+             {"Notes", "—"}
            ]
+
+    assert list["title"] == "Parts"
+    assert [%{"label" => "Wheel", "to" => "/k/part/P-1"}] = list["rows"]
+
+    assert [%{"label" => "Add part", "key" => "a", "to" => "/k/part/new/of_widget/W-1"}] =
+             list["actions"]
+
+    %{blocks: [_, %{"props" => none}]} =
+      Pages.render({:item, "widget", "W-1"}, @d, [answer, %{"facts" => []}])
+
+    assert none["empty"] == "No parts yet. Press a to add one."
+  end
+
+  test "a fact that points at a parent names it, and goes back and away to it" do
+    part = %{
+      "fact" => %{
+        "key" => "P-1",
+        "values" => %{"title" => "Wheel"},
+        "links" => %{"of_widget" => ["W-1"]},
+        "version" => "v1"
+      }
+    }
+
+    %{back: "/k/widget/W-1", blocks: [%{"props" => item}]} =
+      Pages.render({:item, "part", "P-1"}, @d, [part])
+
+    assert {"Of widget", "W-1"} in Enum.map(item["fields"], &{&1["label"], &1["value"]})
+    assert Pages.after_delete(@d, "part", part) == {:item, "widget", "W-1"}
+    assert Pages.after_delete(@d, "widget", %{"fact" => fact("W-1", %{})}) == {:list, "widget"}
+  end
+
+  test "a form to add a fact under its parent" do
+    route = {:new, "part", {"of_widget", "W-1"}}
+    assert Pages.route("/k/part/new/of_widget/W-1") == route
+    %{back: "/k/widget/W-1", blocks: [%{"props" => form}]} = Pages.render(route, @d, [])
+    assert form["title"] == "New part in W-1"
+    assert form["submit_to"] == "/k/part/new/of_widget/W-1"
+    assert form["cancel_to"] == "/k/widget/W-1"
+  end
+
+  test "a hint of a child kind refreshes its parent's page" do
+    assert Pages.shows?({:item, "widget", "W-1"}, @d, "part")
+    assert Pages.shows?({:item, "widget", "W-1"}, @d, "widget")
+    refute Pages.shows?({:list, "widget"}, @d, "part")
+    refute Pages.shows?({:item, "part", "P-1"}, @d, "gadget")
   end
 
   test "a create form has an id input and an input per property, typed by the description" do

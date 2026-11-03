@@ -90,7 +90,7 @@ defmodule AtlasControl.Session do
 
   # A hint: a fact of some kind was stored, by anyone.
   def handle_info({:atlas_bus, %Envelope{class: "stored"} = envelope, content}, state) do
-    if Pages.kind_of(state.route) in [:all, envelope.kind] do
+    if Pages.shows?(state.route, state.description, envelope.kind) do
       if Pages.form?(state.route) do
         {:noreply,
          notice(
@@ -178,6 +178,21 @@ defmodule AtlasControl.Session do
     put_fact(%{state | route: route, form: %{values: raw}}, kind, content, {:item, kind, key})
   end
 
+  defp submit({:new, kind, {relation, parent}} = route, raw, state) do
+    key = String.trim(raw["_key"] || "")
+    values = Pages.values_for(spec(state, kind), raw)
+
+    content = %{
+      "op" => "create",
+      "key" => key,
+      "values" => values,
+      "version" => nil,
+      "links" => %{relation => [parent]}
+    }
+
+    put_fact(%{state | route: route, form: %{values: raw}}, kind, content, {:item, kind, key})
+  end
+
   defp submit({:edit, kind, key} = route, raw, state) do
     values = Pages.values_for(spec(state, kind), raw)
 
@@ -206,7 +221,13 @@ defmodule AtlasControl.Session do
     case answer do
       %{"fact" => %{"version" => version}} when held == [] ->
         content = %{"op" => "delete", "key" => key, "values" => %{}, "version" => version}
-        put_fact(%{state | route: route}, kind, content, {:list, kind})
+
+        put_fact(
+          %{state | route: route},
+          kind,
+          content,
+          Pages.after_delete(state.description, kind, answer)
+        )
 
       _ ->
         show(state, route, "open", nil)
