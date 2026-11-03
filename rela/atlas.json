@@ -129,6 +129,20 @@
         }
       }
     },
+    "agent": {
+      "top": false,
+      "primary": "name",
+      "create": {
+        "ask": ["name"],
+        "id": {
+          "from": "name",
+          "pattern": "^\\s*([A-Za-z][A-Za-z0-9]*)",
+          "template": "{1}",
+          "lower": true,
+          "error": "name must start with a letter, e.g. Coordinator"
+        }
+      }
+    },
     "pull_request": {
       "primary": "title",
       "create": {

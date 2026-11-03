@@ -32,7 +32,9 @@
 #   atlas load-plan <SCENES.md> <links.json> [--dry-run]   UC-Atlas-05: the plan into Atlas
 #   atlas migrate-completion [--dry-run]     UC-Atlas-32: completion becomes an association;
 #                      after a real run it stops rela, removes the old completed values, starts it
-#                      put, set, get, list, delete, tools, plan, load-plan and migrate-completion go
+#   atlas migrate-owner [--dry-run]          IS-Atlas-52: every fact gets an owner, the coordinator
+#                      agent, one fact each with cause "owner introduced"; --dry-run first
+#                      put, set, get, list, delete, tools, plan, load-plan, migrate-completion and migrate-owner go
 #                      through Control like the TUI, and start nothing: Control must run (`atlas status`).
 #
 # Every command works on prod unless it gets --env test: `atlas tui --env test`. Scripts,
@@ -49,7 +51,7 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
-usage() { sed -n '2,42p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,44p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
 caller="$PWD"
 no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
@@ -65,7 +67,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|help) args+=("$1"); shift ;;
+        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|help) args+=("$1"); shift ;;
         *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
       esac ;;
   esac
@@ -291,7 +293,7 @@ case "$cmd" in
     kind_named=""
     for arg in ${args[@]+"${args[@]}"}; do case "$arg" in -*) ;; *) kind_named=1 ;; esac; done
     if [ "$cmd" = help ] && [ -z "$kind_named" ] && [[ " ${args[*]-} " != *" --json "* ]]; then
-      sed -n '2,42p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
+      sed -n '2,44p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
     fi
     clean_build
     cd "$root/clients/agent"
@@ -303,6 +305,11 @@ case "$cmd" in
     cd "$root/tools/plan"
     mix compile >&2
     ATLAS_CALLER_CWD="$caller" exec mix atlas.load_plan --env "$env" ${args[@]+"${args[@]}"}
+    ;;
+  migrate-owner)
+    cd "$root/tools/plan"
+    mix compile >&2
+    ATLAS_CALLER_CWD="$caller" exec mix atlas.migrate_owner --env "$env" ${args[@]+"${args[@]}"}
     ;;
   migrate-completion)
     (cd "$root/tools/plan" && mix compile >&2 &&
