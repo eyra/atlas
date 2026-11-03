@@ -27,6 +27,8 @@ if config_env() != :test do
 
   config :atlas_state,
     rela_url: settings["rela"]["url"],
+    # On Fly rela has an IPv6 address on the private network only.
+    rela_ipv6: settings["rela"]["ipv6"] == true,
     description_extra: settings["rela"]["extra"] && Path.join(root, settings["rela"]["extra"]),
     data_dir: expand.(settings["state"]["data"]),
     # The connectors at State's edge: only those this environment has settings for.

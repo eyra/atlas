@@ -11,6 +11,10 @@ defmodule AtlasState.Application do
       if Application.get_env(:atlas_state, :start, true) do
         data_dir = Application.fetch_env!(:atlas_state, :data_dir)
 
+        # A rela on a private IPv6 network (Fly): try IPv6 first, IPv4 next.
+        if Application.get_env(:atlas_state, :rela_ipv6),
+          do: :ok = :httpc.set_options(ipfamily: :inet6fb4)
+
         [
           {AtlasState.Server,
            rela: {AtlasState.Rela.Http, Application.fetch_env!(:atlas_state, :rela_url)},
