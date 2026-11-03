@@ -250,7 +250,16 @@ defmodule AtlasE2E.Scenario do
       end
     end)
 
-    see(tui, @first_page)
+    screen = see(tui, @first_page)
+
+    # The user is a person: the start page is what is assigned to them (IS-Atlas-55), and
+    # the scenes are one key away. Scenarios go on from the scenes, as before.
+    if screen =~ "s Scenes" do
+      Tui.keys(tui, ["s"])
+      see(tui, ~r/Atlas · test.*\sScenes$/m)
+    else
+      screen
+    end
   end
 
   @doc """

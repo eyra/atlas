@@ -50,6 +50,10 @@ defmodule AtlasControl.Session do
        pending: %{},
        by: "agent",
        by_kind: nil,
+       # What is assigned to the client, for the header of every page (`start.assigned`):
+       # its words, and whether a hint has made it stale since.
+       count: nil,
+       count_stale: true,
        cause: nil
      }}
   end
@@ -124,6 +128,8 @@ defmodule AtlasControl.Session do
 
   # A hint: a fact of some kind was stored, by anyone.
   def handle_info({:atlas_bus, %Envelope{class: "stored"} = envelope, content}, state) do
+    state = %{state | count_stale: true}
+
     if Pages.shows?(state.route, state.description, envelope.kind) do
       if Pages.form?(state.route) do
         {:noreply,
@@ -575,8 +581,12 @@ defmodule AtlasControl.Session do
   end
 
   defp show(state, route, reason, position, refused \\ nil) do
+    route = start(route, state)
+
     answers =
       Enum.map(Pages.reads(route, state.description), fn {kind, content} -> ask(kind, content) end)
+
+    state = count(state, route, answers)
 
     form = Map.merge(state.form, %{by: state.by, by_kind: state.by_kind})
     page = Pages.render(route, state.description, answers, form)
@@ -609,11 +619,45 @@ defmodule AtlasControl.Session do
         "at" => now()
       }
       |> then(&if(refused, do: Map.put(&1, "refused", refused), else: &1))
+      |> then(&if(state.count, do: Map.put(&1, "count", state.count), else: &1))
     )
 
     %{state | route: route, form: form}
   end
 
+  # `/` for a client that is a fact of a kind the start's relation points at:
+  # what is assigned to it, when the description has such a start page.
+  defp start(:home, state) do
+    if Pages.assigned_start?(state.description, state.by_kind),
+      do: {:assigned, state.by},
+      else: :home
+  end
+
+  defp start(route, _state), do: route
+
+  # The header's count: from the page when it is the start page of assignments, else read
+  # again only after a hint (a fact may have moved to or away from the client).
+  defp count(state, {:assigned, _} = _route, answers),
+    do: %{state | count: Pages.assigned_count(state.description, answers), count_stale: false}
+
+  defp count(%{count_stale: true} = state, _route, _answers) do
+    if Pages.assigned_start?(state.description, state.by_kind) do
+      route = {:assigned, state.by}
+
+      answers =
+        Enum.map(Pages.reads(route, state.description), fn {kind, content} ->
+          ask(kind, content)
+        end)
+
+      count(state, route, answers)
+    else
+      %{state | count: nil, count_stale: false}
+    end
+  end
+
+  defp count(state, _route, _answers), do: state
+
+  defp current_path({:assigned, _}), do: "/"
   defp current_path(:home), do: "/"
   defp current_path(:unknown), do: "/"
   defp current_path(route), do: Pages.path(route)

@@ -918,6 +918,80 @@ defmodule AtlasControl.PagesTest do
            ]
   end
 
+  # A start page of what is assigned to the client (made-up kinds and words).
+  @assigning @d
+             |> put_in(["entities", "keeper"], %{
+               "top" => false,
+               "label" => "Keeper",
+               "plural" => "keepers",
+               "primary" => "title",
+               "properties" => %{"title" => %{"type" => "string"}}
+             })
+             |> put_in(["relations", "kept_by"], %{
+               "from" => ["widget", "part"],
+               "to" => ["keeper"],
+               "max_outgoing" => 1
+             })
+             |> put_in(["entities", "widget", "start"], %{"key" => "s", "label" => "Widgets"})
+             |> Map.put("flows", %{"f" => %{"kinds" => ["widget"], "field" => "shade"}})
+             |> Map.put("start", %{
+               "assigned" => %{
+                 "relation" => "kept_by",
+                 "title" => "Kept by you",
+                 "count" => "{count} kept by you",
+                 "empty" => "Nothing is kept by you."
+               }
+             })
+
+  defp kept(key, title, since, cause, extra \\ %{}) do
+    fact(key, Map.merge(%{"title" => title}, extra))
+    |> Map.put("origins", %{"kept_by" => %{"since" => since, "cause" => cause}})
+  end
+
+  test "a client of a kind the start's relation points at opens on what points at it" do
+    assert Pages.assigned_start?(@assigning, "keeper")
+    refute Pages.assigned_start?(@assigning, nil)
+    refute Pages.assigned_start?(@d, "keeper")
+
+    assert Pages.reads({:assigned, "K-1"}, @assigning) == [
+             {"widget", %{"linked" => %{"kept_by" => "K-1"}}},
+             {"part", %{"linked" => %{"kept_by" => "K-1"}}}
+           ]
+
+    widgets = %{
+      "facts" => [
+        kept("W-1", "Older", "2026-11-03T10:00:00Z", "first", %{"shade" => "dark"}),
+        kept("W-2", "Done", "2026-11-03T12:00:00Z", "done")
+        |> Map.put("completion", %{"done" => true})
+      ]
+    }
+
+    parts = %{"facts" => [kept("P-1", "Newer", "2026-11-03T11:00:00Z", "second")]}
+    answers = [widgets, parts]
+
+    %{title: "Kept by you", back: nil, blocks: [%{"props" => list}]} =
+      Pages.render({:assigned, "K-1"}, @assigning, answers)
+
+    # Newest move first; a completed one is not there; what its flow expects, and why.
+    assert [%{"id" => "P-1", "to" => "/k/part/P-1"}, %{"id" => "W-1"} = older] = list["rows"]
+    assert older["detail"] =~ ~r/^dark · since 3 Nov \d\d:00 · first$/
+    assert [%{"key" => "s", "label" => "Widgets", "to" => "/k/widget"}] = list["actions"]
+    assert Pages.assigned_count(@assigning, answers) == "2 kept by you"
+
+    %{blocks: [%{"props" => empty}]} =
+      Pages.render({:assigned, "K-1"}, @assigning, [%{"facts" => []}, %{"facts" => []}])
+
+    assert empty["rows"] == [] and empty["empty"] == "Nothing is kept by you."
+  end
+
+  test "with a start of assignments, the only top kind's list goes back to it" do
+    answer = %{"facts" => []}
+    assert %{back: nil} = Pages.render({:list, "widget"}, @assigning, [answer], %{by_kind: nil})
+
+    assert %{back: "/"} =
+             Pages.render({:list, "widget"}, @assigning, [answer], %{by_kind: "keeper"})
+  end
+
   test "the kinds page names the kinds that hold a record" do
     %{blocks: blocks} =
       Pages.render(:kinds, put_in(@logged, ["entities", "log", "agent"], "request"), [])
