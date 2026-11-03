@@ -10,5 +10,5 @@
   },
   "state": { "data": "~/.local/share/atlas/prod/beam" },
   "reconcile_seconds": 5,
-  "agent": { "planner": "claude" }
+  "agent": { "planner": "claude", "step_pause_ms": 300 }
 }

@@ -109,7 +109,10 @@ defmodule AtlasTui.Model do
         # A new proposal starts with every step kept, as the agent made it.
         fresh = plan.state == "proposed" and model.plan.state != "proposed"
         steps = if fresh, do: @no_steps, else: model.steps
-        %{model | plan: plan, steps: steps}
+        # "Stopping after this step…" is answered by the plan itself once it ends.
+        over = plan.state in ["done", "stopped", "failed"] and model.plan.state == "running"
+        notice = if over and match?(%{tone: "pending"}, model.notice), do: nil, else: model.notice
+        %{model | plan: plan, steps: steps, notice: notice}
 
       _ ->
         %{model | notice: %{tone: "error", text: "The agent sent a plan this TUI cannot show."}}

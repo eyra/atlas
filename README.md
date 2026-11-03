@@ -17,6 +17,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-04.md`: link the pull requests of an issue (UC-Atlas-04).
 - `docs/guides/uc-atlas-16.md`: the agent's tools, and a plan for a request that writes nothing (UC-Atlas-16).
 - `docs/guides/uc-atlas-17.md`: press `:` on any page, say what you want, and decide on the agent's plan (UC-Atlas-17).
+- `docs/guides/uc-atlas-18.md`: watch the agent's steps go one by one, and stop it with `esc` (UC-Atlas-18).
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
 
 ```sh
