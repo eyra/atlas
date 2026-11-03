@@ -16,7 +16,7 @@ defmodule AtlasControl.Pages do
   | `/k/_/<key>` (and `/edit`, `/delete`) | one fact, for a client that knows only its key: |
   |                           | the kind whose id prefix it has (`resolve/2`)     |
   | `/k/<kind>/<key>`         | one fact, with a list per relation pointing at it |
-  | `/k/<kind>/<key>/edit`    | form to change it                                 |
+  | `/k/<kind>/<key>/edit`    | form to change it, and to move it to another parent |
   | `/k/<kind>/<key>/delete`  | confirm deleting it, or why it cannot be deleted  |
   | `/_kinds`                 | every kind: what a create asks, its id, its parent, its fields |
 
@@ -92,7 +92,11 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  defp parent_relations(description, kind) do
+  @doc """
+  The relations by which a fact of `kind` belongs to a parent: those that start at the
+  kind with `max_outgoing: 1`, sorted. A change form offers each, to move the fact.
+  """
+  def parent_relations(description, kind) do
     for {relation, %{"max_outgoing" => 1} = spec} <- Enum.sort(description["relations"] || %{}),
         kind in (spec["from"] || []),
         do: relation
@@ -183,6 +187,15 @@ defmodule AtlasControl.Pages do
     [{kind, %{"key" => key}} | children]
   end
 
+  # A change form also lists where the fact can move: every fact of each parent kind.
+  def reads({:edit, kind, key}, description) do
+    parents =
+      for relation <- parent_relations(description, kind),
+          do: {parent_of(description, relation), %{}}
+
+    [{kind, %{"key" => key}} | parents]
+  end
+
   def reads({_, kind, key}, _), do: [{kind, %{"key" => key}}]
   def reads(:unknown, _), do: []
   def reads(:kinds, _), do: []
@@ -226,8 +239,12 @@ defmodule AtlasControl.Pages do
 
         children = for {_relation, from, _} <- child_relations(description, kind), do: from
 
+        # A parent relation is a field a change sets too: it moves the fact.
         fields =
-          for {name, prop} <- ordered(spec), do: "#{name}: #{field_text(prop, name in rule.ask)}"
+          for({name, prop} <- ordered(spec), do: "#{name}: #{field_text(prop, name in rule.ask)}") ++
+            for relation <- parent_relations(description, kind),
+                do:
+                  "#{relation}: the key of a #{parent_of(description, relation)}; a change moves it there"
 
         {"kind:#{kind}",
          Blocks.item(
@@ -348,9 +365,10 @@ defmodule AtlasControl.Pages do
           Blocks.item(
             title: "#{singular(spec, kind)} #{key}: #{label(spec, fact)}",
             fields: fields,
-            # Nothing to change when a person may set nothing but where the id comes from.
+            # Nothing to change when a person may set nothing but where the id comes from, and
+            # there is no parent to move it to.
             actions:
-              if(changeable?(spec),
+              if(changeable?(description, kind, spec),
                 do: [Blocks.action(label: "Change", key: "e", to: path({:edit, kind, key}))],
                 else: []
               ) ++
@@ -413,7 +431,7 @@ defmodule AtlasControl.Pages do
     page("New #{singular(spec, kind) |> String.downcase()}", path({:list, kind}), [form_block])
   end
 
-  defp page({:edit, kind, key}, kind, spec, _description, [answer], form) do
+  defp page({:edit, kind, key}, kind, spec, description, [answer | parent_answers], form) do
     back = path({:item, kind, key})
 
     case answer do
@@ -422,7 +440,11 @@ defmodule AtlasControl.Pages do
 
       %{"fact" => fact} ->
         shown = Map.new(fact["values"] || %{}, fn {k, v} -> {k, to_text(v)} end)
-        values = Map.merge(shown, form[:values] || %{})
+
+        values =
+          shown
+          |> Map.merge(parent_values(description, kind, fact))
+          |> Map.merge(form[:values] || %{})
 
         form_block =
           Blocks.form(
@@ -430,7 +452,9 @@ defmodule AtlasControl.Pages do
             # The id is shown, never changed; nor is the property it was made from.
             inputs:
               [Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key)] ++
-                from_input(spec, values) ++ inputs(spec, values, except: id_property(spec)),
+                from_input(spec, values) ++
+                inputs(spec, values, except: id_property(spec)) ++
+                parent_inputs(description, kind, values, parent_answers),
             submit_label: "Save",
             submit_to: path({:edit, kind, key}),
             cancel_to: back,
@@ -666,11 +690,63 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  defp changeable?(spec) do
-    Enum.any?(spec["properties"] || %{}, fn {name, prop} ->
-      settable?(prop) and name != id_property(spec)
-    end)
+  # A fact can be changed when a person may set one of its fields, or move it.
+  defp changeable?(description, kind, spec) do
+    parent_relations(description, kind) != [] or
+      Enum.any?(spec["properties"] || %{}, fn {name, prop} ->
+        settable?(prop) and name != id_property(spec)
+      end)
   end
+
+  @doc "The parent a fact points at through each of its parent relations: `%{relation => key}`."
+  def parent_values(description, kind, fact) do
+    for relation <- parent_relations(description, kind),
+        [parent | _] <- [get_in(fact, ["links", relation]) || []],
+        into: %{},
+        do: {relation, parent}
+  end
+
+  # Where a fact can move: per parent relation a choice of every fact of the parent's
+  # kind, the current parent selected. A fact that has a parent keeps one: no empty choice.
+  defp parent_inputs(description, kind, values, answers) do
+    for {relation, at} <- Enum.with_index(parent_relations(description, kind)) do
+      answer = Enum.at(answers, at)
+      to = parent_of(description, relation)
+      to_spec = get_in(description, ["entities", to]) || %{}
+      current = values[relation] || ""
+
+      facts =
+        case answer do
+          %{"facts" => facts} -> Enum.sort_by(facts, & &1["key"])
+          _ -> []
+        end
+
+      # The current parent stays a choice even when the list of its kind could not be read.
+      choices =
+        if(current == "", do: [Blocks.choice(value: "", label: "—")], else: []) ++
+          if(current in ["" | Enum.map(facts, & &1["key"])],
+            do: [],
+            else: [Blocks.choice(value: current, label: current)]
+          ) ++
+          Enum.map(
+            facts,
+            &Blocks.choice(value: &1["key"], label: "#{&1["key"]}: #{label(to_spec, &1)}")
+          )
+
+      Blocks.input(
+        name: relation,
+        label: relation_label(description, relation),
+        kind: "choice",
+        value: current,
+        required: current != "",
+        hint: get_in(description, ["relations", relation, "description"]),
+        choices: choices
+      )
+    end
+  end
+
+  defp relation_label(description, relation),
+    do: String.capitalize(get_in(description, ["relations", relation, "label"]) || relation)
 
   defp input_kind(%{"values" => values}) when is_list(values), do: "choice"
   defp input_kind(%{"type" => "boolean"}), do: "boolean"

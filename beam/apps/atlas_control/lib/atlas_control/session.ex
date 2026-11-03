@@ -205,21 +205,31 @@ defmodule AtlasControl.Session do
   defp submit({:edit, kind, key} = route, raw, state) do
     # The property the id was made from is shown, never changed.
     spec = spec(state, kind)
-    values = Pages.values_for(spec, Map.drop(raw, List.wrap(Pages.id_property(spec))))
+    {parents, fields} = Map.split(raw, Pages.parent_relations(state.description, kind))
+    values = Pages.values_for(spec, Map.drop(fields, List.wrap(Pages.id_property(spec))))
+    state = %{state | route: route, form: Map.put(state.form, :values, raw)}
+    was = state.form[:parents] || %{}
 
-    content = %{
-      "op" => "change",
-      "key" => key,
-      "values" => values,
-      "version" => state.form[:version]
-    }
+    case moves(parents, was) do
+      {:ok, links} ->
+        content = %{
+          "op" => "change",
+          "key" => key,
+          "values" => values,
+          "version" => state.form[:version]
+        }
 
-    put_fact(
-      %{state | route: route, form: Map.put(state.form, :values, raw)},
-      kind,
-      content,
-      {:item, kind, key}
-    )
+        content =
+          if links == %{},
+            do: content,
+            else: Map.merge(content, %{"links" => links, "cause" => moved(links, was)})
+
+        put_fact(state, kind, content, {:item, kind, key})
+
+      {:error, reasons} ->
+        state = notice(state, "error", "Not sent: the form says why.")
+        show(put_in(state.form[:errors], reasons), route, "refused", nil)
+    end
   end
 
   defp submit({:delete, kind, key} = route, _raw, state) do
@@ -246,6 +256,32 @@ defmodule AtlasControl.Session do
   end
 
   defp submit(_route, _raw, state), do: notice(state, "error", "Nothing to submit here.")
+
+  # The parents a change form names that differ from those the fact had: `{:ok, %{relation
+  # => [key]}}`. A change moves a fact; it never leaves one without the parent it had.
+  defp moves(parents, was) do
+    empty = for {relation, ""} <- parents, Map.has_key?(was, relation), do: relation
+
+    if empty == [] do
+      {:ok,
+       for({relation, parent} <- parents, parent != "", parent != was[relation], into: %{}) do
+         {relation, [parent]}
+       end}
+    else
+      {:error, Enum.map(empty, &"#{&1} cannot be empty; choose where it goes")}
+    end
+  end
+
+  # The cause a move is stored with: "Moved from UC-Atlas-01 to UC-Atlas-30 (in_use_case),
+  # by a change in Control".
+  defp moved(links, was) do
+    changes =
+      Enum.map_join(links, "; ", fn {relation, [to]} ->
+        "from #{was[relation] || "nothing"} to #{to} (#{relation})"
+      end)
+
+    "Moved #{changes}, by a change in Control"
+  end
 
   # A new fact gets the next free key of its kind; nobody types one. When two clients make
   # the same key at once, State refuses the second ("exists"), and it tries the next number.
@@ -365,11 +401,13 @@ defmodule AtlasControl.Session do
 
     page = Pages.render(route, state.description, answers, state.form)
 
-    # Remember the version a change form was made from, so the change names it.
+    # Remember the version a change form was made from, so the change names it, and the
+    # parents the fact had, so only a parent that differs moves it.
     form =
       case {route, answers} do
-        {{:edit, _, _}, [%{"fact" => %{"version" => version}}]} ->
-          Map.put(state.form, :version, version)
+        {{:edit, kind, _}, [%{"fact" => %{"version" => version} = fact} | _]} ->
+          parents = Pages.parent_values(state.description, kind, fact)
+          Map.merge(state.form, %{version: version, parents: parents})
 
         _ ->
           state.form

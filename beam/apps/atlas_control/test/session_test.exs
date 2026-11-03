@@ -213,6 +213,70 @@ defmodule AtlasControl.SessionTest do
     assert %{"reason" => "hint", "blocks" => [_, %{"props" => %{"rows" => []}}]} = next(b, "page")
   end
 
+  test "a change moves a fact to another parent; clients on both parents see it by hint",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    FakeStore.put("W-2", %{"title" => "Two"})
+    FakeStore.link("P-1", "W-1")
+    a = client(port)
+    old = client(port)
+    new = client(port)
+    for c <- [a, old, new], do: next(c, "page")
+    put(old, %{"op" => "open", "to" => "/k/widget/W-1"})
+    assert %{"blocks" => [_, %{"props" => %{"rows" => [_]}}]} = next(old, "page")
+    put(new, %{"op" => "open", "to" => "/k/widget/W-2"})
+    assert %{"blocks" => [_, %{"props" => %{"rows" => []}}]} = next(new, "page")
+
+    put(a, %{"op" => "open", "to" => "/k/part/P-1/edit"})
+    assert %{"blocks" => [%{"props" => form}]} = next(a, "page")
+    assert %{"value" => "W-1"} = Enum.find(form["inputs"], &(&1["name"] == "of_widget"))
+
+    # Emptied, it is refused before State sees it: a move never leaves a fact without one.
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/part/P-1/edit",
+      "values" => %{"title" => "P-1", "of_widget" => ""}
+    })
+
+    assert %{"reason" => "refused", "blocks" => [%{"props" => %{"errors" => [error]}}]} =
+             next(a, "page")
+
+    assert error == "of_widget cannot be empty; choose where it goes"
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/part/P-1/edit",
+      "values" => %{"title" => "P-1", "of_widget" => "W-2"}
+    })
+
+    assert %{"path" => "/k/part/P-1", "back" => "/k/widget/W-2", "reason" => "stored"} =
+             next(a, "page")
+
+    assert %{"cause" => "Moved from W-1 to W-2 (of_widget), by a change in Control"} =
+             FakeStore.last_fact()
+
+    assert %{"reason" => "hint", "blocks" => [_, %{"props" => %{"rows" => []}}]} =
+             next(old, "page")
+
+    assert %{"reason" => "hint", "blocks" => [_, %{"props" => %{"rows" => [%{"to" => to}]}}]} =
+             next(new, "page")
+
+    assert to == "/k/part/P-1"
+
+    # A change that keeps the parent sends no move.
+    put(a, %{"op" => "open", "to" => "/k/part/P-1/edit"})
+    next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/part/P-1/edit",
+      "values" => %{"title" => "Wheel", "of_widget" => "W-2"}
+    })
+
+    assert %{"reason" => "stored"} = next(a, "page")
+    refute Map.has_key?(FakeStore.last_fact(), "links")
+  end
+
   test "a client that knows only the parent's key submits to _parent", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     a = client(port)

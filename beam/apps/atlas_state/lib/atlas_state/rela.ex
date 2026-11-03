@@ -31,7 +31,8 @@ defmodule AtlasState.Rela do
               {:ok, [String.t()]} | {:error, failure}
   @callback create(config, String.t(), String.t(), map(), targets) ::
               {:ok, [String.t()]} | {:error, failure}
-  @callback change(config, String.t(), String.t(), map(), version :: String.t() | nil) ::
+  @doc "Change properties and, for each relation in `targets`, replace the keys it points at."
+  @callback change(config, String.t(), String.t(), map(), version :: String.t() | nil, targets) ::
               {:ok, [String.t()]} | {:error, failure}
   @callback delete(config, String.t(), String.t(), version :: String.t() | nil) ::
               :ok | {:error, failure}
@@ -49,8 +50,8 @@ defmodule AtlasState.Rela do
   def create({mod, config}, plural, key, props, targets),
     do: mod.create(config, plural, key, props, targets)
 
-  def change({mod, config}, plural, key, props, version),
-    do: mod.change(config, plural, key, props, version)
+  def change({mod, config}, plural, key, props, version, targets),
+    do: mod.change(config, plural, key, props, version, targets)
 
   def delete({mod, config}, plural, key, version), do: mod.delete(config, plural, key, version)
 end
