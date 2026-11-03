@@ -36,17 +36,20 @@ defmodule AtlasBFF.Schema do
     id) and markup: entries of a kind that cover the blocks from one id to another, with
     the kind's fields as props. All markup nests (`AtlasBFF.Markup` has the rules).
   - `field`: a snake_case name, a type and `required: true | false` (default `false`).
-    Types: `:string`, `:integer`, `:boolean`, a model, or `{:list, type}`.
+    Types: `:string`, `:integer`, `:boolean`, a model, `{:list, type}`, or
+    `{:map, primitive}` (an object of names to such values).
   - `defpage`: a page the server serves, by name and path. A segment `:name` is a
     parameter (a string); the others are literal. A page always returns a view model; it
     is fetched, never sent to. Where two pages could match one path, the one with a
     literal segment first wins (`/k/:kind/new` over `/k/:kind/:key`), so the order they are
     written in does not matter (`AtlasBFF.Paths`). Each page is also an endpoint: the call
     that fetches it, so a client has one list of what it can call.
-  - `defendpoint`: any other call, by name, path and options: `call:` (the message it
-    travels in, such as `:submit`; required), `takes:` (what it is sent, such as
-    `:values`) and `replies:` (`[reply: what it returns]`). Names and paths are unique per
-    call; `:open` is the pages' own.
+  - `defendpoint`: any other call, by name, an optional path and options: `call:` (the
+    message it travels in, such as `:submit`; required), `takes:` (what it is sent: a
+    model, or `:values`, a form's inputs by name) and `replies:` (`[reply: what it
+    returns]`: a model, a block or `:view_model`). Names and paths are unique per call;
+    `:open` is the pages' own. Without a path an endpoint is a message of its own (a
+    session's hello), matched by its call alone.
 
   A mistake fails at compile time and points at its line.
 
@@ -84,6 +87,7 @@ defmodule AtlasBFF.Schema do
           defmodel: 2,
           defmarkup: 2,
           defpage: 2,
+          defendpoint: 2,
           defendpoint: 3,
           field: 2,
           field: 3
@@ -118,9 +122,12 @@ defmodule AtlasBFF.Schema do
     end
   end
 
-  defmacro defendpoint(name, path, opts) do
-    line = __CALLER__.line
+  defmacro defendpoint(name, opts) when is_list(opts),
+    do: endpoint_entry(name, nil, opts, __CALLER__.line)
 
+  defmacro defendpoint(name, path, opts), do: endpoint_entry(name, path, opts, __CALLER__.line)
+
+  defp endpoint_entry(name, path, opts, line) do
     quote do
       if open = Module.get_attribute(__MODULE__, :spec_open) do
         AtlasBFF.Schema.__fail__(
@@ -211,7 +218,13 @@ defmodule AtlasBFF.Schema do
     {endpoints, entries} = Enum.split_with(entries, &(&1.type == :endpoint))
     validate!(entries, env.file)
     pages = validate_pages!(pages, env.file)
-    endpoints = validate_endpoints!(endpoints, env.file)
+
+    known = %{
+      takes: [:values | for(%{type: :model, name: n} <- entries, do: n)],
+      returns: [:view_model | for(%{type: t, name: n} <- entries, t in [:model, :block], do: n)]
+    }
+
+    endpoints = validate_endpoints!(endpoints, known, env.file)
 
     strip = fn entry ->
       %{name: entry.name, fields: Enum.map(entry.fields, &Map.delete(&1, :line))}
@@ -276,7 +289,7 @@ defmodule AtlasBFF.Schema do
 
   # Endpoints are unique per call, by name and by the paths they match; `:open` is the
   # pages' call.
-  defp validate_endpoints!(endpoints, file) do
+  defp validate_endpoints!(endpoints, known, file) do
     {endpoints, _seen} =
       Enum.map_reduce(endpoints, %{}, fn endpoint, seen ->
         fail = &__fail__(file, endpoint.line, &1)
@@ -301,22 +314,35 @@ defmodule AtlasBFF.Schema do
             :ok
         end
 
-        unless is_nil(opts[:takes]) or snake?(opts[:takes]),
-          do: fail.("endpoint #{inspect(name)}: takes: is a snake_case atom")
+        unless is_nil(opts[:takes]) or opts[:takes] in known.takes,
+          do:
+            fail.(
+              "endpoint #{inspect(name)} takes #{inspect(opts[:takes])}, " <>
+                "which is no model and not :values"
+            )
 
         replies = opts[:replies] || []
 
         unless Keyword.keyword?(replies) and replies != [] and
-                 Enum.all?(replies, fn {reply, returns} -> snake?(reply) and snake?(returns) end),
+                 Enum.all?(replies, fn {reply, _returns} -> snake?(reply) end),
                do: fail.("endpoint #{inspect(name)} needs replies: [reply: what it returns]")
 
+        for {reply, returns} <- replies, returns not in known.returns do
+          fail.(
+            "endpoint #{inspect(name)} replies #{reply} with #{inspect(returns)}, " <>
+              "which is no model, no block and not :view_model"
+          )
+        end
+
         segments =
-          case AtlasBFF.Paths.parse(endpoint.path) do
+          case endpoint.path && AtlasBFF.Paths.parse(endpoint.path) do
+            nil -> []
             {:ok, segments} -> segments
             {:error, why} -> fail.("endpoint #{inspect(name)}: #{why}")
           end
 
-        shape = {call, AtlasBFF.Paths.shape(segments)}
+        # Endpoints without a path never clash by their paths; their names keep them apart.
+        shape = {call, if(endpoint.path, do: AtlasBFF.Paths.shape(segments), else: name)}
 
         cond do
           Map.has_key?(seen, {call, name}) ->
@@ -379,6 +405,14 @@ defmodule AtlasBFF.Schema do
   end
 
   defp check_type!({:list, inner}, kinds, at, fail), do: check_type!(inner, kinds, at, fail)
+
+  defp check_type!({:map, inner}, _kinds, at, fail) do
+    unless inner in @primitives,
+      do: fail.("#{at} is a map of #{inspect(inner)}; a map holds a primitive type")
+
+    :ok
+  end
+
   defp check_type!(type, _kinds, _at, _fail) when type in @primitives, do: :ok
 
   defp check_type!(type, {models, blocks, markup}, at, fail) do

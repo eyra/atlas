@@ -71,7 +71,7 @@
         {
           "name": "submit_to",
           "required": true,
-          "type": "string"
+          "type": "call"
         },
         {
           "name": "cancel_to",
@@ -106,7 +106,7 @@
         {
           "name": "confirm_to",
           "required": false,
-          "type": "string"
+          "type": "call"
         },
         {
           "name": "cancel_to",
@@ -397,6 +397,94 @@
         "stored": "view model"
       },
       "takes": "values"
+    },
+    {
+      "call": "hello",
+      "name": "hello",
+      "params": [],
+      "path": "",
+      "replies": {
+        "bye": "bye",
+        "welcome": "welcome"
+      },
+      "takes": "hello"
+    },
+    {
+      "call": "refresh",
+      "name": "refresh",
+      "params": [],
+      "path": "",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "page",
+      "name": "hint",
+      "params": [],
+      "path": "",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "notice",
+      "name": "notice",
+      "params": [],
+      "path": "",
+      "replies": {
+        "notice": "notice"
+      }
+    },
+    {
+      "call": "bye",
+      "name": "bye",
+      "params": [],
+      "path": "",
+      "replies": {
+        "bye": "bye"
+      }
+    },
+    {
+      "call": "ask",
+      "name": "ask",
+      "params": [],
+      "path": "",
+      "replies": {
+        "notice": "notice",
+        "plan": "plan"
+      },
+      "takes": "ask"
+    },
+    {
+      "call": "run",
+      "name": "run",
+      "params": [],
+      "path": "",
+      "replies": {
+        "notice": "notice",
+        "plan": "plan"
+      },
+      "takes": "run"
+    },
+    {
+      "call": "cancel",
+      "name": "cancel",
+      "params": [],
+      "path": "",
+      "replies": {
+        "plan": "plan"
+      }
+    },
+    {
+      "call": "stop",
+      "name": "stop",
+      "params": [],
+      "path": "",
+      "replies": {
+        "notice": "notice",
+        "plan": "plan"
+      }
     }
   ],
   "markup": [
@@ -610,6 +698,21 @@
     {
       "fields": [
         {
+          "name": "endpoint",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "params",
+          "required": false,
+          "type": "map of string"
+        }
+      ],
+      "name": "call"
+    },
+    {
+      "fields": [
+        {
           "name": "n",
           "required": true,
           "type": "integer"
@@ -641,6 +744,116 @@
         }
       ],
       "name": "step"
+    },
+    {
+      "fields": [
+        {
+          "name": "env",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "client",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "spec",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "hello"
+    },
+    {
+      "fields": [
+        {
+          "name": "env",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "spec",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "welcome"
+    },
+    {
+      "fields": [
+        {
+          "name": "text",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "bye"
+    },
+    {
+      "fields": [
+        {
+          "name": "tone",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "text",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "at",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "notice"
+    },
+    {
+      "fields": [
+        {
+          "name": "request",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "on",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "intent",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "ask"
+    },
+    {
+      "fields": [
+        {
+          "name": "n",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "values",
+          "required": false,
+          "type": "map of string"
+        }
+      ],
+      "name": "run_step"
+    },
+    {
+      "fields": [
+        {
+          "name": "steps",
+          "required": true,
+          "type": "list of run_step"
+        }
+      ],
+      "name": "run"
     }
   ],
   "pages": [
@@ -740,7 +953,7 @@
       "returns": "view model"
     }
   ],
-  "version": "0.10.0",
+  "version": "0.11.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

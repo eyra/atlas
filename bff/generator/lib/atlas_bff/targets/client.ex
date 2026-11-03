@@ -81,7 +81,19 @@ defmodule AtlasBFF.Targets.Client do
       `:error` for a path that is no such endpoint (`AtlasBFF.Paths.match/2`).
       """
       def endpoint(call, path),
-        do: AtlasBFF.Paths.match(Enum.filter(@endpoints, &(&1.call == call)), path)
+        do: AtlasBFF.Paths.match(Enum.filter(@endpoints, &(&1.call == call and &1.path)), path)
+
+      @doc """
+      The path of endpoint `name` of `call` with `params`; nil for an endpoint without a
+      path, and raises when it does not exist or a parameter is missing.
+      """
+      def endpoint_path(call, name, params \\ %{}) do
+        case Enum.find(@endpoints, &(&1.call == call and &1.name == name)) do
+          nil -> raise ArgumentError, "no endpoint #{inspect(name)} (#{call})"
+          %{path: nil} -> nil
+          endpoint -> AtlasBFF.Paths.build([endpoint], name, params)
+        end
+      end
 
       defmodule Fallback do
         @moduledoc false
@@ -111,6 +123,7 @@ defmodule AtlasBFF.Targets.Client do
     do: Module.concat(module, Macro.camelize(Atom.to_string(name)))
 
   defp type({:list, inner}, names), do: {:list, type(inner, names)}
+  defp type({:map, inner}, names), do: {:map, type(inner, names)}
   defp type(type, names), do: if(type in names, do: Atom.to_string(type), else: type)
 
   @doc false
@@ -176,6 +189,15 @@ defmodule AtlasBFF.Targets.Client do
     Enum.reduce_while(Enum.reverse(values), {:ok, []}, fn value, {:ok, acc} ->
       case decode_value(table, type, value) do
         {:ok, value} -> {:cont, {:ok, [value | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp decode_value(table, {:map, type}, values) when is_map(values) do
+    Enum.reduce_while(values, {:ok, %{}}, fn {k, v}, {:ok, acc} ->
+      case decode_value(table, type, v) do
+        {:ok, value} -> {:cont, {:ok, Map.put(acc, k, value)}}
         :error -> {:halt, :error}
       end
     end)

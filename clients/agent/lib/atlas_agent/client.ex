@@ -27,7 +27,7 @@ defmodule AtlasAgent.Client do
 
     with {:ok, socket} <- tcp_connect(host, port, options, env),
          client = %__MODULE__{socket: socket, env: env},
-         :ok <- send_line(client, %{"op" => "hello", "env" => env, "client" => as}),
+         :ok <- send_line(client, hello(env, as)),
          {:ok, _welcome} <- await(client, @page_wait, &welcome/1),
          # Control shows its start page after the welcome; it is not what anyone asked.
          {:ok, _home} <- await(client, @page_wait, &page(&1, ["open"])) do
@@ -37,6 +37,12 @@ defmodule AtlasAgent.Client do
 
   def close(%__MODULE__{socket: socket}), do: :gen_tcp.close(socket)
 
+  # The contract version this client implements; Control sends a too old one away.
+  @version AtlasBFFContract.Blocks.__schema__().version
+
+  @doc "The hello this client says: its environment, what it is, and its contract version."
+  def hello(env, as), do: %{"op" => "hello", "env" => env, "client" => as, "spec" => @version}
+
   @doc "The page at `path`."
   def open(client, path) do
     with :ok <- send_line(client, %{"op" => "open", "to" => path}) do
@@ -45,11 +51,18 @@ defmodule AtlasAgent.Client do
   end
 
   @doc """
-  Submit `values` (text) to a form's `submit_to`, with why (`cause`) when given. Answers
+  Submit `values` (text) to what a form's `submit_to` (or a confirm's `confirm_to`) names:
+  an endpoint and its params. With why (`cause`) when given. Answers
   `{:stored, page}` with the page Control shows after it was stored, or `{:refused, reasons}`.
   """
   def submit(client, to, values, cause \\ nil) do
-    message = %{"op" => "submit", "to" => to, "values" => values}
+    message = %{
+      "op" => "submit",
+      "endpoint" => to["endpoint"],
+      "params" => to["params"] || %{},
+      "values" => values
+    }
+
     message = if cause, do: Map.put(message, "cause", cause), else: message
 
     with :ok <- send_line(client, message),

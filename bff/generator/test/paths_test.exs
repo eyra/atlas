@@ -24,8 +24,10 @@ defmodule AtlasBFF.PathsTest do
            } = hd(schema.endpoints)
 
     # Then the contract's own endpoints, after one per page.
-    assert [%{name: :save_card, call: :submit, page: nil, takes: :values} = save] =
+    assert [%{name: :save_card, call: :submit, page: nil, takes: :values} = save, greet] =
              Enum.drop(schema.endpoints, length(schema.pages))
+
+    assert %{name: :greet, call: :greet, path: nil, params: [], takes: :greeting} = greet
 
     assert save.replies == [
              %{name: :saved, returns: :view_model},
@@ -71,8 +73,37 @@ defmodule AtlasBFF.PathsTest do
       assert target.endpoint(:submit, "/cards/new") == {:ok, :save_card, %{id: "new"}}
       assert target.endpoint(:submit, "/") == :error
       assert target.endpoint(:hello, "/cards/C-1") == :error
-      assert length(target.endpoints()) == 4
+      assert length(target.endpoints()) == 5
     end
+  end
+
+  test "an endpoint without a path is a message of its own, named by its call" do
+    for target <- [Server, Client] do
+      assert target.endpoint(:greet, "/") == :error
+      assert target.endpoint_path(:greet, :greet) == nil
+      assert target.endpoint_path(:submit, :save_card, id: "C 1") == "/cards/C%201"
+
+      assert_raise ArgumentError, ~r/no endpoint :gone/, fn ->
+        target.endpoint_path(:submit, :gone)
+      end
+    end
+  end
+
+  test "a map holds a primitive, by name: built by the server, decoded by the client" do
+    assert %{"name" => "N", "tags" => %{"a" => "1"}} =
+             AtlasBFF.Example.Server.__build__(
+               "model",
+               "greeting",
+               [name: "N", tags: %{a: "1"}],
+               []
+             )
+
+    assert_raise ArgumentError, ~r/greeting.tags.a must be "string"/, fn ->
+      AtlasBFF.Example.Server.__build__("model", "greeting", [name: "N", tags: %{a: 1}], [])
+    end
+
+    greeting = Enum.find(AtlasBFF.Example.__schema__().models, &(&1.name == :greeting))
+    assert %{name: :tags, type: {:map, :string}} = List.last(greeting.fields)
   end
 
   describe "an endpoint mistake fails at compile time" do
@@ -90,19 +121,41 @@ defmodule AtlasBFF.PathsTest do
       end
 
       assert_raise CompileError, ~r/the options are call:, takes: and replies:/, fn ->
-        spec(~s(defendpoint :a, "/a", call: :submit, replies: [ok: :x], method: :post))
+        spec(~s(defendpoint :a, "/a", call: :submit, replies: [ok: :view_model], method: :post))
+      end
+    end
+
+    test "what an endpoint takes or replies is a model, a block, values or a view model" do
+      assert_raise CompileError,
+                   ~r/endpoint :a takes :nothing, which is no model and not :values/,
+                   fn ->
+                     spec(
+                       ~s(defendpoint :a, call: :say, takes: :nothing, replies: [ok: :view_model])
+                     )
+                   end
+
+      assert_raise CompileError,
+                   ~r/endpoint :a replies ok with :nothing, which is no model/,
+                   fn ->
+                     spec(~s(defendpoint :a, call: :say, replies: [ok: :nothing]))
+                   end
+
+      assert_raise CompileError, ~r/b.x is a map of :link; a map holds a primitive type/, fn ->
+        spec(
+          ~s(defmodel :link do field :t, :string end\ndefblock :b do field :x, {:map, :link} end)
+        )
       end
     end
 
     test "two endpoints of one call for the same paths, or one name twice" do
       assert_raise CompileError, ~r/endpoints :a and :b match the same paths/, fn ->
-        spec(~s(defendpoint :a, "/x/:id", call: :submit, replies: [ok: :x]
-                defendpoint :b, "/x/:key", call: :submit, replies: [ok: :x]))
+        spec(~s(defendpoint :a, "/x/:id", call: :submit, replies: [ok: :view_model]
+                defendpoint :b, "/x/:key", call: :submit, replies: [ok: :view_model]))
       end
 
       assert_raise CompileError, ~r/endpoint :a \(submit\) is defined twice/, fn ->
-        spec(~s(defendpoint :a, "/x", call: :submit, replies: [ok: :x]
-                defendpoint :a, "/y", call: :submit, replies: [ok: :x]))
+        spec(~s(defendpoint :a, "/x", call: :submit, replies: [ok: :view_model]
+                defendpoint :a, "/y", call: :submit, replies: [ok: :view_model]))
       end
     end
   end

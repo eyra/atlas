@@ -1,7 +1,7 @@
 defmodule AtlasControl.SessionTest do
   use ExUnit.Case, async: false
 
-  alias AtlasControl.FakeStore
+  alias AtlasControl.{FakeStore, Pages}
 
   setup do
     Application.put_env(:atlas_bus, :store, "store-#{System.unique_integer([:positive])}")
@@ -20,7 +20,13 @@ defmodule AtlasControl.SessionTest do
         buffer: 4_194_304
       ])
 
-    put(socket, %{"op" => "hello", "env" => env, "client" => "test"})
+    put(socket, %{
+      "op" => "hello",
+      "env" => env,
+      "client" => "test",
+      "spec" => AtlasControl.Blocks.version()
+    })
+
     socket
   end
 
@@ -91,7 +97,7 @@ defmodule AtlasControl.SessionTest do
   test "a client sees the top list at once", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     c = client(port)
-    assert %{"env" => "test", "spec" => "0.10.0"} = next(c, "welcome")
+    assert %{"env" => "test", "spec" => "0.11.0"} = next(c, "welcome")
     assert %{"path" => "/", "title" => "Widgets", "reason" => "open"} = page = next(c, "page")
     assert rows(page) == ["One"]
   end
@@ -326,10 +332,65 @@ defmodule AtlasControl.SessionTest do
       put(a, %{"op" => "submit", "to" => to, "values" => %{"title" => "Two"}})
 
       assert %{"tone" => "error", "text" => text} = next(a, "notice")
-      assert text == "Control takes no submit at #{to}."
+      assert text == "Control takes no submit at #{inspect(to)}."
     end
 
     assert FakeStore.last_fact() == nil
+  end
+
+  test "hello carries the contract version: an older client, or one without, is told it is too old",
+       %{port: port} do
+    version = AtlasControl.Blocks.version()
+
+    for spec <- ["0.1.0", nil, "not a version"] do
+      {:ok, socket} =
+        :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
+
+      hello = %{"op" => "hello", "env" => "test", "client" => "tui"}
+      put(socket, if(spec, do: Map.put(hello, "spec", spec), else: hello))
+
+      assert %{"op" => "bye", "text" => text} = next(socket, "bye")
+
+      assert text =~
+               "This client implements contract #{spec || "(none)"}; Control test speaks #{version}."
+
+      assert text =~ "It is too old"
+      assert {:error, :closed} = :gen_tcp.recv(socket, 0, 1_000)
+    end
+
+    # The same version, or a newer one, is welcomed.
+    newer = version |> Version.parse!() |> Map.update!(:minor, &(&1 + 1)) |> to_string()
+    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
+    put(socket, %{"op" => "hello", "env" => "test", "client" => "tui", "spec" => newer})
+    assert %{"spec" => ^version} = next(socket, "welcome")
+  end
+
+  test "a submit names its endpoint and params, as the form's submit_to holds them",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    a = client(port)
+    next(a, "page")
+    put(a, %{"op" => "open", "to" => "/k/widget/W-1/edit"})
+    assert %{"blocks" => [%{"props" => form}]} = next(a, "page")
+
+    assert form["submit_to"] ==
+             %{"endpoint" => "update", "params" => %{"kind" => "widget", "key" => "W-1"}}
+
+    message = Map.merge(%{"op" => "submit", "values" => %{"title" => "Uno"}}, form["submit_to"])
+    put(a, message)
+    assert %{"path" => "/k/widget/W-1", "reason" => "stored"} = next(a, "page")
+
+    # An endpoint the contract has not, or one without its params, is refused, unsent.
+    for bad <- [
+          %{"endpoint" => "explode", "params" => %{"kind" => "widget"}},
+          %{"endpoint" => "update", "params" => %{"kind" => "widget"}},
+          %{"endpoint" => "update", "params" => "W-1"}
+        ] do
+      put(a, Map.merge(%{"op" => "submit", "values" => %{}}, bad))
+
+      assert %{"tone" => "error", "text" => "Control takes no submit at " <> _} =
+               next(a, "notice")
+    end
   end
 
   test "a client that knows only the parent's key submits to _parent", %{port: port} do
@@ -340,7 +401,9 @@ defmodule AtlasControl.SessionTest do
     put(a, %{"op" => "open", "to" => "/k/part/new/_parent/W-1"})
 
     assert %{"title" => "Create part in W-1", "blocks" => [%{"props" => form}]} = next(a, "page")
-    assert form["submit_to"] == "/k/part/new/of_widget/W-1"
+
+    assert Pages.submit_call(form["submit_to"]) ==
+             {:ok, :create_under, %{kind: "part", relation: "of_widget", parent: "W-1"}}
 
     put(a, %{
       "op" => "submit",
@@ -442,7 +505,14 @@ defmodule AtlasControl.SessionTest do
     on_exit(fn -> Application.delete_env(:atlas_control, :tui_user) end)
 
     {:ok, tui} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
-    put(tui, %{"op" => "hello", "env" => "test", "client" => "tui"})
+
+    put(tui, %{
+      "op" => "hello",
+      "env" => "test",
+      "client" => "tui",
+      "spec" => AtlasControl.Blocks.version()
+    })
+
     next(tui, "page")
     put(tui, %{"op" => "open", "to" => "/k/_/W-1/links/checked_by"})
     assert %{"blocks" => [%{"type" => "form"}]} = next(tui, "page")
@@ -531,7 +601,14 @@ defmodule AtlasControl.SessionTest do
     # A client that says it is the migration may.
     FakeStore.put("T-1", %{"name" => "#t/1"}, "tag")
     {:ok, m} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
-    put(m, %{"op" => "hello", "env" => "test", "client" => "migration"})
+
+    put(m, %{
+      "op" => "hello",
+      "env" => "test",
+      "client" => "migration",
+      "spec" => AtlasControl.Blocks.version()
+    })
+
     next(m, "page")
 
     put(m, %{
@@ -554,7 +631,14 @@ defmodule AtlasControl.SessionTest do
     on_exit(fn -> Application.delete_env(:atlas_control, :tui_user) end)
 
     {:ok, tui} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
-    put(tui, %{"op" => "hello", "env" => "test", "client" => "tui"})
+
+    put(tui, %{
+      "op" => "hello",
+      "env" => "test",
+      "client" => "tui",
+      "spec" => AtlasControl.Blocks.version()
+    })
+
     next(tui, "page")
 
     put(tui, %{"op" => "submit", "to" => "/k/widget/W-1/set/approved_by", "values" => %{}})

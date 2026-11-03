@@ -29,7 +29,7 @@ defmodule AtlasAgent.ToolsTest do
 
   @form %{
     "title" => "Create part",
-    "submit_to" => "/k/part/new",
+    "submit_to" => %{"endpoint" => "create", "params" => %{"kind" => "part"}},
     "inputs" => [
       %{"name" => "title", "label" => "Title", "kind" => "text", "required" => true},
       %{"name" => "notes", "label" => "Notes", "kind" => "multiline"}
