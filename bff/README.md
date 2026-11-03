@@ -64,7 +64,7 @@ Models that blocks hold: `action` (label, key, to), `link` (label, key, url), `r
 
 A row starts with its id, in a column of its own (IS-Atlas-57): a client lines the ids of a list up, as wide as the longest, then the labels, then the details. The detail does not repeat the id.
 
-An action opens a page of Control's (`to`). A link opens a web address outside the client, in a browser (`url`); an `item` has links, and so does a `row`, for while it is selected. A client opens only http and https addresses. Control gives a fact a link when the description marks the type of one of its fields as a web address (`types.<name>.format: "url"` in `rela/atlas.json`).
+An action opens a page of Control's (`to`), except one whose `to` is `agent:<intent>`: that one asks the agent about the page it is on, as `:` does, with that intent (`x Overrule` on a step the agent took: `agent:overrule`). The description adds such actions per kind (`actions` in `rela/atlas.json`). A link opens a web address outside the client, in a browser (`url`); an `item` has links, and so does a `row`, for while it is selected. A client opens only http and https addresses. Control gives a fact a link when the description marks the type of one of its fields as a web address (`types.<name>.format: "url"` in `rela/atlas.json`).
 
 On the wire a block is `{"id": "item", "type": "list", "props": {...}}`. An optional prop without a value is left out. A client ignores unknown keys, and shows an unknown or broken block as a fallback while the rest of the page still renders.
 

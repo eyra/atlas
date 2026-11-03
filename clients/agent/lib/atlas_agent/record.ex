@@ -39,7 +39,8 @@ defmodule AtlasAgent.Record do
         "planner" => plan.by || "",
         "outcome" => outcome,
         "summary" => plan.summary || "",
-        "before" => plan[:before] || ""
+        "before" => plan[:before] || "",
+        "overrules" => plan[:overrules] || ""
       }
 
     AtlasAgent.put(client, kind, values)

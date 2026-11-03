@@ -1,8 +1,9 @@
-# UC-Atlas-19: see what the agent did (docs/guides/uc-atlas-19.md). Each request, its
-# steps and its outcome are facts in State; the start page has `w What the agent did`.
+# UC-Atlas-19: see and overrule what the agent did (docs/guides/uc-atlas-19.md). Each
+# request, its steps and its outcome are facts in State; the start page has `w What the
+# agent did`; x Overrule on a stored step proposes the steps that undo it.
 import AtlasE2E.Scenario
 
-scenario "UC-Atlas-19: See what the agent did", fn %{t1: t1, t2: t2, instance: i} ->
+scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2, instance: i} ->
   description = """
   Melle looks back at what the agent did.
 
@@ -61,6 +62,7 @@ scenario "UC-Atlas-19: See what the agent did", fn %{t1: t1, t2: t2, instance: i
     Process.put(:step, stored["key"])
     Process.put(:made, step["values"]["made"])
 
+    Process.put(:dropped, dropped["key"])
     {step, _} = atlas_json(i, ["get", dropped["key"]])
     step["values"]["state"] == "dropped" || raise inspect(step["values"])
     step["values"]["made"] == "" || raise inspect(step["values"])
@@ -116,5 +118,84 @@ scenario "UC-Atlas-19: See what the agent did", fn %{t1: t1, t2: t2, instance: i
     {a, _} = :binary.match(screen, newest["key"])
     {b, _} = :binary.match(screen, oldest["key"])
     a < b || raise "not newest first:\n#{screen}"
+  end
+
+  # The page of one of the agent's steps, from the start page.
+  open_step = fn request, step ->
+    home(t1)
+    press(t1, "w")
+    see(t1, ~r/Atlas · test\s+Agent requests$/m)
+    open_row(t1, request)
+    see(t1, "Agent request #{request}:")
+    open_row(t1, step)
+    see(t1, "Agent step #{step}:")
+  end
+
+  step "x Overrule on a stored step: the steps that undo it, asked first; enter deletes", fn ->
+    {request, made, scene} = {Process.get(:request), Process.get(:made), Process.get(:scene)}
+
+    # TUI 2 on the scene, to see the use case go.
+    home(t2)
+    open_row(t2, "A scene to look back on")
+    see(t2, row.("Keep what the agent did"))
+
+    # A dropped step stored nothing: no x.
+    open_step.(request, Process.get(:dropped))
+    refute_see(t1, "x Overrule")
+
+    open_step.(request, Process.get(:step))
+    see(t1, "x Overrule")
+    press(t1, "x")
+    see(t1, "Proposed: 1 step", 10_000)
+    see(t1, ~r/You asked\s+Overrule #{Process.get(:step)}: 1\. Create use case in #{scene}/)
+    see(t1, "By              Atlas, from the record of #{Process.get(:step)}")
+    see(t1, "[✓] 1. Delete use case #{made}?")
+    at = press(t1, "Enter")
+    by_hint(t2, row.("Keep what the agent did"), at, gone: true)
+    see(t1, "Done: 1 of 1 stored", 5_000)
+    refute_see(t1, "without asking")
+    see(t1, "Deleted #{made}.")
+
+    # The request it overrules lists it; the overrule is a request of its own.
+    {requests, _} = atlas_json(i, ["list", "agent_request"])
+    overrule = Enum.max_by(requests, & &1["key"])
+    {got, _} = atlas_json(i, ["get", overrule["key"]])
+    got["values"]["overrules"] == request || raise inspect(got["values"])
+    got["values"]["outcome"] == "done" || raise inspect(got["values"])
+
+    press(t1, "Enter")
+    press(t1, "Escape")
+    see(t1, "Agent request #{request}:")
+    see(t1, "Overruled by")
+    see(t1, overrule["key"])
+  end
+
+  step "Overruling a change puts back the values it replaced", fn ->
+    scene = Process.get(:scene)
+    home(t1)
+    open_row(t1, "A scene to look back on")
+    see(t1, "Scene #{scene}: A scene to look back on")
+    press(t1, ":")
+    type(t1, "rename to A renamed look back")
+    press(t1, "Enter")
+    see(t1, "Done: 1 of 1 stored, without asking", 10_000)
+    press(t1, "Enter")
+    see(t1, "Scene #{scene}: A renamed look back")
+
+    {requests, _} = atlas_json(i, ["list", "agent_request"])
+    rename = Enum.max_by(requests, & &1["key"])
+    {got, _} = atlas_json(i, ["get", rename["key"]])
+    [set] = hd(got["lists"])["rows"]
+
+    open_step.(rename["key"], set["key"])
+    press(t1, "x")
+    see(t1, "Proposed: 1 step", 10_000)
+    see(t1, "[✓] 1. Update #{scene}")
+    see(t1, "A scene to look back on")
+    press(t1, "Enter")
+    see(t1, "Done: 1 of 1 stored", 5_000)
+
+    {scene_now, _} = atlas_json(i, ["get", scene])
+    scene_now["values"]["title"] == "A scene to look back on" || raise inspect(scene_now)
   end
 end
