@@ -3,7 +3,7 @@ import AtlasE2E.Scenario
 
 url = "https://github.com/eyra/atlas/pull/12"
 
-scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2} ->
+scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2, instance: i} ->
   issue = ~r/Issue IS-Atlas-\d+: An issue with pull requests/
 
   step "An issue, with no pull requests yet", fn ->
@@ -46,6 +46,24 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2}
     refute_see(t1, "e Change")
     refute_see(t1, ~r/Title\s/)
     by_hint(t2, url, at)
+  end
+
+  # IS-Atlas-47. The run's browser is a stand-in that records the address.
+  step "o opens it in the browser, on its page and on its row in the issue", fn ->
+    see(t1, "d Delete   o Open in browser   r refresh")
+    at = press(t1, "o")
+    opened(i, url, at, 1)
+    see(t1, "Opened #{url} in the browser")
+
+    press(t1, "Escape")
+    see(t1, issue)
+    see(t1, ~r/› .*#{Regex.escape(url)}/)
+    see(t1, "o Open in browser")
+    at = press(t1, "o")
+    opened(i, url, at, 2)
+    see(t1, issue)
+    open_row(t1, url)
+    see(t1, "Pull request PR-eyra-atlas-12")
   end
 
   step "The same URL again is the same pull request", fn ->
