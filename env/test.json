@@ -9,5 +9,6 @@
     "extra": "rela/atlas.json"
   },
   "state": { "data": "~/.local/share/atlas/test/beam" },
-  "reconcile_seconds": 5
+  "reconcile_seconds": 5,
+  "agent": { "planner": "claude" }
 }
