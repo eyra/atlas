@@ -37,6 +37,8 @@
 #   atlas migrate-assignment [--dry-run]     IS-Atlas-78: every fact gets its Assignment, and its owner
 #                      moves there; run it on the old core and rela: it keeps who set each owner,
 #                      restarts rela and the core on this build, writes, and removes the old values
+#   atlas migrate-done-owner [--dry-run]     IS-Atlas-88: a done fact has no owner: removes the owner a
+#                      migration gave a fact Flow expects nothing of; never one set by hand or Flow
 #                      put, set, get, list, delete, tools, plan, load-plan and the migrations go
 #                      through Control like the TUI, and start nothing: Control must run (`atlas status`).
 #
@@ -87,7 +89,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-assignment|move-to-fly|fetch-from-fly|help) args+=("$1"); shift ;;
+        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help) args+=("$1"); shift ;;
         *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
       esac ;;
   esac
@@ -448,6 +450,11 @@ case "$cmd" in
     cd "$root/tools/plan"
     mix compile >&2
     ATLAS_CALLER_CWD="$caller" exec mix atlas.migrate_owner --env "$env" ${args[@]+"${args[@]}"}
+    ;;
+  migrate-done-owner)
+    cd "$root/tools/plan"
+    mix compile >&2
+    ATLAS_CALLER_CWD="$caller" exec mix atlas.migrate_done_owner --env "$env" ${args[@]+"${args[@]}"}
     ;;
   migrate-completion)
     (cd "$root/tools/plan" && mix compile >&2 &&
