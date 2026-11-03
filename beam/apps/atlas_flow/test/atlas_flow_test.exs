@@ -145,6 +145,27 @@ defmodule AtlasFlowTest do
       assert alive("B-1")
     end
 
+    test "the hint of Flow's own write is passed over; a walk up reads plainly" do
+      FakeState.put("box", %{"key" => "B-1", "progress" => %{"value" => "check"}})
+      FakeState.put("crate", %{"key" => "C-1", "links" => %{"in_box" => ["B-1"]}})
+      engine()
+      eventually(fn -> FakeState.get("box", "B-1")["values"]["todo"] == "Check it" end)
+      Process.sleep(150)
+      {settled, _} = FakeState.reads()
+
+      # Flow's own write came back as a hint: nothing read again for it.
+      Process.sleep(150)
+      assert {^settled, _} = FakeState.reads()
+
+      # Someone else's change to the crate walks up to the box, reading the crate plainly.
+      :ok = AtlasBus.attach("tester-#{System.unique_integer([:positive])}")
+
+      {:stored, _} =
+        AtlasFlow.Talk.put("crate", %{"op" => "change", "key" => "C-1", "values" => %{}})
+
+      eventually(fn -> elem(FakeState.reads(), 1) >= 2 end)
+    end
+
     test "a fact made later gets its process from its hint" do
       engine()
       FakeState.put("box", %{"key" => "B-7"})

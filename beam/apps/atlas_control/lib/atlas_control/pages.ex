@@ -55,21 +55,18 @@ defmodule AtlasControl.Pages do
 
   # Routes
 
-  def route("/"), do: :home
-  def route("/_kinds"), do: :kinds
-
+  # The pages are the contract's (`defpage` in AtlasBFFContract.Blocks): Control serves
+  # those and nothing else; a path outside them is no page (`:unknown`).
   def route(path) do
-    case path |> String.trim_leading("/") |> String.split("/") |> Enum.map(&URI.decode/1) do
-      ["k", kind] -> {:list, kind}
-      ["k", kind, "new"] -> {:new, kind}
-      ["k", kind, "new", relation, parent] -> {:new, kind, {relation, parent}}
-      ["k", kind, key] -> {:item, kind, key}
-      ["k", kind, key, "edit"] -> {:edit, kind, key}
-      ["k", kind, key, "delete"] -> {:delete, kind, key}
-      ["k", kind, key, "links", relation] -> {:links, kind, key, relation}
-      ["k", kind, key, "set", relation] -> {:set, kind, key, relation}
-      ["k", kind, key, "remove", relation] -> {:remove, kind, key, relation}
-      _ -> :unknown
+    case Blocks.match(path) do
+      {:ok, :home, _} -> :home
+      {:ok, :kinds, _} -> :kinds
+      {:ok, :list, p} -> {:list, p.kind}
+      {:ok, :new, p} -> {:new, p.kind}
+      {:ok, :new_under, p} -> {:new, p.kind, {p.relation, p.parent}}
+      {:ok, page, p} when page in [:item, :edit, :delete] -> {page, p.kind, p.key}
+      {:ok, page, p} when page in [:links, :set, :remove] -> {page, p.kind, p.key, p.relation}
+      :error -> :unknown
     end
   end
 
@@ -102,8 +99,14 @@ defmodule AtlasControl.Pages do
   def resolve({page, "_", key, relation}, description) when page in [:links, :set, :remove] do
     case kind_of_key(description, key) do
       nil -> :unknown
-      kind -> {page, kind, key, relation}
+      kind -> resolve({page, kind, key, relation}, description)
     end
+  end
+
+  # An association its component holds is set there (`link_holder/4`).
+  def resolve({page, kind, key, relation}, description) when page in [:links, :set, :remove] do
+    {holder, holder_key} = link_holder(description, kind, key, relation)
+    {page, holder, holder_key, relation}
   end
 
   def resolve(route, _description), do: route
@@ -181,21 +184,32 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def path(:kinds), do: "/_kinds"
-  def path({:list, kind}), do: "/k/#{enc(kind)}"
-  def path({:new, kind}), do: "/k/#{enc(kind)}/new"
+  @doc """
+  The route a submit endpoint of the contract (`defendpoint`, call :submit) acts on, from
+  its name and parameters: the page whose form or confirm it comes from.
+  """
+  def submit_route(:create, p), do: {:new, p.kind}
+  def submit_route(:create_under, p), do: {:new, p.kind, {p.relation, p.parent}}
+  def submit_route(:update, p), do: {:edit, p.kind, p.key}
+  def submit_route(:delete, p), do: {:delete, p.kind, p.key}
+  def submit_route(:link, p), do: {:links, p.kind, p.key, p.relation}
+  def submit_route(:accept, p), do: {:set, p.kind, p.key, p.relation}
+  def submit_route(:reopen, p), do: {:remove, p.kind, p.key, p.relation}
+
+  # A route's path, by the contract's page for it.
+  def path(:home), do: Blocks.path(:home)
+  def path(:kinds), do: Blocks.path(:kinds)
+  def path({:list, kind}), do: Blocks.path(:list, kind: kind)
+  def path({:new, kind}), do: Blocks.path(:new, kind: kind)
 
   def path({:new, kind, {relation, parent}}),
-    do: "/k/#{enc(kind)}/new/#{enc(relation)}/#{enc(parent)}"
+    do: Blocks.path(:new_under, kind: kind, relation: relation, parent: parent)
 
-  def path({:item, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}"
-  def path({:edit, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/edit"
-  def path({:delete, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/delete"
+  def path({page, kind, key}) when page in [:item, :edit, :delete],
+    do: Blocks.path(page, kind: kind, key: key)
 
   def path({page, kind, key, relation}) when page in [:links, :set, :remove],
-    do: "/k/#{enc(kind)}/#{enc(key)}/#{page}/#{enc(relation)}"
-
-  defp enc(part), do: URI.encode(part, &URI.char_unreserved?/1)
+    do: Blocks.path(page, kind: kind, key: key, relation: relation)
 
   @doc """
   The name and key of a CRUD operation (`:create`, `:update`, `:delete`) on a kind, as
@@ -236,7 +250,11 @@ defmodule AtlasControl.Pages do
 
     kind == kind_of(route) or kind in listed or
       Enum.any?(listed, &(kind in progress_from(description, &1))) or
-      kind in Enum.map(cause_fields(description), &elem(&1, 0))
+      kind in Enum.map(cause_fields(description), &elem(&1, 0)) or
+      kind in for(
+        {_relation, part_kind, _component} <- components(description, of),
+        do: part_kind
+      )
   end
 
   def shows?({:list, of} = route, description, kind),
@@ -316,12 +334,14 @@ defmodule AtlasControl.Pages do
   end
 
   # What is assigned to `by` (`start.assigned` in the description): the facts of every kind
-  # the relation starts at that point at `by` through it.
+  # the relation starts at that point at `by` through it (the Assignments), and the facts of
+  # every kind those are a component of (`components/2`), whose they are.
   def reads({:assigned, by}, description) do
     relation = assigned_rule(description)["relation"]
+    froms = get_in(description, ["relations", relation, "from"]) || []
 
-    for from <- get_in(description, ["relations", relation, "from"]) || [],
-        do: {from, %{"linked" => %{relation => by}}}
+    for(from <- froms, do: {from, %{"linked" => %{relation => by}}}) ++
+      for {_relation, owner} <- owner_kinds(description, froms), do: {owner, %{}}
   end
 
   def reads({:list, kind}, _), do: [{kind, %{}}]
@@ -335,7 +355,11 @@ defmodule AtlasControl.Pages do
 
     causes = for {from, _name, _label} <- cause_fields(description), do: {from, %{}}
 
-    [{kind, %{"key" => key}} | children] ++ causes
+    parts =
+      for {_relation, part_kind, component} <- components(description, kind),
+          do: {part_kind, %{"key" => part_key(component, key)}}
+
+    [{kind, %{"key" => key}} | children] ++ causes ++ parts
   end
 
   # A change form also lists where the fact can move: every fact of each parent kind.
@@ -361,6 +385,48 @@ defmodule AtlasControl.Pages do
 
   def reads(:unknown, _), do: []
   def reads(:kinds, _), do: []
+
+  @doc """
+  The relations marked `component` that start at `kind` (`rela/atlas.json`): the one fact
+  each points at is made and deleted with the fact (its Assignment), and the fact's page
+  shows its fields and associations as the fact's own. `[{relation, kind, component}]`.
+  """
+  def components(description, kind) do
+    for {relation, %{"component" => %{"key" => _} = component, "to" => [to]} = spec} <-
+          Enum.sort(description["relations"] || %{}),
+        kind in (spec["from"] || []),
+        do: {relation, to, component}
+  end
+
+  # The kinds whose facts a fact of `kind` is made and deleted with, as their component.
+  defp made_with(description, kind) do
+    for {_relation, %{"component" => %{}, "to" => [^kind]} = spec} <-
+          Enum.sort(description["relations"] || %{}),
+        from <- spec["from"] || [],
+        uniq: true,
+        do: from
+  end
+
+  @doc "The key of the component a fact with `key` has, as `component` makes it."
+  def part_key(%{"key" => template}, key), do: String.replace(template, "{key}", key)
+
+  @doc """
+  Where an association of `kind` is set: on the fact itself, or, when it starts at the kind
+  of one of its components and not at `kind`, on that component: `{kind, key}`.
+  """
+  def link_holder(description, kind, key, relation) do
+    from = get_in(description, ["relations", relation, "from"]) || []
+
+    found =
+      if kind in from,
+        do: nil,
+        else:
+          Enum.find_value(components(description, kind), fn {_rel, part_kind, component} ->
+            if part_kind in from, do: {part_kind, part_key(component, key)}
+          end)
+
+    found || {kind, key}
+  end
 
   @doc """
   The fields that name the fact that caused them (`"cause"` in the description, `true` or
@@ -416,17 +482,46 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  @doc "The open facts among the answers to `reads({:assigned, by})`: `[{kind, fact}]`, newest move first."
+  @doc """
+  What is assigned, among the answers to `reads({:assigned, by})`: `[{kind, fact, link}]`,
+  newest link first. `link` is the fact that points at the client (the Assignment, with
+  what is expected and the origin of the link); `fact` is what it is the component of (or
+  itself, when it is no component), left out once completed.
+  """
   def assigned_facts(description, answers) do
     relation = assigned_rule(description)["relation"]
     froms = get_in(description, ["relations", relation, "from"]) || []
+    owners = owner_kinds(description, froms)
+    {linked, owned} = Enum.split(answers, length(froms))
 
-    for {from, %{"facts" => facts}} <- Enum.zip(froms, answers),
-        fact <- facts,
+    # Each component's fact, by the component's key.
+    whose =
+      for {{component, owner}, %{"facts" => facts}} <- Enum.zip(owners, owned),
+          fact <- facts,
+          part <- get_in(fact, ["links", component]) || [],
+          into: %{},
+          do: {part, {owner, fact}}
+
+    for {from, %{"facts" => links}} <- Enum.zip(froms, linked),
+        link <- links,
+        {kind, fact} = Map.get(whose, link["key"], {from, link}),
         not completed?(fact) do
-      {from, fact}
+      {kind, fact, link}
     end
-    |> Enum.sort_by(fn {_, fact} -> get_in(fact, ["origins", relation, "since"]) || "" end, :desc)
+    |> Enum.sort_by(
+      fn {_, _, link} -> get_in(link, ["origins", relation, "since"]) || "" end,
+      :desc
+    )
+  end
+
+  # The component relations that point at one of `kinds`, with each kind they start at:
+  # `[{relation, owner kind}]`.
+  defp owner_kinds(description, kinds) do
+    for {relation, %{"component" => %{}, "to" => [to]} = spec} <-
+          Enum.sort(description["relations"] || %{}),
+        to in kinds,
+        owner <- spec["from"] || [],
+        do: {relation, owner}
   end
 
   @doc "The count of what is assigned, as the description words it (`start.assigned.count`)."
@@ -445,13 +540,13 @@ defmodule AtlasControl.Pages do
     relation = rule["relation"]
 
     rows =
-      for {from, fact} <- assigned_facts(description, answers) do
+      for {from, fact, link} <- assigned_facts(description, answers) do
         spec = description["entities"][from] || %{}
-        origin = get_in(fact, ["origins", relation]) || %{}
+        origin = get_in(link, ["origins", relation]) || %{}
 
         detail =
           [
-            expected(description, from, fact),
+            expected(description, from, fact, link),
             origin["since"] && "since " <> short_moment(origin["since"]),
             origin["cause"]
           ]
@@ -477,10 +572,12 @@ defmodule AtlasControl.Pages do
     page(rule["title"] || "", nil, [list])
   end
 
-  # What the fact's owner is expected to do: the value of the field a flow on its kind writes.
-  defp expected(description, kind, fact) do
+  # What the fact's owner is expected to do: the value of the field a flow on its kind
+  # writes, on the fact or, for a flow `on` a component, on its component (`link`).
+  defp expected(description, kind, fact, link) do
     Enum.find_value(description["flows"] || %{}, fn {_name, flow} ->
-      value = kind in (flow["kinds"] || []) && to_text(fact["values"][flow["field"]])
+      written = if flow["on"], do: link, else: fact
+      value = kind in (flow["kinds"] || []) && to_text(written["values"][flow["field"]])
       if value in [false, ""], do: nil, else: value
     end)
   end
@@ -591,6 +688,7 @@ defmodule AtlasControl.Pages do
         {"kind:#{kind}",
          Blocks.item(
            title: "#{singular(spec, kind)} (#{kind})",
+           # A component (`components/2`): State makes and deletes it with its fact.
            fields:
              [
                Blocks.pair(label: "Kind", value: kind),
@@ -615,7 +713,11 @@ defmodule AtlasControl.Pages do
                if(spec["agent"],
                  do: [Blocks.pair(label: "Agent record", value: spec["agent"])],
                  else: []
-               ),
+               ) ++
+               case made_with(description, kind) do
+                 [] -> []
+                 froms -> [Blocks.pair(label: "Made with", value: Enum.join(froms, ", "))]
+               end,
            # What can be done with one, named as every page names it; `<key>` is its key.
            actions: [
              action(:create, spec, kind, path({:new, kind})),
@@ -627,6 +729,9 @@ defmodule AtlasControl.Pages do
 
     page("Kinds", "/", items)
   end
+
+  def render(:unknown, _description, _answers, _form),
+    do: missing("No such page", "Control serves no page at this path.", "/")
 
   def render(route, description, answers, form) do
     kind = kind_of(route)
@@ -714,23 +819,26 @@ defmodule AtlasControl.Pages do
         )
 
       %{"fact" => fact} ->
-        back = path(up(description, kind, fact))
+        back = path(owner(description, kind, answer) || up(description, kind, fact))
+        relations = child_relations(description, kind)
+        {child_answers, rest} = Enum.split(child_answers, length(relations))
+        {cause_answers, part_answers} = Enum.split(rest, length(cause_fields(description)))
+        parts = parts(description, kind, part_answers)
 
         fields =
           [Blocks.pair(label: "Id", value: key)] ++
-            Enum.flat_map(ordered(spec), fn {name, prop} ->
-              value = fact["values"][name]
-
-              # A field only a connector or the system fills shows only once it has a value.
-              if settable?(prop) or value not in [nil, ""],
-                do: [Blocks.pair(label: field_label(name, prop), value: show(prop, value))],
-                else: []
+            own_fields(spec, fact) ++
+            Enum.flat_map(parts, fn {_kind, part_spec, part, made} ->
+              own_fields(part_spec, part, made)
             end) ++
             Enum.map(parents(description, kind, fact), fn {label, keys} ->
               Blocks.pair(label: label, value: Enum.join(keys, ", "))
             end) ++
             progress_pair(description, spec, kind, fact) ++
-            linked(description, kind, fact) ++ copy(answer["copy"])
+            linked(description, kind, fact) ++
+            Enum.flat_map(parts, fn {part_kind, _spec, part, _made} ->
+              linked(description, part_kind, part)
+            end) ++ copy(answer["copy"])
 
         item =
           Blocks.item(
@@ -746,12 +854,14 @@ defmodule AtlasControl.Pages do
                     else: []
                   ) ++ [action(:delete, spec, kind, path({:delete, kind, key}))],
                 else: []
-              ) ++ described_actions(spec, fact) ++ link_actions(description, kind, fact, form),
+              ) ++
+                described_actions(spec, fact) ++
+                link_actions(description, kind, fact, form) ++
+                Enum.flat_map(parts, fn {part_kind, _spec, part, _made} ->
+                  link_actions(description, part_kind, part, form)
+                end),
             links: links(description, spec, fact)
           )
-
-        relations = child_relations(description, kind)
-        {child_answers, cause_answers} = Enum.split(child_answers, length(relations))
 
         lists =
           relations
@@ -773,7 +883,10 @@ defmodule AtlasControl.Pages do
         references =
           lists ++
             cause_lists(description, key, cause_answers) ++
-            parent_lists(description, kind, fact)
+            parent_lists(description, kind, fact) ++
+            Enum.flat_map(parts, fn {part_kind, _spec, part, _made} ->
+              parent_lists(description, part_kind, part)
+            end)
 
         ids = for {id, _} <- references, do: id
         main = Blocks.part("item", "item", title: "Content", role: "main")
@@ -1030,12 +1143,44 @@ defmodule AtlasControl.Pages do
         )
 
       %{"fact" => fact} = answer ->
-        case Enum.reject(children(description, kind, answer), fn {_, keys} -> keys == [] end) do
+        # A component goes with its fact (`components/2`), never alone.
+        owners =
+          for {relation, %{"component" => %{}} = rel} <- description["relations"] || %{},
+              kind in (rel["to"] || []),
+              owner <- get_in(answer, ["incoming", relation]) || [],
+              do: owner
+
+        held =
+          if owners == [],
+            do: Enum.reject(children(description, kind, answer), fn {_, keys} -> keys == [] end),
+            else: {:part_of, owners}
+
+        parts =
+          for {relation, part_kind, _} <- components(description, kind),
+              part <- get_in(fact, ["links", relation]) || [],
+              do:
+                "#{singular(get_in(description, ["entities", part_kind]) || %{}, part_kind)} #{part}"
+
+        with_parts = if parts == [], do: "", else: ", with its #{Enum.join(parts, " and ")}"
+
+        case held do
+          {:part_of, owners} ->
+            confirm =
+              Blocks.confirm(
+                title: "#{key} cannot be deleted",
+                text: "#{key} goes with #{Enum.join(owners, ", ")}; delete that instead.",
+                cancel_to: back
+              )
+
+            page("#{verb(:delete)} #{key}", back, [confirm])
+
           [] ->
             confirm =
               Blocks.confirm(
                 title: "#{elem(operation(:delete, spec, kind), 0)} #{key}?",
-                text: "#{key}: #{label(spec, fact)} will be deleted. This cannot be undone.",
+                text:
+                  "#{key}: #{label(spec, fact)} will be deleted#{with_parts}. " <>
+                    "This cannot be undone.",
                 confirm_label: verb(:delete),
                 confirm_to: path({:delete, kind, key}),
                 cancel_to: back
@@ -1310,6 +1455,19 @@ defmodule AtlasControl.Pages do
 
   def after_delete(_description, kind, _answer), do: {:list, kind}
 
+  # The page of the fact a component belongs to (`components/2`), from what points at it.
+  defp owner(description, kind, answer) do
+    Enum.find_value(description["relations"] || %{}, fn {relation, spec} ->
+      with %{} <- spec["component"],
+           true <- kind in (spec["to"] || []),
+           [key] <- get_in(answer, ["incoming", relation]) do
+        {:item, "_", key}
+      else
+        _ -> nil
+      end
+    end)
+  end
+
   # A fact's parent page, when it points at one through a parent relation.
   defp up(description, kind, fact) do
     parent =
@@ -1336,10 +1494,34 @@ defmodule AtlasControl.Pages do
         do: {String.capitalize(spec["label"] || relation), keys}
   end
 
+  # The fields a page shows of a fact: those a user may set, and the others once they have a
+  # value. `made` names those a component's values are made from (the fact's key): not shown.
+  defp own_fields(spec, fact, made \\ []) do
+    Enum.flat_map(ordered(spec), fn {name, prop} ->
+      value = fact["values"][name]
+
+      # A field only a connector or the system fills shows only once it has a value.
+      if name not in made and (settable?(prop) or value not in [nil, ""]),
+        do: [Blocks.pair(label: field_label(name, prop), value: show(prop, value))],
+        else: []
+    end)
+  end
+
+  # The components State answered (one that is not there yet shows nothing): `[{kind, spec,
+  # fact, made}]`, where `made` names the fields made from the fact's key.
+  defp parts(description, kind, answers) do
+    for {{_relation, part_kind, component}, %{"fact" => %{} = part}} <-
+          Enum.zip(components(description, kind), answers),
+        do:
+          {part_kind, get_in(description, ["entities", part_kind]) || %{}, part,
+           Map.keys(component["values"] || %{})}
+  end
+
   # Its associations, each with the fact that set it (since, by, cause) when State knows
   # it. One that was removed shows as removed while that is the latest fact about it.
   defp linked(description, kind, fact) do
     for {relation, spec} <- associations(description, kind),
+        not is_map(spec["component"]),
         keys = get_in(fact, ["links", relation]) || [],
         origin = [get_in(fact, ["origins", relation])],
         keys != [] or origin != [nil] do

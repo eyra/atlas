@@ -91,7 +91,7 @@ defmodule AtlasControl.SessionTest do
   test "a client sees the top list at once", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     c = client(port)
-    assert %{"env" => "test", "spec" => "0.8.0"} = next(c, "welcome")
+    assert %{"env" => "test", "spec" => "0.10.0"} = next(c, "welcome")
     assert %{"path" => "/", "title" => "Widgets", "reason" => "open"} = page = next(c, "page")
     assert rows(page) == ["One"]
   end
@@ -316,6 +316,22 @@ defmodule AtlasControl.SessionTest do
     assert %{"path" => "/k/tag/T-c-1", "reason" => "stored"} = next(a, "page")
   end
 
+  test "a submit to anything but a submit endpoint of the contract is refused, unsent",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    a = client(port)
+    next(a, "page")
+
+    for to <- ["/k/widget", "/k/widget/W-1", "/nowhere"] do
+      put(a, %{"op" => "submit", "to" => to, "values" => %{"title" => "Two"}})
+
+      assert %{"tone" => "error", "text" => text} = next(a, "notice")
+      assert text == "Control takes no submit at #{to}."
+    end
+
+    assert FakeStore.last_fact() == nil
+  end
+
   test "a client that knows only the parent's key submits to _parent", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     a = client(port)
@@ -473,6 +489,28 @@ defmodule AtlasControl.SessionTest do
     assert %{"reason" => "stored"} = next(a, "page")
     assert %{"links" => %{"checked_by" => []}, "by" => "agent"} = List.last(FakeStore.sent())
     refute Map.has_key?(List.last(FakeStore.sent()), "cause")
+  end
+
+  test "an update sends only what was edited, with what the form was read with (was)",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One", "shade" => "light"})
+    a = client(port)
+    next(a, "page")
+    put(a, %{"op" => "open", "to" => "/k/widget/W-1/edit"})
+    next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/edit",
+      "values" => %{"title" => "Uno", "shade" => "light"}
+    })
+
+    assert %{"reason" => "stored"} = next(a, "page")
+
+    # The shade was left as it was: it is not sent, so it can never put an old value back.
+    assert %{"values" => values, "version" => "v0", "was" => was} = List.last(FakeStore.sent())
+    assert values == %{"title" => "Uno"}
+    assert was == %{"title" => "One"}
   end
 
   test "a link only a migration sets is never sent", %{port: port} do

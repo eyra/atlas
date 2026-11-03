@@ -17,19 +17,25 @@ defmodule AtlasState.Server do
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
-  "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional}`.
+  "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional,
+  "was" => %{property or relation => value or keys} on a change, optional}`.
+  A fact's components (`AtlasState.Components`, its Assignment) are made in the same write,
+  before it, and deleted with it; a component alone is not deleted while its fact exists.
   On a create the links are the fact's first; on a change each relation named is replaced
   by the keys given (`[]` removes its links), so a fact moves to another parent or an
   association is set or removed; the hint then reaches every listener of its kind, on
   the old parent's page and the new one's. The cause and who sent it are kept with
-  State's answer and go along with the hint.
+  State's answer and go along with the hint. A change on an old version is refused only
+  when what it sets changed meanwhile: with `was` (the values and links the sender read)
+  and every field and relation it sets still as it was, it is applied on the current
+  version, so a write to other fields (Flow's, a connector's) never fails a user's save.
   """
   use GenServer
 
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Copies, Description, Flows, Ledger, Links, Progress, Rela}
+  alias AtlasState.{Components, Copies, Description, Flows, Ledger, Links, Progress, Rela}
 
   @description "_description"
 
@@ -181,9 +187,17 @@ defmodule AtlasState.Server do
   defp read(state, kind, content) do
     with {:ok, spec, state} <- kind_spec(state, kind) do
       case content do
-        %{"key" => key} -> {read_one(state, kind, spec, key), state}
-        %{"linked" => linked} when is_map(linked) -> {read_all(state, kind, spec, linked), state}
-        _ -> {read_all(state, kind, spec, %{}), state}
+        %{"key" => key, "plain" => true} ->
+          {read_plain(state, kind, spec, key), state}
+
+        %{"key" => key} ->
+          {read_one(state, kind, spec, key, content["incoming"] != false), state}
+
+        %{"linked" => linked} when is_map(linked) ->
+          {read_all(state, kind, spec, linked, content["plain"] != true), state}
+
+        _ ->
+          {read_all(state, kind, spec, %{}, true), state}
       end
     else
       {:error, :unavailable, state} -> {read_error(:unavailable), state}
@@ -205,20 +219,43 @@ defmodule AtlasState.Server do
 
   defp answered(text), do: %{"error" => text, "error_kind" => "answered"}
 
-  defp read_all(state, kind, spec, linked) do
+  # `progress?` false (a plain read): the facts and their links only, no progress.
+  defp read_all(state, kind, spec, linked, progress?) do
     with {:ok, facts} <- Rela.list(state.rela, spec["plural"]),
          facts =
            Enum.filter(facts, fn fact ->
              Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
            end),
-         {:ok, facts} <- with_progress(state, kind, facts) do
+         {:ok, facts} <- if(progress?, do: with_progress(state, kind, facts), else: {:ok, facts}) do
       %{"facts" => Enum.map(facts, &wire(state, kind, &1))}
     else
       {:error, reason} -> read_error(reason)
     end
   end
 
-  defp read_one(state, kind, spec, key) do
+  # Only the fact, as rela has it, with its links: one call to rela, for a reader that
+  # needs no progress, completion or what points at it (Flow walking up to the parents).
+  defp read_plain(state, kind, spec, key) do
+    case Rela.get(state.rela, spec["plural"], key) do
+      {:ok, fact} -> %{"fact" => wire(state, kind, fact)}
+      {:error, :not_found} -> %{"fact" => nil}
+      {:error, reason} -> read_error(reason)
+    end
+  end
+
+  # `full?` false (`"incoming": false`): the fact with its progress and completion, without
+  # what points at it, the kinds of its links, its history or its copy: what Flow needs.
+  defp read_one(state, kind, spec, key, false) do
+    with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
+         {:ok, [fact]} <- with_progress(state, kind, [fact]) do
+      %{"fact" => wire(state, kind, fact)}
+    else
+      {:error, :not_found} -> %{"fact" => nil}
+      {:error, reason} -> read_error(reason)
+    end
+  end
+
+  defp read_one(state, kind, spec, key, true) do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
          {:ok, [fact]} <- with_progress(state, kind, [fact]),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
@@ -289,8 +326,11 @@ defmodule AtlasState.Server do
           case Description.targets(state.description, kind, content["links"] || %{}) do
             {:ok, targets} ->
               with {:ok, targets} <- target_kinds(state, op, targets),
-                   :ok <- targets_exist(state, op, targets) do
-                store(state.rela, spec, op, key, values, content["version"], targets)
+                   :ok <- targets_exist(state, op, targets),
+                   :ok <- not_a_part(state, kind, op, key) do
+                parts = Components.of(state.description, kind, key)
+                was = content["was"]
+                write(state, spec, op, key, values, content["version"], targets, was, parts)
               end
 
             {:error, problems} ->
@@ -309,7 +349,112 @@ defmodule AtlasState.Server do
 
   defp store(state, _kind, _content), do: {{:refused, ["a fact needs an op and a key"]}, state}
 
-  defp store(rela, spec, "create", key, values, _version, targets) do
+  defp write(state, spec, op, key, values, version, targets, was, []),
+    do: store(state.rela, spec, op, key, values, version, targets, was)
+
+  # A fact with components: they are made first (the fact links to them), and when the fact
+  # is then not stored, the ones made here go again.
+  defp write(state, spec, "create", key, values, _version, targets, _was, parts) do
+    values = Map.reject(values, fn {_, v} -> v in [nil, ""] end)
+    plural = spec["plural"]
+
+    with :ok <- both(Description.check_key(spec, key), Description.check(spec, values, :create)),
+         {:ok, []} <- Rela.check_create(state.rela, plural, key, values, targets),
+         {:ok, made} <- make_parts(state, parts) do
+      linked =
+        for {relation, kind, part, _} <- parts, into: targets, do: {relation, {kind, [part]}}
+
+      case Rela.create(state.rela, plural, key, values, linked) do
+        {:ok, _warnings} ->
+          :stored
+
+        error ->
+          unmake_parts(state, made)
+
+          case error do
+            {:error, :exists} -> resent_create(state.rela, plural, key, values, targets)
+            error -> failure(error)
+          end
+      end
+    else
+      {:ok, warnings} -> {:refused, warnings}
+      {:error, :exists} -> resent_create(state.rela, plural, key, values, targets)
+      {:refused, _} = refused -> refused
+      {:refused, _, _} = refused -> refused
+      error -> failure(error)
+    end
+  end
+
+  # Deleted with the fact, by the keys they are made with, so a resent delete finds them too.
+  defp write(state, spec, "delete", key, values, version, targets, was, parts) do
+    case store(state.rela, spec, "delete", key, values, version, targets, was) do
+      :stored ->
+        Enum.reduce_while(parts, :stored, fn {_relation, kind, part, _}, :stored ->
+          case Rela.delete(state.rela, plural(state, kind), part, nil) do
+            :ok -> {:cont, :stored}
+            {:error, :not_found} -> {:cont, :stored}
+            error -> {:halt, failure(error)}
+          end
+        end)
+
+      other ->
+        other
+    end
+  end
+
+  defp write(state, spec, op, key, values, version, targets, was, _parts),
+    do: store(state.rela, spec, op, key, values, version, targets, was)
+
+  # Made here: `{:ok, [{kind, key}]}`; one there already with the same values is kept and
+  # not made again (a resent create).
+  defp make_parts(state, parts) do
+    Enum.reduce_while(parts, {:ok, []}, fn {_relation, kind, part, values}, {:ok, made} ->
+      spec = Description.kind(state.description, kind) || %{}
+
+      result =
+        with :ok <- Description.check(spec, values, :create) do
+          case Rela.create(state.rela, spec["plural"], part, values, %{}) do
+            {:ok, []} -> :made
+            {:ok, warnings} -> {:refused, warnings}
+            {:error, :exists} -> resent_create(state.rela, spec["plural"], part, values, %{})
+            error -> failure(error)
+          end
+        else
+          {:error, problems} -> {:refused, Enum.map(problems, &"#{part}: #{&1}")}
+        end
+
+      case result do
+        :made -> {:cont, {:ok, [{kind, part} | made]}}
+        :stored -> {:cont, {:ok, made}}
+        other -> unmake_parts(state, made) && {:halt, other}
+      end
+    end)
+  end
+
+  defp unmake_parts(state, made) do
+    for {kind, part} <- made, do: Rela.delete(state.rela, plural(state, kind), part, nil)
+    true
+  end
+
+  defp plural(state, kind), do: get_in(state.description, ["entities", kind, "plural"])
+
+  # A component goes with its fact, never alone while that fact exists.
+  defp not_a_part(state, kind, "delete", key) do
+    owners =
+      for {relation, _from} <- Components.owners(state.description, kind),
+          {:ok, keys} <- [Rela.incoming(state.rela, plural(state, kind), key, relation)],
+          owner <- keys,
+          do: owner
+
+    case owners do
+      [] -> :ok
+      _ -> {:refused, ["#{key} goes with #{Enum.join(owners, ", ")}; delete that instead"]}
+    end
+  end
+
+  defp not_a_part(_state, _kind, _op, _key), do: :ok
+
+  defp store(rela, spec, "create", key, values, _version, targets, _was) do
     values = Map.reject(values, fn {_, v} -> v in [nil, ""] end)
     plural = spec["plural"]
 
@@ -325,7 +470,7 @@ defmodule AtlasState.Server do
   end
 
   # The links of a change replace the relation's keys: a move to another parent.
-  defp store(rela, spec, "change", key, values, version, targets) do
+  defp store(rela, spec, "change", key, values, version, targets, was) do
     values = Map.new(values, fn {k, v} -> {k, if(v == "", do: nil, else: v)} end)
     plural = spec["plural"]
 
@@ -335,13 +480,13 @@ defmodule AtlasState.Server do
     else
       # The current rela has already stored the change; say so instead of hiding it.
       {:ok, warnings} -> {:refused, ["rela stored it with warnings: " | warnings]}
-      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values, targets)
+      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values, targets, was)
       {:error, :not_found} -> {:refused, ["#{key} does not exist (any more)"]}
       error -> failure(error)
     end
   end
 
-  defp store(rela, spec, "delete", key, _values, version, _targets) do
+  defp store(rela, spec, "delete", key, _values, version, _targets, _was) do
     # The current rela ignores If-Match on delete, so State compares the version itself.
     current =
       case Rela.get(rela, spec["plural"], key) do
@@ -363,7 +508,7 @@ defmodule AtlasState.Server do
     end
   end
 
-  defp store(_rela, _spec, op, _key, _values, _version, _targets),
+  defp store(_rela, _spec, op, _key, _values, _version, _targets, _was),
     do: {:refused, ["unknown op #{inspect(op)}"]}
 
   defp both(:ok, :ok), do: :ok
@@ -393,17 +538,51 @@ defmodule AtlasState.Server do
   end
 
   # A change on an old version: already applied (a resend) or a real conflict.
-  defp changed_meanwhile(rela, plural, key, values, targets) do
+  # A change on an old version: already applied (a resend), applied now when only other
+  # fields changed meanwhile, or a real conflict.
+  defp changed_meanwhile(rela, plural, key, values, targets, was, tries \\ 3) do
     case Rela.get(rela, plural, key) do
       {:ok, fact} ->
-        if same?(fact, values) and same_links?(fact, targets),
-          do: :stored,
-          else: {:refused, ["#{key} changed meanwhile; open it again"]}
+        cond do
+          same?(fact, values) and same_links?(fact, targets) ->
+            :stored
+
+          tries > 0 and untouched?(fact, values, targets, was) ->
+            case Rela.change(rela, plural, key, values, fact.version, targets) do
+              {:ok, []} ->
+                :stored
+
+              {:ok, warnings} ->
+                {:refused, ["rela stored it with warnings: " | warnings]}
+
+              {:error, :version_mismatch} ->
+                changed_meanwhile(rela, plural, key, values, targets, was, tries - 1)
+
+              error ->
+                failure(error)
+            end
+
+          true ->
+            {:refused, ["#{key} changed meanwhile; open it again"]}
+        end
 
       error ->
         failure(error)
     end
   end
+
+  # Every field and relation the change sets still has the value its sender read.
+  defp untouched?(fact, values, targets, was) when is_map(was) do
+    Enum.all?(values, fn {name, _} ->
+      Map.has_key?(was, name) and loose(fact.properties[name]) == loose(was[name])
+    end) and
+      Enum.all?(targets, fn {relation, _} ->
+        Map.has_key?(was, relation) and
+          Enum.sort(fact.links[relation] || []) == Enum.sort(List.wrap(was[relation]))
+      end)
+  end
+
+  defp untouched?(_fact, _values, _targets, _was), do: false
 
   defp same_links?(fact, targets) do
     Enum.all?(targets, fn {relation, {_kind, keys}} ->

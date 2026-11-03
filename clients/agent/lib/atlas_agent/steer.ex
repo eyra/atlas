@@ -39,7 +39,8 @@ defmodule AtlasAgent.Steer do
   has a Control connection of its own, closed when it is done.
 
   A run goes one step at a time, and waits `agent.step_pause_ms` (from the settings, 0 by
-  default) before the next, so a user can follow it. A stop is seen before the next
+  default) after a step shows as stored before the next, so a user can follow it and has
+  all of that wait to stop, however long State took. A stop is seen before the next
   step, also during that wait (UC-Atlas-18); the steps not run say so.
   """
 
@@ -252,11 +253,14 @@ defmodule AtlasAgent.Steer do
 
     case write(run.client, step) do
       {:ok, key} ->
-        Process.send_after(self(), :step, pause(state))
         done = if step["tool"] == "delete", do: "Deleted #{key}.", else: "Stored as #{key}."
         state = put_step(state, n, %{"state" => "stored", "detail" => done})
         state = keep_step(state, run.client, n, key, was)
-        show(%{state | run: %{run | order: rest}})
+        state = show(%{state | run: %{run | order: rest}})
+        # The pause starts once the step shows as stored, so the user always has all of it
+        # to stop the run, however long keeping the step took (State may be busy).
+        Process.send_after(self(), :step, pause(state))
+        state
 
       {:refused, reasons} ->
         state = put_step(state, n, %{"state" => "refused", "detail" => Enum.join(reasons, "; ")})

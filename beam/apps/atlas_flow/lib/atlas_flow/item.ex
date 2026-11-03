@@ -24,25 +24,41 @@ defmodule AtlasFlow.Item do
 
   def via(kind, key), do: {:via, Registry, {AtlasFlow.Items, {kind, key}}}
 
-  @doc "Look again soon: something it depends on may have changed."
-  def poke(pid), do: send(pid, :poke)
+  @doc """
+  Look again soon: something it depends on may have changed. `description` is the
+  engine's copy (read every round), so a poke costs no read of it; the timer reads it.
+  """
+  def poke(pid, description \\ nil), do: send(pid, {:poke, description})
 
   @impl true
   def init({kind, key, opts}) do
     :ok = AtlasBus.attach("flow/#{kind}/#{key}")
     send(self(), :look)
-    {:ok, %{kind: kind, key: key, every: Keyword.fetch!(opts, :every), timer: nil, soon: false}}
+
+    {:ok,
+     %{
+       kind: kind,
+       key: key,
+       every: Keyword.fetch!(opts, :every),
+       timer: nil,
+       soon: false,
+       description: nil
+     }}
   end
 
   @impl true
-  def handle_info(:poke, %{soon: true} = state), do: {:noreply, state}
+  def handle_info({:poke, description}, %{soon: true} = state),
+    do: {:noreply, %{state | description: description || state.description}}
 
-  def handle_info(:poke, state) do
-    Process.send_after(self(), :look, @settle)
-    {:noreply, %{state | soon: true}}
+  def handle_info({:poke, description}, state) do
+    Process.send_after(self(), {:look, :poked}, @settle)
+    {:noreply, %{state | soon: true, description: description}}
   end
 
-  def handle_info(:look, state) do
+  # On its timer it reads everything, the description too.
+  def handle_info(:look, state), do: handle_info({:look, :timer}, %{state | description: nil})
+
+  def handle_info({:look, _why}, state) do
     if state.timer, do: Process.cancel_timer(state.timer)
     state = %{state | soon: false, timer: nil}
 
@@ -56,13 +72,14 @@ defmodule AtlasFlow.Item do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp look(state) do
-    with %{"description" => description} <- Talk.read("_description", %{}),
+    with %{"description" => description} <- description(state),
          {name, flow} <- Definition.for_kind(description, state.kind),
-         %{"fact" => fact} when is_map(fact) <- Talk.read(state.kind, %{"key" => state.key}) do
+         %{"fact" => fact} when is_map(fact) <-
+           Talk.read(state.kind, %{"key" => state.key, "incoming" => false}) do
       parents = parent_relations(description, state.kind)
       children = children(parents, description, state.key)
       {current, vars} = Definition.state_of(flow, fact, children, parents)
-      move(state, name, flow, fact, current, vars)
+      move(state, description, {name, flow}, fact, current, vars)
 
       if current["done"],
         do: :stop,
@@ -76,8 +93,40 @@ defmodule AtlasFlow.Item do
     end
   end
 
-  # Store what differs: what is expected, and the owner, in one change with its cause.
-  defp move(state, name, flow, fact, current, vars) do
+  defp description(%{description: nil}), do: Talk.read("_description", %{})
+  defp description(%{description: description}), do: %{"description" => description}
+
+  # Store what differs: what is expected, and the owner, in one change with its cause, on
+  # the fact the definition writes on: its own, or the one its `on` relation points at.
+  defp move(state, description, {name, flow}, fact, current, vars) do
+    case written(description, flow, state.kind, fact) do
+      {:ok, kind, target} ->
+        write(state, name, flow, kind, target, current, vars)
+
+      {:missing, relation} ->
+        Logger.warning("flow #{name}: #{state.key} has no #{relation} to write on; tried again")
+
+      :unavailable ->
+        :ok
+    end
+  end
+
+  defp written(description, %{"on" => relation}, _kind, fact) when is_binary(relation) do
+    with [to] <- get_in(description, ["relations", relation, "to"]),
+         [key] <- get_in(fact, ["links", relation]) || [],
+         %{"fact" => target} when is_map(target) <-
+           Talk.read(to, %{"key" => key, "plain" => true}) do
+      {:ok, to, target}
+    else
+      %{"fact" => nil} -> {:missing, relation}
+      %{"error" => _} -> :unavailable
+      _ -> {:missing, relation}
+    end
+  end
+
+  defp written(_description, _flow, kind, fact), do: {:ok, kind, fact}
+
+  defp write(state, name, flow, kind, fact, current, vars) do
     expected = Definition.expected(current, vars)
     field = flow["field"]
 
@@ -95,9 +144,10 @@ defmodule AtlasFlow.Item do
         else: %{}
 
     if values != %{} or links != %{} do
+      # By flow: Flow passes over the hints of its own writes, on whichever fact.
       content = %{
         "op" => "change",
-        "key" => state.key,
+        "key" => fact["key"],
         "values" => values,
         "version" => nil,
         "by" => "flow",
@@ -106,7 +156,7 @@ defmodule AtlasFlow.Item do
 
       content = if links == %{}, do: content, else: Map.put(content, "links", links)
 
-      case Talk.put(state.kind, content) do
+      case Talk.put(kind, content) do
         {:stored, _} ->
           Logger.info("flow #{name}: #{state.key} #{current["name"]} (#{inspect(values)})")
 
@@ -136,7 +186,7 @@ defmodule AtlasFlow.Item do
     Enum.flat_map(parents, fn relation ->
       [from | _] = get_in(description, ["relations", relation, "from"]) || [nil]
 
-      case from && Talk.read(from, %{"linked" => %{relation => key}}) do
+      case from && Talk.read(from, %{"linked" => %{relation => key}, "plain" => true}) do
         %{"facts" => facts} -> facts
         _ -> []
       end

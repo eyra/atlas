@@ -7,6 +7,8 @@ defmodule AtlasFlow.Definition do
 
       "flows": {"<name>": {
         "kinds": [<kind>, ...],            the kinds it runs on
+        "on": "<relation>",                writes on the fact this relation of its fact
+                                           points at (its Assignment), not on the fact
         "field": "<property>",             where it writes what the owner is expected to do
         "owner_relation": "<relation>",    where it writes the owner (optional)
         "states": [                        in order: the first that holds is the state

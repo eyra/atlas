@@ -103,6 +103,55 @@ defmodule AtlasStateTest do
     assert {%{"title" => "Two"}, _} = FakeRela.facts(rela)["W-1"]
   end
 
+  test "an old version is no conflict when only other fields changed meanwhile (was)",
+       %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One", "shade" => "light"})
+    %{"fact" => %{"version" => version}} = read("widget", %{"key" => "W-1"})
+    read_with = %{"title" => "One", "shade" => "light"}
+
+    # Someone else (Flow, a connector) changes another field meanwhile.
+    FakeRela.poke(rela, "W-1", %{"done" => true})
+
+    assert {"stored", _, _} =
+             send_and_wait(Envelope.new("fact", "widget"), %{
+               "op" => "change",
+               "key" => "W-1",
+               "values" => %{"title" => "Uno", "shade" => "light"},
+               "version" => version,
+               "was" => read_with
+             })
+
+    # The user's change and the other writer's both stay.
+    assert {%{"title" => "Uno", "shade" => "light", "done" => true}, _} =
+             FakeRela.facts(rela)["W-1"]
+  end
+
+  test "an old version is refused when a field it sets changed meanwhile, or without was",
+       %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One", "shade" => "light"})
+    %{"fact" => %{"version" => version}} = read("widget", %{"key" => "W-1"})
+    FakeRela.poke(rela, "W-1", %{"shade" => "dark"})
+
+    change = fn content ->
+      send_and_wait(
+        Envelope.new("fact", "widget"),
+        Map.merge(%{"op" => "change", "key" => "W-1", "version" => version}, content)
+      )
+    end
+
+    assert {"refused", %{"reasons" => ["W-1 changed meanwhile; open it again"]}, _} =
+             change.(%{
+               "values" => %{"title" => "Uno", "shade" => "light"},
+               "was" => %{"title" => "One", "shade" => "light"}
+             })
+
+    # Without was, any change meanwhile is a conflict, as before.
+    FakeRela.poke(rela, "W-1", %{"done" => true})
+
+    assert {"refused", _, _} = change.(%{"values" => %{"title" => "Uno"}})
+    assert {%{"title" => "One", "shade" => "dark"}, _} = FakeRela.facts(rela)["W-1"]
+  end
+
   test "an empty optional value clears it; a required one cannot be cleared", %{rela: rela} do
     fact("create", "W-1", %{"title" => "One", "shade" => "dark"})
     assert {"stored", _, _} = fact("change", "W-1", %{"shade" => ""})
@@ -162,6 +211,18 @@ defmodule AtlasStateTest do
     assert %{"error" => "rela does not describe \"gadget\""} = read("gadget")
   end
 
+  test "a plain read answers the fact and its links only", %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One"})
+    FakeRela.link(rela, "P-1", "W-1")
+
+    assert %{"fact" => %{"key" => "W-1", "values" => %{"title" => "One"}} = plain} =
+             answer = read("widget", %{"key" => "W-1", "plain" => true})
+
+    refute Map.has_key?(answer, "incoming")
+    refute Map.has_key?(plain, "progress")
+    assert %{"fact" => nil} = read("widget", %{"key" => "W-9", "plain" => true})
+  end
+
   test "Atlas's additions are merged into the description State answers", %{rela: rela, dir: dir} do
     extra = Path.join(dir, "atlas.json")
 
@@ -180,6 +241,56 @@ defmodule AtlasStateTest do
     assert description["entities"]["widget"]["create"] == %{"ask" => ["title"]}
     assert description["entities"]["widget"]["plural"] == "widgets"
     refute Map.has_key?(description, "_about")
+  end
+
+  # A widget has a tag, made and deleted with it (a made-up component, as the Assignment).
+  test "a fact's components are made in the same write, and deleted with it", %{
+    rela: rela,
+    dir: dir
+  } do
+    extra = Path.join(dir, "atlas.json")
+
+    File.write!(
+      extra,
+      JSON.encode!(%{
+        "entities" => %{
+          "tag" => %{"plural" => "tags", "properties" => %{"title" => %{"type" => "string"}}}
+        },
+        "relations" => %{
+          "tagged" => %{
+            "from" => ["widget"],
+            "to" => ["tag"],
+            "max_outgoing" => 1,
+            "component" => %{"key" => "T-{key}", "values" => %{"title" => "{key}"}}
+          }
+        }
+      })
+    )
+
+    stop_supervised!(AtlasState.Server)
+
+    start_supervised!(
+      {AtlasState.Server, rela: {FakeRela, rela}, data_dir: dir, description_extra: extra}
+    )
+
+    assert {"stored", _, _} = fact("create", "W-1", %{"title" => "One"}, cause: "made")
+    assert {%{"title" => "W-1"}, _} = FakeRela.facts(rela)["T-W-1"]
+    assert %{"fact" => %{"links" => %{"tagged" => ["T-W-1"]}}} = read("widget", %{"key" => "W-1"})
+
+    # Sent again after a lost answer: stored, once.
+    assert {"stored", _, _} = fact("create", "W-1", %{"title" => "One"})
+    assert map_size(FakeRela.facts(rela)) == 2
+
+    # A fact that is refused leaves no component behind.
+    assert {"refused", _, _} = fact("create", "W-2", %{"title" => "Two", "shade" => "red"})
+    refute Map.has_key?(FakeRela.facts(rela), "T-W-2")
+
+    # Never alone while its fact exists; with it, always.
+    assert {"refused", %{"reasons" => ["T-W-1 goes with W-1; delete that instead"]}, _} =
+             fact("delete", "T-W-1", %{}, kind: "tag")
+
+    assert {"stored", _, _} = fact("delete", "W-1")
+    assert FakeRela.facts(rela) == %{}
   end
 
   test "a kind rela does not know says so, and what to do; never 'not reachable'", %{

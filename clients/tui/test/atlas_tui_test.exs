@@ -72,6 +72,22 @@ defmodule AtlasTuiTest do
   defp screen(model), do: model |> View.render(90, 20, 5) |> View.plain()
   defp tall(model), do: model |> View.render(90, 30, 5) |> View.plain()
 
+  test "a destination that is no page of the contract is not asked for" do
+    elsewhere =
+      update_in(@list, ["blocks", Access.at(0), "props", "actions"], fn _ ->
+        [%{"label" => "Somewhere", "key" => "c", "to" => "/nowhere/at/all"}]
+      end)
+
+    assert {m, []} = press(model(elsewhere), [{:char, "c"}])
+    assert screen(m) =~ "Not opened: /nowhere/at/all is no page of Control's"
+
+    # A page of the contract is.
+    assert {_, [{:send, %{"op" => "open", "to" => "/k/thing/new"}}]} =
+             press(model(@list), [{:char, "c"}])
+
+    assert {:ok, :item, %{kind: "thing", key: "T-1"}} = Blocks.match("/k/thing/T-1")
+  end
+
   test "keys: arrows, escape, enter, text" do
     assert Keys.parse("\e[A\e[Bx\r") == {[:up, :down, {:char, "x"}, :enter], ""}
     assert Keys.parse("ab\e") == {[{:char, "a"}, {:char, "b"}], "\e"}
