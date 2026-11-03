@@ -105,7 +105,7 @@ defmodule AtlasControl.SessionTest do
   test "a client sees the top list at once", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     c = client(port)
-    assert %{"env" => "test", "spec" => "0.11.0"} = next(c, "welcome")
+    assert %{"env" => "test", "spec" => "0.12.0"} = next(c, "welcome")
     assert %{"path" => "/", "title" => "Widgets", "reason" => "open"} = page = next(c, "page")
     assert rows(page) == ["One"]
   end
@@ -609,6 +609,25 @@ defmodule AtlasControl.SessionTest do
     assert %{"reason" => "stored"} = next(a, "page")
     assert %{"links" => %{"checked_by" => []}, "by" => "agent"} = List.last(FakeStore.sent())
     refute Map.has_key?(List.last(FakeStore.sent()), "cause")
+
+    # An agent that says which fact it is (`as`, IS-Atlas-54) is that fact; the migration
+    # stays the migration whatever it says.
+    {:ok, b} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
+
+    put(b, %{
+      "op" => "hello",
+      "env" => "test",
+      "client" => "agent",
+      "as" => "ada",
+      "spec" => AtlasControl.Blocks.version()
+    })
+
+    next(b, "page")
+    put(b, %{"op" => "open", "to" => "/k/widget/W-1/edit"})
+    next(b, "page")
+    put(b, %{"op" => "submit", "to" => "/k/widget/W-1/edit", "values" => %{"title" => "Una"}})
+    assert %{"reason" => "stored"} = next(b, "page")
+    assert %{"by" => "ada"} = List.last(FakeStore.sent())
   end
 
   test "an update sends only what was edited, with what the form was read with (was)",

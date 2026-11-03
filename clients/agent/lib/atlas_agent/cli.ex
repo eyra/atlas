@@ -201,7 +201,25 @@ defmodule AtlasAgent.CLI do
         Enum.join(["#{list["title"] || "Under it"}:" | rows], "\n")
       end)
 
-    Enum.join([item["title"] | fields] ++ lists, "\n")
+    Enum.join(todo_text(item["todo"]) ++ [item["title"] | fields] ++ lists, "\n")
+  end
+
+  # What to do, for its owner, before the rest (IS-Atlas-54).
+  defp todo_text(nil), do: []
+
+  defp todo_text(todo) do
+    fields =
+      Enum.map(todo["fields"], fn [label, value] ->
+        case String.split(value || "", "\n") do
+          [line] ->
+            "  #{label}: #{line}"
+
+          lines ->
+            "  #{label}:\n" <> Enum.map_join(lines, "\n", &String.trim_trailing("    " <> &1))
+        end
+      end)
+
+    [todo["title"] | fields] ++ [""]
   end
 
   # The fact that set a link: "since 3 Nov 15:10, by melle: why", in local time.

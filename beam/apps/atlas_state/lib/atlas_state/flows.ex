@@ -60,6 +60,15 @@ defmodule AtlasState.Flows do
                        nil ->
                    ["#{written || kind} has no #{field} to write what is expected"]
 
+                 is_binary(flow["state_field"]) and
+                     get_in(description, [
+                       "entities",
+                       written || kind,
+                       "properties",
+                       flow["state_field"]
+                     ]) == nil ->
+                   ["#{written || kind} has no #{flow["state_field"]} to write its state"]
+
                  true ->
                    []
                end),
@@ -127,7 +136,7 @@ defmodule AtlasState.Flows do
   # field or that relation: of the kinds it writes on (its own, or what `on` points at), or
   # of its own kinds through `on`.
   defp writes(description, flow) do
-    written = Enum.reject([flow["field"], flow["owner_relation"]], &is_nil/1)
+    written = Enum.reject([flow["field"], flow["state_field"], flow["owner_relation"]], &is_nil/1)
 
     conditions =
       for state <- List.wrap(flow["states"]),

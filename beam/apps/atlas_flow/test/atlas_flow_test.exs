@@ -201,6 +201,28 @@ defmodule AtlasFlowTest do
       eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
     end
 
+    test "with a state field, the state's name is written; alone it moves no owner" do
+      FakeState.set_description(
+        FakeState.description(Map.put(FakeState.flow(), "state_field", "step"))
+      )
+
+      FakeState.put("clerk", %{"key" => "cy"})
+
+      FakeState.put("box", %{
+        "key" => "B-1",
+        "values" => %{"todo" => "Pack it"},
+        "links" => %{"owned_by" => ["cy"]},
+        "origins" => %{"owned_by" => %{"keys" => ["cy"], "by" => "ada", "cause" => "cy packs"}}
+      })
+
+      engine()
+      eventually(fn -> FakeState.get("box", "B-1")["values"]["step"] == "packing" end)
+      # Only the name: what is expected was right, and cy, whom ada chose, stays.
+      assert [%{"values" => %{"step" => "packing"}} = sent] = FakeState.sent()
+      refute Map.has_key?(sent, "links")
+      assert FakeState.get("box", "B-1")["links"]["owned_by"] == ["cy"]
+    end
+
     test "handed over before Flow's first look: the first look writes what is expected only" do
       FakeState.put("clerk", %{"key" => "cy"})
 

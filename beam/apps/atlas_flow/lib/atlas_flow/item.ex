@@ -150,6 +150,10 @@ defmodule AtlasFlow.Item do
 
     links = if owner? == :yes, do: %{relation => List.wrap(owner)}, else: %{}
 
+    # The state's name, so a page can show its owner what to do (`state_field`). Written
+    # with the rest, and alone when only it differs; it never counts as a move by itself.
+    values = Map.merge(values, state_value(flow["state_field"], fact, current))
+
     cond do
       # State did not say whether the owner exists: write nothing now, rather than what
       # is expected without its owner; the timer tries again.
@@ -218,6 +222,13 @@ defmodule AtlasFlow.Item do
     why = current["why"] || current["name"]
     to = if owner, do: " → #{owner}", else: ""
     "Flow #{name}: #{why}#{to}"
+  end
+
+  defp state_value(nil, _fact, _current), do: %{}
+
+  defp state_value(field, fact, current) do
+    name = if current && !current["done"], do: current["name"], else: nil
+    if blank(fact["values"][field]) == blank(name), do: %{}, else: %{field => name || ""}
   end
 
   defp blank(value) when value in [nil, ""], do: nil

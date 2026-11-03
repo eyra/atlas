@@ -18,7 +18,9 @@ defmodule AtlasBFFContract.Blocks do
   # 0.10.0: the form submits Control takes (defendpoint, call :submit).
   # 0.11.0: a form's submit_to and a confirm's confirm_to name an endpoint and its params
   # (a `call`), no longer a path; the session's other calls; hello carries the version.
-  version "0.11.0"
+  # 0.12.0: a part of role todo (what its owner is to do); hello may say `as`, the fact an
+  # agent client is.
+  version "0.12.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -156,8 +158,8 @@ defmodule AtlasBFFContract.Blocks do
   # Ask of every new kind: does it name a meaning, or an appearance?
 
   # A top-level division of a view, with its title. `role` says what it holds: `main`
-  # (the item itself) or `related` (what it links to). Parts do not nest in parts;
-  # sections nest in parts.
+  # (the item itself), `related` (what it links to) or `todo` (what its owner is to do,
+  # shown to the owner only, first). Parts do not nest in parts; sections nest in parts.
   defmarkup :part do
     field :title, :string, required: true
     field :role, :string, required: true
@@ -212,11 +214,13 @@ defmodule AtlasBFFContract.Blocks do
 
   # A client's first message: its environment, what it is, and the contract version it
   # implements. Control of another environment, or one newer than the client's version,
-  # answers bye and closes; else welcome, then its start page.
+  # answers bye and closes; else welcome, then its start page. `as`: the key of the fact
+  # an agent client is (an agent's, such as coordinator), when it says so; no sign-in yet.
   defmodel :hello do
     field :env, :string, required: true
     field :client, :string, required: true
     field :spec, :string, required: true
+    field :as, :string
   end
 
   defmodel :welcome do

@@ -41,7 +41,16 @@ defmodule AtlasAgent.Client do
   @version AtlasBFFContract.Blocks.__schema__().version
 
   @doc "The hello this client says: its environment, what it is, and its contract version."
-  def hello(env, as), do: %{"op" => "hello", "env" => env, "client" => as, "spec" => @version}
+  def hello(env, as) do
+    hello = %{"op" => "hello", "env" => env, "client" => as, "spec" => @version}
+
+    # The fact an agent is (an agent's key), from ATLAS_AS: it then owns what is assigned
+    # to that agent and sees what to do (IS-Atlas-54). The migration is the migration.
+    case System.get_env("ATLAS_AS") do
+      who when is_binary(who) and who != "" and as != "migration" -> Map.put(hello, "as", who)
+      _ -> hello
+    end
+  end
 
   @doc "The page at `path`."
   def open(client, path) do

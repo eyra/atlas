@@ -150,7 +150,8 @@ defmodule AtlasAgent do
   end
 
   @doc """
-  One fact: `%{"key", "path", "title", "fields" => [[label, value]], "origins" =>
+  One fact: `%{"key", "path", "title", "fields" => [[label, value]], "todo" => %{"title",
+  "fields"}` (only for its owner), "origins" =>
   %{label => %{"since", "by", "cause"}}, "lists" => [%{"title", "rows"}], "values" =>
   %{name => text}}`. `origins` holds the fact that set a field's value, for a link. `values`
   are what its change form holds, so exactly what was stored; empty when it has no change
@@ -158,7 +159,15 @@ defmodule AtlasAgent do
   """
   def get(client, key) do
     with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}") do
-      case Client.blocks(page, "item") do
+      # The fact's own item; its owner's What to do part, when the client is the owner, is
+      # a second one (IS-Atlas-54).
+      items =
+        for %{"type" => "item", "props" => props} = b <- page["blocks"] || [],
+            do: {b["id"], props}
+
+      todo = Enum.find_value(items, fn {id, props} -> id == "todo" && props end)
+
+      case for({id, props} <- items, id != "todo", do: props) do
         [item] ->
           # The change form holds the exact values; it answers at its path also for a kind
           # that offers no key to change it (one only the agent writes).
@@ -179,13 +188,21 @@ defmodule AtlasAgent do
              "origins" => origins,
              "lists" => lists(page),
              "values" => values
-           }}
+           }
+           |> then(&if(todo, do: Map.put(&1, "todo", todo_of(todo)), else: &1))}
 
         _ ->
           {:error, why(page, key)}
       end
     end
   end
+
+  # What to do, as the page words it: its title and its fields.
+  defp todo_of(todo),
+    do: %{
+      "title" => todo["title"],
+      "fields" => Enum.map(todo["fields"] || [], &[&1["label"], &1["value"]])
+    }
 
   @doc """
   The kinds Control describes (`/_kinds`): `[%{"kind", "title", "fields" => [[label,
