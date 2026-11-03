@@ -55,21 +55,18 @@ defmodule AtlasControl.Pages do
 
   # Routes
 
-  def route("/"), do: :home
-  def route("/_kinds"), do: :kinds
-
+  # The pages are the contract's (`defpage` in AtlasBFFContract.Blocks): Control serves
+  # those and nothing else; a path outside them is no page (`:unknown`).
   def route(path) do
-    case path |> String.trim_leading("/") |> String.split("/") |> Enum.map(&URI.decode/1) do
-      ["k", kind] -> {:list, kind}
-      ["k", kind, "new"] -> {:new, kind}
-      ["k", kind, "new", relation, parent] -> {:new, kind, {relation, parent}}
-      ["k", kind, key] -> {:item, kind, key}
-      ["k", kind, key, "edit"] -> {:edit, kind, key}
-      ["k", kind, key, "delete"] -> {:delete, kind, key}
-      ["k", kind, key, "links", relation] -> {:links, kind, key, relation}
-      ["k", kind, key, "set", relation] -> {:set, kind, key, relation}
-      ["k", kind, key, "remove", relation] -> {:remove, kind, key, relation}
-      _ -> :unknown
+    case Blocks.match(path) do
+      {:ok, :home, _} -> :home
+      {:ok, :kinds, _} -> :kinds
+      {:ok, :list, p} -> {:list, p.kind}
+      {:ok, :new, p} -> {:new, p.kind}
+      {:ok, :new_under, p} -> {:new, p.kind, {p.relation, p.parent}}
+      {:ok, page, p} when page in [:item, :edit, :delete] -> {page, p.kind, p.key}
+      {:ok, page, p} when page in [:links, :set, :remove] -> {page, p.kind, p.key, p.relation}
+      :error -> :unknown
     end
   end
 
@@ -107,6 +104,16 @@ defmodule AtlasControl.Pages do
   end
 
   def resolve(route, _description), do: route
+
+  @doc """
+  The kinds whose ids have no prefix (made from a name, say). A key no prefix claims is of
+  one of them; when there are several, Control asks State which one has it.
+  """
+  def unprefixed_kinds(description) do
+    for {kind, spec} <- Enum.sort(description["entities"] || %{}),
+        unprefixed?(spec),
+        do: kind
+  end
 
   defp kind_of_key(description, key) do
     matches =
@@ -171,21 +178,32 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def path(:kinds), do: "/_kinds"
-  def path({:list, kind}), do: "/k/#{enc(kind)}"
-  def path({:new, kind}), do: "/k/#{enc(kind)}/new"
+  @doc """
+  The route a submit endpoint of the contract (`defendpoint`, call :submit) acts on, from
+  its name and parameters: the page whose form or confirm it comes from.
+  """
+  def submit_route(:create, p), do: {:new, p.kind}
+  def submit_route(:create_under, p), do: {:new, p.kind, {p.relation, p.parent}}
+  def submit_route(:update, p), do: {:edit, p.kind, p.key}
+  def submit_route(:delete, p), do: {:delete, p.kind, p.key}
+  def submit_route(:link, p), do: {:links, p.kind, p.key, p.relation}
+  def submit_route(:accept, p), do: {:set, p.kind, p.key, p.relation}
+  def submit_route(:reopen, p), do: {:remove, p.kind, p.key, p.relation}
+
+  # A route's path, by the contract's page for it.
+  def path(:home), do: Blocks.path(:home)
+  def path(:kinds), do: Blocks.path(:kinds)
+  def path({:list, kind}), do: Blocks.path(:list, kind: kind)
+  def path({:new, kind}), do: Blocks.path(:new, kind: kind)
 
   def path({:new, kind, {relation, parent}}),
-    do: "/k/#{enc(kind)}/new/#{enc(relation)}/#{enc(parent)}"
+    do: Blocks.path(:new_under, kind: kind, relation: relation, parent: parent)
 
-  def path({:item, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}"
-  def path({:edit, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/edit"
-  def path({:delete, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/delete"
+  def path({page, kind, key}) when page in [:item, :edit, :delete],
+    do: Blocks.path(page, kind: kind, key: key)
 
   def path({page, kind, key, relation}) when page in [:links, :set, :remove],
-    do: "/k/#{enc(kind)}/#{enc(key)}/#{page}/#{enc(relation)}"
-
-  defp enc(part), do: URI.encode(part, &URI.char_unreserved?/1)
+    do: Blocks.path(page, kind: kind, key: key, relation: relation)
 
   @doc """
   The name and key of a CRUD operation (`:create`, `:update`, `:delete`) on a kind, as
@@ -284,11 +302,17 @@ defmodule AtlasControl.Pages do
   spec}]`. A fact's page lists those facts; under a parent relation it can add one.
   """
   def child_relations(description, kind) do
-    for {relation, %{"to" => to, "from" => [from]} = spec} <-
+    # A relation from several kinds (what is assigned to someone, say) is one list per kind.
+    for {relation, %{"to" => to, "from" => [_ | _] = froms} = spec} <-
           Enum.sort(description["relations"] || %{}),
         kind in to,
+        from <- froms,
         do: {relation, from, spec}
   end
+
+  # The id of a related list on a page; one per kind for a relation from several.
+  defp list_id(relation, from, %{"from" => [_, _ | _]}), do: "list:#{relation}:#{from}"
+  defp list_id(relation, _from, _spec), do: "list:" <> relation
 
   @doc "The reads a route needs: `[{kind, content}]`."
   def reads(:home, description) do
@@ -323,16 +347,14 @@ defmodule AtlasControl.Pages do
 
   def reads({_, kind, key}, _), do: [{kind, %{"key" => key}}]
 
-  # The fact, and the facts it may point at.
   # Setting a link that needs the facts under it completed reads them, as the page does.
   def reads({:set, kind, key, _relation}, description), do: reads({:item, kind, key}, description)
   def reads({:remove, kind, key, _relation}, _description), do: [{kind, %{"key" => key}}]
 
+  # The fact, and the facts it may point at: of each kind the relation points at.
   def reads({:links, kind, key, relation}, description) do
-    case get_in(description, ["relations", relation, "to"]) do
-      [to] -> [{kind, %{"key" => key}}, {to, %{}}]
-      _ -> [{kind, %{"key" => key}}]
-    end
+    tos = get_in(description, ["relations", relation, "to"]) || []
+    [{kind, %{"key" => key}} | for(to <- tos, do: {to, %{}})]
   end
 
   def reads(:unknown, _), do: []
@@ -494,6 +516,9 @@ defmodule AtlasControl.Pages do
     page("Kinds", "/", items)
   end
 
+  def render(:unknown, _description, _answers, _form),
+    do: missing("No such page", "Control serves no page at this path.", "/")
+
   def render(route, description, answers, form) do
     kind = kind_of(route)
 
@@ -563,8 +588,8 @@ defmodule AtlasControl.Pages do
         back = if start?, do: nil, else: "/"
         page(plural(spec, kind), back, [list])
 
-      %{"error" => error} ->
-        unavailable(error, "/")
+      %{"error" => _} = failed ->
+        unavailable(failed, "/")
     end
   end
 
@@ -626,7 +651,7 @@ defmodule AtlasControl.Pages do
             create_key == nil and match?(%{"facts" => []}, answer)
           end)
           |> Enum.map(fn {{{relation, from, rel_spec}, child_answer}, create_key} ->
-            {"list:" <> relation,
+            {list_id(relation, from, rel_spec),
              child_list(description, {relation, from, rel_spec}, key, child_answer, create_key)}
           end)
 
@@ -655,8 +680,8 @@ defmodule AtlasControl.Pages do
         content = [{"item", item} | for({id, {_title, list}} <- references, do: {id, list})]
         page("#{singular(spec, kind)} #{key}", back, content, markup)
 
-      %{"error" => error} ->
-        unavailable(error, path({:list, kind}))
+      %{"error" => _} = failed ->
+        unavailable(failed, path({:list, kind}))
     end
   end
 
@@ -713,8 +738,8 @@ defmodule AtlasControl.Pages do
             page(title, back, [form_block])
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -752,8 +777,8 @@ defmodule AtlasControl.Pages do
             missing(title, problem, back)
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -804,8 +829,8 @@ defmodule AtlasControl.Pages do
             page(title, back, [form_block])
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -877,8 +902,8 @@ defmodule AtlasControl.Pages do
 
         page("#{verb(:update)} #{key}", back, [form_block])
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -923,8 +948,8 @@ defmodule AtlasControl.Pages do
             page("#{verb(:delete)} #{key}", back, [confirm])
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -961,7 +986,9 @@ defmodule AtlasControl.Pages do
     keys
   end
 
-  defp link_input(%{"max_outgoing" => 1}, value, [%{"facts" => facts}]) do
+  defp link_input(%{"max_outgoing" => 1}, value, [_ | _] = targets) do
+    facts = Enum.flat_map(targets, &(&1["facts"] || []))
+
     Blocks.input(
       name: "to",
       label: "To",
@@ -1098,6 +1125,12 @@ defmodule AtlasControl.Pages do
     from_spec = description["entities"][from] || %{}
     title = String.capitalize(get_in(rel_spec, ["inverse", "label"]) || plural(from_spec, from))
 
+    # One list per kind for a relation from several: the kind says which.
+    title =
+      if length(rel_spec["from"] || []) > 1,
+        do: "#{title}: #{plural(from_spec, from)}",
+        else: title
+
     rows =
       case answer do
         %{"facts" => facts} ->
@@ -1215,14 +1248,23 @@ defmodule AtlasControl.Pages do
   defp parent_lists(description, kind, fact) do
     for {relation, spec} <- Enum.sort(description["relations"] || %{}),
         kind in (spec["from"] || []),
-        [to] <- [spec["to"]],
+        tos = spec["to"] || [],
+        tos != [],
         keys = get_in(fact, ["links", relation]) || [],
         keys != [] do
-      to_spec = get_in(description, ["entities", to]) || %{}
+      # A relation that points at several kinds: State says which kind each key is.
+      kind_of = fn key ->
+        case tos do
+          [to] -> to
+          _ -> get_in(fact, ["link_kinds", relation, key])
+        end
+      end
 
       rows =
-        for key <- Enum.sort(keys),
-            do: Blocks.row(id: key, label: singular(to_spec, to), to: path({:item, to, key}))
+        for key <- Enum.sort(keys), to = kind_of.(key), to != nil do
+          to_spec = get_in(description, ["entities", to]) || %{}
+          Blocks.row(id: key, label: singular(to_spec, to), to: path({:item, to, key}))
+        end
 
       {"parent:" <> relation,
        {String.capitalize(spec["label"] || relation), Blocks.list(rows: rows)}}
@@ -1255,13 +1297,19 @@ defmodule AtlasControl.Pages do
   defp missing(title, text, back),
     do: page(title, back, [Blocks.confirm(title: title, text: text, cancel_to: back)])
 
-  defp unavailable(error, back),
-    do:
-      missing(
-        "State did not answer",
-        "#{error}. Showing nothing rather than something old.",
-        back
-      )
+  # A read that failed, titled by what happened: State did not answer at all, rela could not
+  # be reached, or rela answered with an error (its own words, and what to do, are in the
+  # text). Never "not reachable" when rela answered.
+  defp unavailable(%{"error" => error} = failed, back) do
+    title =
+      case failed["error_kind"] do
+        "unreachable" -> "rela is not reachable"
+        "answered" -> "rela answered with an error"
+        _ -> "State did not answer"
+      end
+
+    missing(title, "#{error}. Showing nothing rather than something old.", back)
+  end
 
   @doc "The relations whose facts point at `kind`, with the keys pointing at this fact."
   def children(description, kind, answer) do

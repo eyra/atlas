@@ -91,7 +91,7 @@ defmodule AtlasControl.SessionTest do
   test "a client sees the top list at once", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     c = client(port)
-    assert %{"env" => "test", "spec" => "0.8.0"} = next(c, "welcome")
+    assert %{"env" => "test", "spec" => "0.10.0"} = next(c, "welcome")
     assert %{"path" => "/", "title" => "Widgets", "reason" => "open"} = page = next(c, "page")
     assert rows(page) == ["One"]
   end
@@ -314,6 +314,22 @@ defmodule AtlasControl.SessionTest do
 
     put(a, %{"op" => "submit", "to" => "/k/tag/new/on_part/P-1", "values" => %{"name" => "#c/1"}})
     assert %{"path" => "/k/tag/T-c-1", "reason" => "stored"} = next(a, "page")
+  end
+
+  test "a submit to anything but a submit endpoint of the contract is refused, unsent",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    a = client(port)
+    next(a, "page")
+
+    for to <- ["/k/widget", "/k/widget/W-1", "/nowhere"] do
+      put(a, %{"op" => "submit", "to" => to, "values" => %{"title" => "Two"}})
+
+      assert %{"tone" => "error", "text" => text} = next(a, "notice")
+      assert text == "Control takes no submit at #{to}."
+    end
+
+    assert FakeStore.last_fact() == nil
   end
 
   test "a client that knows only the parent's key submits to _parent", %{port: port} do

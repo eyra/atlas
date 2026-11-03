@@ -111,6 +111,10 @@ defmodule AtlasState.Server do
       # Not recorded: the same id may be stored once rela is back.
       :unavailable ->
         reply(envelope, "refused", Map.put(about, "reasons", ["rela is not reachable"]), nil)
+
+      # rela answered but failed: not recorded either, so the same id may be stored later.
+      {:unavailable, reason} ->
+        reply(envelope, "refused", Map.put(about, "reasons", [reason]), nil)
     end
   end
 
@@ -174,41 +178,95 @@ defmodule AtlasState.Server do
   defp read(state, @description, _content) do
     case describe(state) do
       {:ok, description} -> {%{"description" => description}, %{state | description: description}}
-      {:error, _} -> {%{"error" => "rela is not reachable"}, state}
+      {:error, reason} -> {read_error(reason), state}
     end
   end
 
   defp read(state, kind, content) do
     with {:ok, spec, state} <- kind_spec(state, kind) do
       case content do
-        %{"key" => key} -> {read_one(state, kind, spec, key), state}
-        %{"linked" => linked} when is_map(linked) -> {read_all(state, kind, spec, linked), state}
-        _ -> {read_all(state, kind, spec, %{}), state}
+        %{"key" => key, "plain" => true} ->
+          {read_plain(state, kind, spec, key), state}
+
+        %{"key" => key} ->
+          {read_one(state, kind, spec, key, content["incoming"] != false), state}
+
+        %{"linked" => linked} when is_map(linked) ->
+          {read_all(state, kind, spec, linked, content["plain"] != true), state}
+
+        _ ->
+          {read_all(state, kind, spec, %{}, true), state}
       end
     else
-      {:error, reason, state} -> {%{"error" => reason}, state}
+      {:error, :unavailable, state} -> {read_error(:unavailable), state}
+      {:error, reason, state} -> {%{"error" => reason, "error_kind" => "answered"}, state}
     end
   end
 
-  defp read_all(state, kind, spec, linked) do
+  # What a read could not do, and whether rela answered at all: "unreachable" (no
+  # connection) or "answered" (rela said no, or failed), with rela's own words.
+  defp read_error(:unavailable),
+    do: %{"error" => "rela is not reachable", "error_kind" => "unreachable"}
+
+  defp read_error({:invalid, problems}),
+    do: answered("rela answered with an error: " <> Enum.join(problems, "; "))
+
+  defp read_error({:failed, text}), do: answered(text)
+  defp read_error(:not_found), do: answered("rela answered: not found")
+  defp read_error(other), do: answered("rela answered with an error: #{inspect(other)}")
+
+  defp answered(text), do: %{"error" => text, "error_kind" => "answered"}
+
+  # `progress?` false (a plain read): the facts and their links only, no progress.
+  defp read_all(state, kind, spec, linked, progress?) do
     with {:ok, facts} <- Rela.list(state.rela, spec["plural"]),
          facts =
            Enum.filter(facts, fn fact ->
              Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
            end),
-         {:ok, facts} <- with_progress(state, kind, facts) do
+         {:ok, facts} <- if(progress?, do: with_progress(state, kind, facts), else: {:ok, facts}) do
       %{"facts" => Enum.map(facts, &wire(state, kind, &1))}
     else
-      {:error, _} -> %{"error" => "rela is not reachable"}
+      {:error, reason} -> read_error(reason)
     end
   end
 
-  defp read_one(state, kind, spec, key) do
+  # Only the fact, as rela has it, with its links: one call to rela, for a reader that
+  # needs no progress, completion or what points at it (Flow walking up to the parents).
+  defp read_plain(state, kind, spec, key) do
+    case Rela.get(state.rela, spec["plural"], key) do
+      {:ok, fact} -> %{"fact" => wire(state, kind, fact)}
+      {:error, :not_found} -> %{"fact" => nil}
+      {:error, reason} -> read_error(reason)
+    end
+  end
+
+  # `full?` false (`"incoming": false`): the fact with its progress and completion, without
+  # what points at it, the kinds of its links, its history or its copy: what Flow needs.
+  defp read_one(state, kind, spec, key, false) do
+    with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
+         {:ok, [fact]} <- with_progress(state, kind, [fact]) do
+      %{"fact" => wire(state, kind, fact)}
+    else
+      {:error, :not_found} -> %{"fact" => nil}
+      {:error, reason} -> read_error(reason)
+    end
+  end
+
+  defp read_one(state, kind, spec, key, true) do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
          {:ok, [fact]} <- with_progress(state, kind, [fact]),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
+      wired = wire(state, kind, fact)
+
+      wired =
+        case link_kinds(state, kind, wired["links"]) do
+          kinds when kinds == %{} -> wired
+          kinds -> Map.put(wired, "link_kinds", kinds)
+        end
+
       answer = %{
-        "fact" => wire(state, kind, fact),
+        "fact" => wired,
         "incoming" => incoming,
         "history" => Links.all(state.links, kind, key)
       }
@@ -219,7 +277,7 @@ defmodule AtlasState.Server do
       end
     else
       {:error, :not_found} -> %{"fact" => nil}
-      {:error, _} -> %{"error" => "rela is not reachable"}
+      {:error, reason} -> read_error(reason)
     end
   end
 
@@ -265,7 +323,8 @@ defmodule AtlasState.Server do
         result =
           case Description.targets(state.description, kind, content["links"] || %{}) do
             {:ok, targets} ->
-              with :ok <- targets_exist(state, op, targets) do
+              with {:ok, targets} <- target_kinds(state, op, targets),
+                   :ok <- targets_exist(state, op, targets) do
                 store(
                   state.rela,
                   spec,
@@ -430,6 +489,72 @@ defmodule AtlasState.Server do
     end)
   end
 
+  # A relation that points at several kinds: which kind each
+  # key is, found by reading it in each. rela takes one kind per link, so all keys of the
+  # relation must be of one; a key of none, or of two, is refused.
+  defp target_kinds(state, op, targets) when op in ["create", "change"] do
+    Enum.reduce_while(targets, {:ok, %{}}, fn
+      {relation, {kinds, keys}}, {:ok, acc} when is_list(kinds) ->
+        case key_kinds(state, kinds, keys) do
+          {:ok, kind} -> {:cont, {:ok, Map.put(acc, relation, {kind, keys})}}
+          {:refused, _} = refused -> {:halt, refused}
+        end
+
+      {relation, target}, {:ok, acc} ->
+        {:cont, {:ok, Map.put(acc, relation, target)}}
+    end)
+  end
+
+  defp target_kinds(_state, _op, targets), do: {:ok, targets}
+
+  # Removing the links: any of the kinds will do.
+  defp key_kinds(_state, [kind | _], []), do: {:ok, kind}
+
+  defp key_kinds(state, kinds, keys) do
+    found =
+      for key <- keys,
+          into: %{},
+          do: {key, Enum.filter(kinds, &kind_has?(state, &1, key))}
+
+    case found |> Map.values() |> List.flatten() |> Enum.uniq() do
+      [kind] ->
+        if Enum.all?(found, fn {_, of} -> of == [kind] end),
+          do: {:ok, kind},
+          else: {:refused, missing_keys(found, kinds)}
+
+      [] ->
+        {:refused, missing_keys(found, kinds)}
+
+      several ->
+        {:refused,
+         [
+           "#{Enum.join(keys, ", ")} must all be one kind; they are #{Enum.join(several, " and ")}"
+         ]}
+    end
+  end
+
+  defp missing_keys(found, kinds) do
+    for {key, []} <- found, do: "#{key} is not a #{Enum.join(kinds, " or ")}"
+  end
+
+  defp kind_has?(state, kind, key) do
+    plural = get_in(state.description, ["entities", kind, "plural"])
+    match?({:ok, _}, Rela.get(state.rela, plural, key))
+  end
+
+  # The kind of each key a fact links to through a relation that points at several kinds,
+  # so a client can open it: `%{relation => %{key => kind}}`. Only for one fact.
+  defp link_kinds(state, kind, links) do
+    for {relation, %{"to" => [_, _ | _] = kinds, "from" => from}} <-
+          state.description["relations"] || %{},
+        kind in from,
+        keys = links[relation] || [],
+        keys != [],
+        into: %{} do
+      {relation, Map.new(keys, fn key -> {key, Enum.find(kinds, &kind_has?(state, &1, key))} end)}
+    end
+  end
+
   # The current rela answers 422 to a create that links to a missing fact, but stores the
   # fact anyway, without the link. So State checks the targets exist before it creates,
   # and before a change moves a fact, to say which one is missing.
@@ -454,29 +579,39 @@ defmodule AtlasState.Server do
   defp loose(value), do: to_string(value)
 
   defp failure({:error, :unavailable}), do: :unavailable
+  defp failure({:error, {:failed, text}}), do: {:unavailable, text}
   defp failure({:error, {:invalid, problems}}), do: {:refused, problems}
   defp failure({:error, problems}) when is_list(problems), do: {:refused, problems}
   defp failure({:error, other}), do: {:refused, [inspect(other)]}
 
+  # A kind rela describes has a plural (its collection). One that only Atlas's additions
+  # (rela/atlas.json) name is one rela does not know: it runs an older description than
+  # this build. The description is read again first, in case rela was restarted since.
   defp kind_spec(state, kind) do
     case state.description && Description.kind(state.description, kind) do
-      nil ->
+      %{"plural" => _} = spec ->
+        {:ok, spec, state}
+
+      _ ->
         case describe(state) do
           {:ok, description} ->
             state = %{state | description: description}
 
             case Description.kind(description, kind) do
               nil -> {:error, "rela does not describe #{inspect(kind)}", state}
-              spec -> {:ok, spec, state}
+              %{"plural" => _} = spec -> {:ok, spec, state}
+              _ -> {:error, older(kind), state}
             end
 
           {:error, _} ->
             {:error, :unavailable, state}
         end
-
-      spec ->
-        {:ok, spec, state}
     end
+  end
+
+  defp older(kind) do
+    "rela does not know #{kind}: its description is older than this build; " <>
+      "run atlas restart --env #{AtlasBus.environment()}"
   end
 
   defp content_op(%{"op" => op}) when is_binary(op), do: op

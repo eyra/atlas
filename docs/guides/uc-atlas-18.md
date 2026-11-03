@@ -44,7 +44,7 @@ A plan that ran by itself shows like an accepted one, so each step can still be 
 
 ## How it works
 
-The agent (`atlas steer`) runs one step at a time and reads its messages between steps, so a stop is seen before the next step. It waits `agent.step_pause_ms` between steps, set in `env/<env>.json` and 0 when unset. That is long enough to follow a run and to stop it. The end-to-end test uses 500.
+The agent (`atlas steer`) runs one step at a time and reads its messages between steps, so a stop is seen before the next step. It waits `agent.step_pause_ms` between steps, set in `env/<env>.json` and 0 when unset. That is long enough to follow a run and to stop it. The end-to-end test uses 2000: its keys wait for a settled screen, and the TUI holds an Escape a moment (IS-Atlas-68).
 
 ## What changed for this
 

@@ -36,6 +36,53 @@
       "name": "note"
     }
   ],
+  "endpoints": [
+    {
+      "call": "open",
+      "name": "card",
+      "page": "card",
+      "params": [
+        "id"
+      ],
+      "path": "/cards/:id",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "open",
+      "name": "new_card",
+      "page": "new_card",
+      "params": [],
+      "path": "/cards/new",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "open",
+      "name": "home",
+      "page": "home",
+      "params": [],
+      "path": "/",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "submit",
+      "name": "save_card",
+      "params": [
+        "id"
+      ],
+      "path": "/cards/:id",
+      "replies": {
+        "refused": "view model",
+        "saved": "view model"
+      },
+      "takes": "values"
+    }
+  ],
   "markup": [
     {
       "fields": [
@@ -73,6 +120,28 @@
         }
       ],
       "name": "link"
+    }
+  ],
+  "pages": [
+    {
+      "name": "card",
+      "params": [
+        "id"
+      ],
+      "path": "/cards/:id",
+      "returns": "view model"
+    },
+    {
+      "name": "new_card",
+      "params": [],
+      "path": "/cards/new",
+      "returns": "view model"
+    },
+    {
+      "name": "home",
+      "params": [],
+      "path": "/",
+      "returns": "view model"
     }
   ],
   "version": "1.0.0",

@@ -72,6 +72,9 @@ defmodule AtlasFlow.FakeState do
 
   def set_description(description), do: GenServer.call(__MODULE__, {:description, description})
 
+  @doc "How many reads were answered so far, and of those how many plain."
+  def reads, do: GenServer.call(__MODULE__, :reads)
+
   @impl true
   def init(opts) do
     :ok = AtlasBus.attach(AtlasBus.store())
@@ -80,6 +83,7 @@ defmodule AtlasFlow.FakeState do
      %{
        facts: %{},
        sent: [],
+       reads: {0, 0},
        position: 0,
        description: Keyword.get(opts, :description, description())
      }}
@@ -94,9 +98,13 @@ defmodule AtlasFlow.FakeState do
   def handle_call({:get, kind, key}, _from, s), do: {:reply, s.facts[{kind, key}], s}
   def handle_call(:sent, _from, s), do: {:reply, Enum.reverse(s.sent), s}
   def handle_call({:description, d}, _from, s), do: {:reply, :ok, %{s | description: d}}
+  def handle_call(:reads, _from, s), do: {:reply, s.reads, s}
 
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do
+    {all, plain} = s.reads
+    s = %{s | reads: {all + 1, plain + if(content["plain"] == true, do: 1, else: 0)}}
+
     answer =
       case {e.kind, content} do
         {"_description", _} ->
@@ -135,10 +143,10 @@ defmodule AtlasFlow.FakeState do
       end)
 
     :ok =
-      AtlasBus.send(Envelope.reply(e, "stored", position: s.position), %{
-        "op" => c["op"],
-        "key" => key
-      })
+      AtlasBus.send(
+        Envelope.reply(e, "stored", position: s.position),
+        Map.take(c, ["op", "key", "by"])
+      )
 
     {:noreply, %{s | facts: facts}}
   end

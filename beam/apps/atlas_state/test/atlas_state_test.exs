@@ -211,6 +211,18 @@ defmodule AtlasStateTest do
     assert %{"error" => "rela does not describe \"gadget\""} = read("gadget")
   end
 
+  test "a plain read answers the fact and its links only", %{rela: rela} do
+    fact("create", "W-1", %{"title" => "One"})
+    FakeRela.link(rela, "P-1", "W-1")
+
+    assert %{"fact" => %{"key" => "W-1", "values" => %{"title" => "One"}} = plain} =
+             answer = read("widget", %{"key" => "W-1", "plain" => true})
+
+    refute Map.has_key?(answer, "incoming")
+    refute Map.has_key?(plain, "progress")
+    assert %{"fact" => nil} = read("widget", %{"key" => "W-9", "plain" => true})
+  end
+
   test "Atlas's additions are merged into the description State answers", %{rela: rela, dir: dir} do
     extra = Path.join(dir, "atlas.json")
 
@@ -229,6 +241,34 @@ defmodule AtlasStateTest do
     assert description["entities"]["widget"]["create"] == %{"ask" => ["title"]}
     assert description["entities"]["widget"]["plural"] == "widgets"
     refute Map.has_key?(description, "_about")
+  end
+
+  test "a kind rela does not know says so, and what to do; never 'not reachable'", %{
+    rela: rela,
+    dir: dir
+  } do
+    # The build's additions name a kind the running rela's description does not have.
+    extra = Path.join(dir, "atlas.json")
+    File.write!(extra, ~s({"entities": {"ghost": {"create": {"ask": ["title"]}}}}))
+    stop_supervised!(AtlasState.Server)
+
+    start_supervised!(
+      {AtlasState.Server, rela: {FakeRela, rela}, data_dir: dir, description_extra: extra}
+    )
+
+    older =
+      "rela does not know ghost: its description is older than this build; " <>
+        "run atlas restart --env #{AtlasBus.environment()}"
+
+    assert %{"error" => ^older, "error_kind" => "answered"} = read("ghost")
+    assert %{"error" => ^older} = read("ghost", %{"key" => "G-1"})
+
+    assert {"refused", %{"reasons" => [^older]}, nil} =
+             fact("create", "G-1", %{"title" => "x"}, kind: "ghost")
+
+    # Only a rela that does not answer is "not reachable".
+    FakeRela.down(rela)
+    assert %{"error" => "rela is not reachable", "error_kind" => "unreachable"} = read("widget")
   end
 
   test "reads carry how far a fact is, from the facts under it, as the description's rule says",

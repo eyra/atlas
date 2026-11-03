@@ -10,7 +10,7 @@ The BFF is in three parts, as in prism (ADR [0001](../docs/adr/0001-generator-co
 
 | Part | Where | What |
 |---|---|---|
-| Generator | `bff/generator/` (Mix app `atlas_bff`) | The DSL (`AtlasBFF.Schema`: `version`, `defblock`, `defmodel`, `defmarkup`, `field`) and its compile-time checks; the rules of markup (`AtlasBFF.Markup`); the header (`AtlasBFF.Header`); the targets; `mix atlas.gen`. None of Atlas's values: it compiles and is tested without the contract, on a neutral example (`test/support/example.ex`). |
+| Generator | `bff/generator/` (Mix app `atlas_bff`) | The DSL (`AtlasBFF.Schema`: `version`, `defblock`, `defmodel`, `defmarkup`, `defpage`, `field`) and its compile-time checks; the rules of markup (`AtlasBFF.Markup`) and of pages (`AtlasBFF.Paths`); the header (`AtlasBFF.Header`); the targets; `mix atlas.gen`. None of Atlas's values: it compiles and is tested without the contract, on a neutral example (`test/support/example.ex`). |
 | Contract | `bff/contract/` (Mix app `atlas_bff_contract`) | `lib/blocks.ex`, `AtlasBFFContract.Blocks`: the blocks, models and kinds of markup Control sends and every client renders. Only that. It depends on the generator by path. **Edit this.** |
 | Targets | see below | What the contract becomes, for each consumer. |
 
@@ -46,7 +46,7 @@ Change the contract, run `cd bff/contract && mix atlas.gen`, commit the contract
 
 The DSL is plain macros, not Spark: a contract of a few blocks, models and kinds of markup needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency.
 
-## View model (contract 0.7.0)
+## View model (contract 0.10.0)
 
 Control sends a view model, not a data model: its **content**, a flat list of blocks, and its **markup**, entries that cover a stretch of those blocks. Every block has an id, stable for as long as the page shows the same thing; markup points at ids, never at positions, so inserting, deleting or moving a block (or a hint that changes one) never shifts other markup.
 
@@ -100,21 +100,21 @@ Client to Control:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"hello","env":"test","client":"tui","spec":"0.7.0"}` | First message. Control of another environment answers `bye` and closes. |
+| `{"op":"hello","env":"test","client":"tui","spec":"0.10.0"}` | First message. Control of another environment answers `bye` and closes. |
 | `{"op":"open","to":"/k/<kind>/<key>"}` | Show the page at this path. |
-| `{"op":"submit","to":"<form submit_to or confirm_to>","values":{...}}` | Submit a form or a confirm. Values travel as text. |
+| `{"op":"submit","to":"<form submit_to or confirm_to>","values":{...}}` | Submit a form or a confirm, to one of the contract's submit endpoints (`defendpoint`, call `submit`: create, create_under, update, delete, link, accept, reopen); any other `to` is refused. Values travel as text. |
 | `{"op":"refresh"}` | Reconcile: read the page again from State. Clients send it on an interval. |
 
 Control to client:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"welcome","env":"test","spec":"0.7.0"}` | Answer to hello. |
+| `{"op":"welcome","env":"test","spec":"0.10.0"}` | Answer to hello. |
 | `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. On a page without a form, a `refused` page also has `refused`: State's reasons. |
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |
 
-Paths are Control's own (`/`, `/k/<kind>`, `/k/<kind>/new`, `/k/<kind>/<key>`, `.../edit`, `.../delete`); a client with a screen only follows them.
+Paths are the contract's pages (`defpage`, ADR [0002](../docs/adr/0002-pages-and-endpoints.md)): `/`, `/_kinds`, `/k/:kind`, `/k/:kind/new`, `/k/:kind/new/:relation/:parent`, `/k/:kind/:key` and its `/edit`, `/delete`, `/links/:relation`, `/set/:relation`, `/remove/:relation`. Control serves those and nothing else (a path outside them gets "No such page"); `blocks.json` lists them, and the targets give every Elixir consumer `pages/0`, `match/1` and `path/2` (`AtlasBFF.Paths`). A client with a screen only follows them.
 
 A client without a screen, such as the agents' command line (`clients/agent`), knows only codes. Three paths are for such a client, and Control works out the rest from rela's description:
 
