@@ -57,7 +57,8 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
 
   # IS-Atlas-47. The run's browser is a stand-in that records the address.
   step "o opens it in the browser, on its page and on its row in the issue", fn ->
-    see(t1, "d Delete pull request   o Open in browser")
+    # Since IS-Atlas-83 an assignable fact also has h Hand to….
+    see(t1, "d Delete pull request   h Hand to…   o Open in browser")
     at = press(t1, "o")
     opened(i, url, at, 1)
     see(t1, "Opened #{url} in the browser")
