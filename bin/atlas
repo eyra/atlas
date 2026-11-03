@@ -168,8 +168,14 @@ update_build() {
   [ -z "${ATLAS_NO_UPDATE:-}" ] || return 0
   if [ "$(main_clone)" = "$root" ] && [ "$(git -C "$root" branch --show-current)" = develop ]; then
     git -C "$root" pull --ff-only -q || echo "atlas: could not update develop; trying the build as it is" >&2
+    # What a rename or a move on develop left behind: folders with only build output.
+    "$root/bin/clean-build" "$root" --moved >&2
   fi
 }
+
+# Build output of apps no mix.exs declares any more goes before anything compiles, so a
+# renamed app never stops the core from starting (IS-Atlas-67).
+clean_build() { "$root/bin/clean-build" "$root" >&2; }
 
 # The repository's main clone (not a worktree of it). git answers an absolute path, so
 # this works from any folder, also from / or from inside another repository.
@@ -183,6 +189,7 @@ case "$cmd" in
   tui)
     update_build
     curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null || "$root/rela/scripts/start-bg.sh"
+    clean_build
     ensure_core
     # Ctrl-S saves a form; without this the terminal would take it as "pause output".
     saved="$(stty -g 2>/dev/null || true)"
@@ -199,6 +206,7 @@ case "$cmd" in
     else
       "$root/rela/scripts/start-bg.sh"
     fi
+    clean_build
     cd "$root/beam"
     exec mix run --no-halt
     ;;
@@ -244,11 +252,13 @@ case "$cmd" in
     if [ "$cmd" = help ] && [ -z "$kind_named" ] && [[ " ${args[*]-} " != *" --json "* ]]; then
       sed -n '2,39p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
     fi
+    clean_build
     cd "$root/clients/agent"
     mix compile >&2
     ATLAS_CALLER_CWD="$caller" exec mix atlas.agent "$cmd" --env "$env" ${args[@]+"${args[@]}"}
     ;;
   load-plan)
+    clean_build
     cd "$root/tools/plan"
     mix compile >&2
     ATLAS_CALLER_CWD="$caller" exec mix atlas.load_plan --env "$env" ${args[@]+"${args[@]}"}
