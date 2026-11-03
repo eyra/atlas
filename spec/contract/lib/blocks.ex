@@ -12,7 +12,7 @@ defmodule AtlasContract.Blocks do
   """
   use AtlasSpec.Schema
 
-  version "0.2.0"
+  version "0.3.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -87,6 +87,31 @@ defmodule AtlasContract.Blocks do
     field :confirm_label, :string
     field :confirm_to, :string
     field :cancel_to, :string, required: true
+  end
+
+  # One step of an agent's plan: the form it fills (`label`, its title; `inputs`, its
+  # inputs with the values the step gives them), why, and how far it got. `state` is
+  # proposed, blocked (it cannot run; `detail` says why), dropped, running, stored,
+  # refused or not_run. `detail` is what happened: the id it stored, or why not.
+  defmodel :step do
+    field :n, :integer, required: true
+    field :label, :string, required: true
+    field :state, :string, required: true
+    field :why, :string
+    field :detail, :string
+    field :inputs, {:list, :input}
+  end
+
+  # What an agent proposes for a request, and then does: its steps, in order. `state` is
+  # planning, proposed, running, done, stopped, failed or cancelled. A person keeps,
+  # edits or drops each proposed step before any of it runs.
+  defblock :plan do
+    field :title, :string, required: true
+    field :request, :string, required: true
+    field :state, :string, required: true
+    field :summary, :string
+    field :by, :string
+    field :steps, {:list, :step}, required: true
   end
 
   # Markup: kinds that cover a stretch of a view model's blocks. All markup nests, of
