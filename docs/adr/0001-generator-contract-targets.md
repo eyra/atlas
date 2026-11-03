@@ -10,20 +10,20 @@ Prism (github.com/novasoftwarefoundation/prism) separates the same concerns into
 
 ## Decision
 
-1. **Three parts under `spec/`.**
-   - `spec/generator/` is its own Mix project (`atlas_spec`). It holds the DSL (`AtlasSpec.Schema`), the rules of markup (`AtlasSpec.Markup`), the header (`AtlasSpec.Header`), the targets and `mix atlas.gen`, and none of Atlas's values.
-   - `spec/contract/` is its own Mix project (`atlas_contract`). It depends on the generator by path and holds only the catalogue, `AtlasContract.Blocks`.
-   - Generated files go under `spec/targets/<target>/`.
-2. **One data function.** A contract compiles to `__schema__/0`, plain data documented in `AtlasSpec.Schema`. Targets read only that. A test fails when anything but the schema module calls into the DSL.
-3. **Elixir consumers read the contract at compile time.** Control and the TUI depend on the contract by path. `use AtlasSpec.Targets.Server` / `use AtlasSpec.Targets.Client` build their modules when they compile, as prism's Phoenix target does. No Elixir code is generated into files, and changing the contract recompiles them.
-4. **Other languages get files.** `AtlasSpec.Targets.Json` writes `spec/targets/json/blocks.json`. A Swift package for iOS will be the next file target, under `spec/targets/swift/`, with its own ADR.
+1. **Three parts under `bff/`.**
+   - `bff/generator/` is its own Mix project (`atlas_bff`). It holds the DSL (`AtlasBFF.Schema`), the rules of markup (`AtlasBFF.Markup`), the header (`AtlasBFF.Header`), the targets and `mix atlas.gen`, and none of Atlas's values.
+   - `bff/contract/` is its own Mix project (`atlas_bff_contract`). It depends on the generator by path and holds only the catalogue, `AtlasBFFContract.Blocks`.
+   - Generated files go under `bff/targets/<target>/`.
+2. **One data function.** A contract compiles to `__schema__/0`, plain data documented in `AtlasBFF.Schema`. Targets read only that. A test fails when anything but the schema module calls into the DSL.
+3. **Elixir consumers read the contract at compile time.** Control and the TUI depend on the contract by path. `use AtlasBFF.Targets.Server` / `use AtlasBFF.Targets.Client` build their modules when they compile, as prism's Phoenix target does. No Elixir code is generated into files, and changing the contract recompiles them.
+4. **Other languages get files.** `AtlasBFF.Targets.Json` writes `bff/targets/json/blocks.json`. A Swift package for iOS will be the next file target, under `bff/targets/swift/`, with its own ADR.
 5. **Generated files are guarded:**
    - Each one starts with a header naming the command and the contract file (in JSON, the first member `"$comment"`).
    - `mix atlas.gen` never overwrites a file without that header, and removes a file with it that no target writes any more.
    - `--check` fails on a file that would change and on a left-over one.
 6. **CI keeps the parts apart:**
    - The generator is built and tested on its own, without the contract, on a neutral example contract.
-   - A grep refuses Atlas's values in `spec/generator/`.
+   - A grep refuses Atlas's values in `bff/generator/`.
    - The contract job runs `mix atlas.gen --check`.
    - The JSON target has a golden test on the example contract.
    - The TUI's tests fail when the contract has a block or kind of markup the TUI does not know (`AtlasTui.View.known/0`).
@@ -53,6 +53,6 @@ Left out, and why:
 
 ## Consequences
 
-- To change the contract, edit `spec/contract/lib/blocks.ex`, run `mix atlas.gen` there, and commit `spec/targets/`. Control and the TUI pick the change up when they compile.
+- To change the contract, edit `bff/contract/lib/blocks.ex`, run `mix atlas.gen` there, and commit `bff/targets/`. Control and the TUI pick the change up when they compile.
 - The generator can be reused, or released, without Atlas's blocks.
-- `spec/README.md` keeps the view model, the wire format and the protocol.
+- `bff/README.md` keeps the view model, the wire format and the protocol.
