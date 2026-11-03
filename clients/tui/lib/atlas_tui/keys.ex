@@ -25,8 +25,16 @@ defmodule AtlasTui.Keys do
   defp parse("\eOB" <> rest, acc), do: parse(rest, [:down | acc])
   defp parse("\eOC" <> rest, acc), do: parse(rest, [:right | acc])
   defp parse("\eOD" <> rest, acc), do: parse(rest, [:left | acc])
+  defp parse("\e[H" <> rest, acc), do: parse(rest, [:home | acc])
+  defp parse("\e[F" <> rest, acc), do: parse(rest, [:end | acc])
+  defp parse("\eOH" <> rest, acc), do: parse(rest, [:home | acc])
+  defp parse("\eOF" <> rest, acc), do: parse(rest, [:end | acc])
+  defp parse("\e[1~" <> rest, acc), do: parse(rest, [:home | acc])
+  defp parse("\e[4~" <> rest, acc), do: parse(rest, [:end | acc])
+  defp parse("\e[5~" <> rest, acc), do: parse(rest, [:page_up | acc])
+  defp parse("\e[6~" <> rest, acc), do: parse(rest, [:page_down | acc])
 
-  # Other CSI sequences (Home, Delete, …) are ignored whole.
+  # Other CSI sequences (Delete, Page up, …) are ignored whole.
   defp parse("\e[" <> rest = buffer, acc) do
     case Regex.run(~r/^[0-9;]*[A-Za-z~]/, rest) do
       [seq] -> parse(binary_part(rest, byte_size(seq), byte_size(rest) - byte_size(seq)), acc)

@@ -45,7 +45,7 @@ The DSL is plain macros (`AtlasControl.Spec`, about 170 lines), not Spark: a cat
 |---|---|---|
 | `list` | a title, rows, an empty text, actions | move, open a row, run an action |
 | `item` | a title and labelled values | run an action (change, delete) |
-| `form` | a title, inputs (text, choice, boolean, readonly), errors | fill it in, submit or cancel; a readonly input is shown, never changed |
+| `form` | a title, inputs (text, multiline, choice, boolean, readonly), errors | fill it in, submit or cancel; a long text wraps; a multiline input takes several lines (enter starts a new line); a readonly input is shown, never changed |
 | `confirm` | a question, or without `confirm_to` only why something cannot be done | confirm or go back |
 
 Models that blocks hold: `action` (label, key, to), `row`, `pair`, `input`, `choice`. A page is a flat list of blocks; no block holds another block.

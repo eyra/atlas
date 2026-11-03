@@ -124,6 +124,8 @@ defmodule AtlasControl.PagesTest do
     %{blocks: [%{"type" => "form", "props" => form}]} = Pages.render({:new, "widget"}, @d, [])
     assert Enum.map(form["inputs"], & &1["name"]) == ["title", "notes"]
     assert %{"required" => true} = hd(form["inputs"])
+    # The description marks notes as text of several lines.
+    assert Enum.map(form["inputs"], & &1["kind"]) == ["text", "multiline"]
     assert form["submit_to"] == "/k/widget/new"
 
     # Without a rule: every field a person may set, still no id.
@@ -150,6 +152,21 @@ defmodule AtlasControl.PagesTest do
              "choices" => [%{"value" => ""}, %{"value" => "light", "label" => "Light"}, _]
            } =
              Enum.find(form["inputs"], &(&1["name"] == "shade"))
+  end
+
+  test "text of several lines keeps its line breaks, on the page and in a change form" do
+    notes = "## Why\n\nBecause.\n\n- one\n- two"
+    answer = %{"fact" => fact("W-01", %{"title" => "One", "notes" => notes})}
+
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "widget", "W-01"}, @d, [answer])
+    assert Enum.find(item["fields"], &(&1["label"] == "Notes"))["value"] == notes
+
+    %{blocks: [%{"props" => form}]} = Pages.render({:edit, "widget", "W-01"}, @d, [answer])
+
+    assert %{"kind" => "multiline", "value" => ^notes} =
+             Enum.find(form["inputs"], &(&1["name"] == "notes"))
+
+    assert Pages.values_for(@d["entities"]["widget"], %{"notes" => notes}) == %{"notes" => notes}
   end
 
   test "a field only a connector fills shows on the page only when it has a value" do
