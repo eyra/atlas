@@ -139,8 +139,9 @@ defmodule AtlasAgent do
 
   @doc """
   The kinds Control describes (`/_kinds`): `[%{"kind", "title", "fields" => [[label,
-  value]]}]`, each telling what a create asks, how its id is made, what it belongs
-  under and its fields.
+  value]], "actions" => [%{"label", "key", "to"}]}]`, each telling what a create asks, how
+  its id is made, what it belongs under, its fields and what can be done with one, named
+  as Control names it everywhere.
   """
   def kinds(client) do
     with {:ok, page} <- Client.open(client, "/_kinds") do
@@ -148,7 +149,8 @@ defmodule AtlasAgent do
        for item <- Client.blocks(page, "item") do
          fields = Enum.map(item["fields"] || [], &[&1["label"], &1["value"]])
          kind = Enum.find_value(fields, fn [label, value] -> label == "Kind" && value end)
-         %{"kind" => kind, "title" => item["title"], "fields" => fields}
+         actions = Enum.map(item["actions"] || [], &Map.take(&1, ["label", "key", "to"]))
+         %{"kind" => kind, "title" => item["title"], "fields" => fields, "actions" => actions}
        end}
     end
   end

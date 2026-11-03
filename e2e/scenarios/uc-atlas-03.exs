@@ -5,17 +5,17 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
   use_case = ~r/Use case UC-Atlas-\d+: A use case with issues/
 
   step "A use case, with no issues yet", fn ->
-    press(t1, "n")
-    see(t1, ~r/^ New scene$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create scene$/m)
     type(t1, "A scene for issues")
     at = press(t1, "C-s")
     stored(t1, ~r/Scene SC-Atlas-\d+: A scene for issues/, at)
-    press(t1, "a")
-    see(t1, ~r/^ New use case in SC-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create use case in SC-Atlas-\d+$/m)
     type(t1, "A use case with issues")
     at = press(t1, "C-s")
     stored(t1, use_case, at)
-    see(t1, "No issues yet. Press a to add one.")
+    see(t1, "No issues yet. Press c to create one.")
 
     by_hint(t2, "A scene for issues", at)
     open_row(t2, "A scene for issues")
@@ -25,8 +25,8 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
   end
 
   step "Add an issue: title and description only, a made code, stage by default", fn ->
-    press(t1, "a")
-    see(t1, ~r/^ New issue in UC-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create issue in UC-Atlas-\d+$/m)
     for field <- ["Stage", "Completed", "Flux ref", "Flux id"], do: refute_see(t1, field)
     type(t1, "Write the first issue")
     press(t1, "Down")
@@ -42,9 +42,9 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
     by_hint(t2, "Write the first issue", at)
   end
 
-  step "Change: the code read-only, no Flux fields; stage and completed", fn ->
-    press(t1, "e")
-    see(t1, ~r/Change issue IS-Atlas-\d+/)
+  step "Update: the code read-only, no Flux fields; stage and completed", fn ->
+    press(t1, "u")
+    see(t1, ~r/Update IS-Atlas-\d+/)
     see(t1, ~r/Id\s+IS-Atlas-\d+/)
     for field <- ["Flux ref", "Flux id"], do: refute_see(t1, field)
     # Title, then the stage (one to the right: Design), then completed (yes).
@@ -68,8 +68,8 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
   end
 
   step "A use case with an issue cannot be deleted", fn ->
-    press(t1, "a")
-    see(t1, ~r/^ New issue in UC-Atlas-\d+$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create issue in UC-Atlas-\d+$/m)
     type(t1, "An issue that stays")
     at = press(t1, "C-s")
     stored(t1, ~r/Issue IS-Atlas-\d+: An issue that stays/, at)

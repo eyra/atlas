@@ -23,9 +23,9 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
     see(t1, ~r/In use case\s+#{from}/)
   end
 
-  step "Change: the use case is a choice, the current one selected; choose the other", fn ->
-    press(t1, "e")
-    see(t1, "Change issue #{issue}")
+  step "Update: the use case is a choice, the current one selected; choose the other", fn ->
+    press(t1, "u")
+    see(t1, "Update #{issue}")
     see(t1, "‹ #{from}: Where the issue starts ›")
     # Title, stage, completed, description, then the use case.
     press(t1, ["Tab", "Tab", "Tab", "Tab", "Right"])
@@ -64,5 +64,28 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
 
     {answer, _} = atlas_json(i, ["set", issue, "in_use_case=UC-Atlas-99"], 1)
     answer["refused"] == ["UC-Atlas-99 does not exist"] || raise inspect(answer)
+  end
+
+  # IS-Atlas-58: every action is Create, Update or Delete, with the same words and keys.
+  step "c Create, u Update, d Delete: the same words and keys on every page", fn ->
+    home(t1)
+    see(t1, "c Create scene")
+    open_row(t1, "A scene with two use cases")
+    see(t1, ~r/u Update scene\s+d Delete scene\s+c Create use case/)
+    press(t1, "c")
+    see(t1, ~r/^ Create use case in #{scene}$/m)
+    see(t1, "[ Create ]")
+    press(t1, "Escape")
+    open_row(t1, "Where the issue starts")
+    see(t1, ~r/u Update use case\s+d Delete use case\s+c Create issue/)
+    press(t1, "u")
+    see(t1, ~r/^ Update #{from}$/m)
+    see(t1, "[ Update ]")
+    press(t1, "Escape")
+    see(t1, "Use case #{from}: Where the issue starts")
+    press(t1, "d")
+    see(t1, "#{from} cannot be deleted")
+    press(t1, "Enter")
+    see(t1, "Use case #{from}: Where the issue starts")
   end
 end

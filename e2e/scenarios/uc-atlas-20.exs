@@ -10,8 +10,8 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
                                                                  instance: instance
                                                                } ->
   step "A long title wraps in its field", fn ->
-    press(t1, "n")
-    see(t1, ~r/^ New scene$/m)
+    press(t1, "c")
+    see(t1, ~r/^ Create scene$/m)
     type(t1, title)
     # The end of the title is on a second row of the field, nothing is cut.
     see(t1, ~r/\n\s+\[.*onto a second row▏/)
@@ -47,7 +47,7 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     # cases stays in view (IS-Atlas-48). Tab, and the arrows (here j and k, which arrive
     # whole where an arrow's escape sequence may not) scroll the description.
     see(t1, ~r/… \d+ more lines?/)
-    see(t1, "No use cases yet. Press a to add one.")
+    see(t1, "No use cases yet. Press c to create one.")
     press(t1, "Tab")
     see(t1, "↑↓ scroll")
     press(t1, ["j", "j", "j", "j", "j"])
@@ -57,7 +57,7 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
       ~r/## What[\s│]*\n[\s│]+- the title wraps[\s│]*\n[\s│]+- the description keeps its lines[\s│]*\n[\s│]*\n[\s│]+## Done when/u ||
       raise "the sections are not shown as written:\n#{page}"
 
-    page =~ "No use cases yet. Press a to add one." || raise "the use cases went out of view"
+    page =~ "No use cases yet. Press c to create one." || raise "the use cases went out of view"
     press(t1, ["k", "k", "k", "k", "k", "Tab"])
     see(t1, ~r/Scene SC-Atlas-\d+: Melle writes(.|\n)*↑↓ move/)
   end
@@ -84,9 +84,9 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     see(t2, ~r/Title\s+Melle writes a scene.*\n[\s│]+.*second row/u)
   end
 
-  step "Change: a line on top; arrows move; TUI 2 by hint", fn ->
-    press(t1, "e")
-    see(t1, ~r/Change scene SC-Atlas-\d+/)
+  step "Update: a line on top; arrows move; TUI 2 by hint", fn ->
+    press(t1, "u")
+    see(t1, ~r/Update SC-Atlas-\d+/)
     # Title, Status, Completed, then into the description at its first line.
     press(t1, ["Down", "Down", "Down"])
     see(t1, "↵ new line")
@@ -102,8 +102,8 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
   end
 
   step "A description longer than the screen scrolls around the cursor", fn ->
-    press(t1, "e")
-    see(t1, ~r/Change scene SC-Atlas-\d+/)
+    press(t1, "u")
+    see(t1, ~r/Update SC-Atlas-\d+/)
     press(t1, ["Down", "Down", "Down"])
     see(t1, "↵ new line")
 

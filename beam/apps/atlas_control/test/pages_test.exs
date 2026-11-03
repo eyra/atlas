@@ -42,7 +42,8 @@ defmodule AtlasControl.PagesTest do
              %{"id" => "W-2", "label" => "Two", "detail" => "done"}
            ] = list["rows"]
 
-    assert [%{"key" => "n", "to" => "/k/widget/new", "label" => "New widget"}] = list["actions"]
+    assert [%{"key" => "c", "to" => "/k/widget/new", "label" => "Create widget"}] =
+             list["actions"]
   end
 
   test "an item shows every described property, and a list of the facts that point at it" do
@@ -110,13 +111,13 @@ defmodule AtlasControl.PagesTest do
     refute Map.has_key?(list, "title")
     assert [%{"label" => "Wheel", "to" => "/k/part/P-1"}] = list["rows"]
 
-    assert [%{"label" => "Add part", "key" => "a", "to" => "/k/part/new/of_widget/W-1"}] =
+    assert [%{"label" => "Create part", "key" => "c", "to" => "/k/part/new/of_widget/W-1"}] =
              list["actions"]
 
     %{blocks: [_, %{"props" => none}]} =
       Pages.render({:item, "widget", "W-1"}, @d, [answer, %{"facts" => []}])
 
-    assert none["empty"] == "No parts yet. Press a to add one."
+    assert none["empty"] == "No parts yet. Press c to create one."
   end
 
   test "a fact that points at a parent names it, and goes back and away to it" do
@@ -150,7 +151,7 @@ defmodule AtlasControl.PagesTest do
     route = {:new, "part", {"of_widget", "W-1"}}
     assert Pages.route("/k/part/new/of_widget/W-1") == route
     %{back: "/k/widget/W-1", blocks: [%{"props" => form}]} = Pages.render(route, @d, [])
-    assert form["title"] == "New part in W-1"
+    assert form["title"] == "Create part in W-1"
     assert form["submit_to"] == "/k/part/new/of_widget/W-1"
     assert form["cancel_to"] == "/k/widget/W-1"
   end
@@ -200,6 +201,67 @@ defmodule AtlasControl.PagesTest do
 
     assert Enum.find_value(widget["fields"], &(&1["label"] == "Belongs under" && &1["value"])) ==
              "nothing; a top kind"
+  end
+
+  test "every action is Create, Update or Delete: the same words and keys everywhere" do
+    widget = @d["entities"]["widget"]
+    assert Pages.operation(:create, widget, "widget") == {"Create widget", "c"}
+    assert Pages.operation(:update, widget, "widget") == {"Update widget", "u"}
+    assert Pages.operation(:delete, widget, "widget") == {"Delete widget", "d"}
+    assert Pages.operation(:update, nil, nil) == {"Update", "u"}
+
+    part = Map.put(fact("P-1", %{"title" => "Wheel"}), "links", %{"of_widget" => ["W-1"]})
+    labels = fn actions -> Enum.map(actions, &{&1["key"], &1["label"]}) end
+
+    %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @d, [%{"facts" => []}])
+    assert labels.(list["actions"]) == [{"c", "Create widget"}]
+    assert list["empty"] == "No widgets yet. Press c to create one."
+
+    %{blocks: [%{"props" => item}, %{"props" => tags} | _]} =
+      Pages.render({:item, "part", "P-1"}, @d, [%{"fact" => part}, %{"facts" => []}])
+
+    assert labels.(item["actions"]) == [{"u", "Update part"}, {"d", "Delete part"}]
+    assert labels.(tags["actions"]) == [{"c", "Create tag"}]
+
+    %{title: "Create part in W-1", blocks: [%{"props" => create}]} =
+      Pages.render({:new, "part", {"of_widget", "W-1"}}, @d, [])
+
+    assert {create["title"], create["submit_label"]} == {"Create part in W-1", "Create"}
+
+    %{title: "Update P-1", blocks: [%{"props" => update}]} =
+      Pages.render({:edit, "part", "P-1"}, @d, [%{"fact" => part}, %{"facts" => []}])
+
+    assert {update["title"], update["submit_label"]} == {"Update P-1", "Update"}
+
+    %{title: "Delete P-1", blocks: [%{"props" => delete}]} =
+      Pages.render({:delete, "part", "P-1"}, @d, [%{"fact" => part, "incoming" => %{}}])
+
+    assert {delete["title"], delete["confirm_label"]} == {"Delete part P-1?", "Delete"}
+
+    # What an agent's tools are called comes from the same place.
+    %{blocks: kinds} = Pages.render(:kinds, @d, [])
+    %{"props" => kind} = Enum.find(kinds, &(&1["props"]["title"] =~ "(part)"))
+
+    assert Enum.map(kind["actions"], &{&1["key"], &1["label"], &1["to"]}) == [
+             {"c", "Create part", "/k/part/new"},
+             {"u", "Update part", "/k/_/<key>/edit"},
+             {"d", "Delete part", "/k/_/<key>/delete"}
+           ]
+
+    # A page with a second related list creates there with the next free key.
+    two = put_in(@d, ["relations", "of_widget_too"], @d["relations"]["of_widget"])
+
+    %{blocks: [_, %{"props" => first}, %{"props" => second}]} =
+      Pages.render({:item, "widget", "W-1"}, two, [
+        %{"fact" => fact("W-1", %{"title" => "One"})},
+        %{"facts" => []},
+        %{"facts" => []}
+      ])
+
+    assert {labels.(first["actions"]), labels.(second["actions"])} ==
+             {[{"c", "Create part"}], [{"s", "Create part"}]}
+
+    assert second["empty"] == "No parts yet. Press s to create one."
   end
 
   test "a hint of a child kind refreshes its parent's page" do
@@ -471,7 +533,7 @@ defmodule AtlasControl.PagesTest do
     # Labelled by that property; no field a person may set, but it can move to another part.
     %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [stored])
     assert item["title"] == "Tag T-a-1: #a/1"
-    assert Enum.map(item["actions"], & &1["key"]) == ["e", "d"]
+    assert Enum.map(item["actions"], & &1["key"]) == ["u", "d"]
 
     # A kind with nothing to set and no parent has nothing to change.
     loose = put_in(@d, ["relations", "on_part", "max_outgoing"], 2)
@@ -557,7 +619,7 @@ defmodule AtlasControl.PagesTest do
     assert Pages.top_kinds(@logged) == ["widget"]
     %{blocks: [%{"props" => start}]} = Pages.render(:home, @logged, [%{"facts" => []}])
 
-    assert [%{"key" => "n"}, %{"key" => "w", "label" => "What happened", "to" => "/k/log"}] =
+    assert [%{"key" => "c"}, %{"key" => "w", "label" => "What happened", "to" => "/k/log"}] =
              start["actions"]
 
     logs = %{
@@ -567,7 +629,7 @@ defmodule AtlasControl.PagesTest do
     %{back: "/", blocks: [%{"props" => list}]} = Pages.render({:list, "log"}, @logged, [logs])
     assert Enum.map(list["rows"], & &1["id"]) == ["L-02", "L-01"]
     assert list["actions"] == []
-    assert list["empty"] == nil or not (list["empty"] =~ "Press n")
+    refute list["empty"] =~ "Press"
   end
 
   test "a kind made by no key: its page has no actions, its entries no add" do

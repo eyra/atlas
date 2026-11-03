@@ -18,7 +18,7 @@ defmodule AtlasControl.Pages do
   | `/k/<kind>/<key>`         | one fact, with a list per relation pointing at it |
   | `/k/<kind>/<key>/edit`    | form to change it, and to move it to another parent |
   | `/k/<kind>/<key>/delete`  | confirm deleting it, or why it cannot be deleted  |
-  | `/_kinds`                 | every kind: what a create asks, its id, its parent, its fields |
+  | `/_kinds`                 | every kind: what a create asks, its id, its parent, its fields, its actions |
 
   A top kind is one that does not belong to a parent: it is not the `from` of a relation
   with `max_outgoing: 1`. Kinds that belong to a parent are reached through it: a fact's
@@ -27,8 +27,13 @@ defmodule AtlasControl.Pages do
 
   require AtlasControl.Blocks, as: Blocks
 
-  # Keys for the "add" action of each related list on a page, in order.
-  @add_keys ~w(a s x z)
+  # Every action is one of the CRUD operations: its verb and its key, the same on every
+  # page. Read is the row itself: enter opens it.
+  @operations %{create: {"Create", "c"}, update: {"Update", "u"}, delete: {"Delete", "d"}}
+
+  # A page with more than one related list: the first creates with c, the others with
+  # these (a and r are kept for Accept and Reopen).
+  @more_create_keys ~w(s x z)
 
   # Routes
 
@@ -114,6 +119,27 @@ defmodule AtlasControl.Pages do
   def path({:delete, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/delete"
 
   defp enc(part), do: URI.encode(part, &URI.char_unreserved?/1)
+
+  @doc """
+  The name and key of a CRUD operation (`:create`, `:update`, `:delete`) on a kind, as
+  every page, form and agent tool shows it: `{"Create <kind>", "c"}`. The one place an
+  action gets its words and key; with `nil` for the kind, only the verb (`"Update"`), as a
+  form's button says it.
+  """
+  def operation(op, nil, _kind), do: {elem(@operations[op], 0), elem(@operations[op], 1)}
+
+  def operation(op, spec, kind) do
+    {verb, key} = @operations[op]
+    {"#{verb} #{noun(spec, kind)}", key}
+  end
+
+  defp action(op, spec, kind, to, key \\ nil) do
+    {label, default} = operation(op, spec, kind)
+    Blocks.action(label: label, key: key || default, to: to)
+  end
+
+  defp verb(op), do: op |> operation(nil, nil) |> elem(0)
+  defp key_of(op), do: op |> operation(nil, nil) |> elem(1)
 
   @doc "The kind a route is about."
   def kind_of(:home), do: :all
@@ -308,7 +334,13 @@ defmodule AtlasControl.Pages do
                if(spec["agent"],
                  do: [Blocks.pair(label: "Agent record", value: spec["agent"])],
                  else: []
-               )
+               ),
+           # What can be done with one, named as every page names it; `<key>` is its key.
+           actions: [
+             action(:create, spec, kind, path({:new, kind})),
+             action(:update, spec, kind, "/k/_/<key>/edit"),
+             action(:delete, spec, kind, "/k/_/<key>/delete")
+           ]
          )}
       end
 
@@ -371,20 +403,14 @@ defmodule AtlasControl.Pages do
             rows: rows,
             empty:
               if(by_hand?(spec),
-                do: "No #{String.downcase(plural(spec, kind))} yet. Press n to make one.",
+                do:
+                  "No #{String.downcase(plural(spec, kind))} yet. " <>
+                    "Press #{key_of(:create)} to create one.",
                 else: "No #{String.downcase(plural(spec, kind))} yet."
               ),
             actions:
-              if(by_hand?(spec),
-                do: [
-                  Blocks.action(
-                    label: "New #{singular(spec, kind) |> String.downcase()}",
-                    key: "n",
-                    to: path({:new, kind})
-                  )
-                ],
-                else: []
-              ) ++ if(start?, do: start_actions(description), else: [])
+              if(by_hand?(spec), do: [action(:create, spec, kind, path({:new, kind}))], else: []) ++
+                if(start?, do: start_actions(description), else: [])
           )
 
         back = if start?, do: nil, else: "/"
@@ -431,10 +457,9 @@ defmodule AtlasControl.Pages do
               if(by_hand?(spec),
                 do:
                   if(changeable?(description, kind, spec),
-                    do: [Blocks.action(label: "Change", key: "e", to: path({:edit, kind, key}))],
+                    do: [action(:update, spec, kind, path({:edit, kind, key}))],
                     else: []
-                  ) ++
-                    [Blocks.action(label: "Delete", key: "d", to: path({:delete, kind, key}))],
+                  ) ++ [action(:delete, spec, kind, path({:delete, kind, key}))],
                 else: []
               ),
             links: links(description, spec, fact)
@@ -446,10 +471,10 @@ defmodule AtlasControl.Pages do
         lists =
           relations
           |> Enum.zip(child_answers)
-          |> Enum.zip(@add_keys)
-          |> Enum.map(fn {{{relation, from, rel_spec}, child_answer}, add_key} ->
+          |> Enum.zip([key_of(:create) | @more_create_keys])
+          |> Enum.map(fn {{{relation, from, rel_spec}, child_answer}, create_key} ->
             {"list:" <> relation,
-             child_list(description, {relation, from, rel_spec}, key, child_answer, add_key)}
+             child_list(description, {relation, from, rel_spec}, key, child_answer, create_key)}
           end)
 
         # Two parts, side by side where there is room: the content (the fact itself, and
@@ -487,7 +512,7 @@ defmodule AtlasControl.Pages do
   defp page({:new, kind, {_relation, parent}} = route, kind, spec, description, [], form) do
     %{blocks: [form_block]} = page({:new, kind}, kind, spec, description, [], form)
     parent_route = {:item, parent_kind(description, route), parent}
-    title = "New #{singular(spec, kind) |> String.downcase()} in #{parent}"
+    title = "#{elem(operation(:create, spec, kind), 0)} in #{parent}"
 
     form_block =
       form_block
@@ -505,15 +530,15 @@ defmodule AtlasControl.Pages do
 
     form_block =
       Blocks.form(
-        title: "New #{singular(spec, kind) |> String.downcase()}",
+        title: elem(operation(:create, spec, kind), 0),
         inputs: inputs(spec, values, only: asked),
-        submit_label: "Create",
+        submit_label: verb(:create),
         submit_to: path({:new, kind}),
         cancel_to: path({:list, kind}),
         errors: form[:errors] || []
       )
 
-    page("New #{singular(spec, kind) |> String.downcase()}", path({:list, kind}), [form_block])
+    page(elem(operation(:create, spec, kind), 0), path({:list, kind}), [form_block])
   end
 
   defp page({:edit, kind, key}, kind, spec, description, [answer | parent_answers], form) do
@@ -521,7 +546,11 @@ defmodule AtlasControl.Pages do
 
     case answer do
       %{"fact" => nil} ->
-        missing("Change #{key}", "#{key} does not exist (any more).", path({:list, kind}))
+        missing(
+          "#{verb(:update)} #{key}",
+          "#{key} does not exist (any more).",
+          path({:list, kind})
+        )
 
       %{"fact" => fact} ->
         shown = Map.new(fact["values"] || %{}, fn {k, v} -> {k, to_text(v)} end)
@@ -533,20 +562,20 @@ defmodule AtlasControl.Pages do
 
         form_block =
           Blocks.form(
-            title: "Change #{singular(spec, kind) |> String.downcase()} #{key}",
+            title: "#{verb(:update)} #{key}",
             # The id is shown, never changed; nor is the property it was made from.
             inputs:
               [Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key)] ++
                 from_input(spec, values) ++
                 inputs(spec, values, except: id_property(spec)) ++
                 parent_inputs(description, kind, values, parent_answers),
-            submit_label: "Save",
+            submit_label: verb(:update),
             submit_to: path({:edit, kind, key}),
             cancel_to: back,
             errors: form[:errors] || []
           )
 
-        page("Change #{key}", back, [form_block])
+        page("#{verb(:update)} #{key}", back, [form_block])
 
       %{"error" => error} ->
         unavailable(error, back)
@@ -558,21 +587,25 @@ defmodule AtlasControl.Pages do
 
     case answer do
       %{"fact" => nil} ->
-        missing("Delete #{key}", "#{key} does not exist (any more).", path({:list, kind}))
+        missing(
+          "#{verb(:delete)} #{key}",
+          "#{key} does not exist (any more).",
+          path({:list, kind})
+        )
 
       %{"fact" => fact} = answer ->
         case Enum.reject(children(description, kind, answer), fn {_, keys} -> keys == [] end) do
           [] ->
             confirm =
               Blocks.confirm(
-                title: "Delete #{singular(spec, kind) |> String.downcase()} #{key}?",
+                title: "#{elem(operation(:delete, spec, kind), 0)} #{key}?",
                 text: "#{key}: #{label(spec, fact)} will be deleted. This cannot be undone.",
-                confirm_label: "Delete",
+                confirm_label: verb(:delete),
                 confirm_to: path({:delete, kind, key}),
                 cancel_to: back
               )
 
-            page("Delete #{key}", back, [confirm])
+            page("#{verb(:delete)} #{key}", back, [confirm])
 
           held ->
             what =
@@ -587,7 +620,7 @@ defmodule AtlasControl.Pages do
                 cancel_to: back
               )
 
-            page("Delete #{key}", back, [confirm])
+            page("#{verb(:delete)} #{key}", back, [confirm])
         end
 
       %{"error" => error} ->
@@ -610,10 +643,9 @@ defmodule AtlasControl.Pages do
     Map.merge(%{title: title, back: back}, Blocks.view_model(content, markup))
   end
 
-  defp child_list(description, {relation, from, rel_spec}, key, answer, add_key) do
+  defp child_list(description, {relation, from, rel_spec}, key, answer, create_key) do
     from_spec = description["entities"][from] || %{}
     title = String.capitalize(get_in(rel_spec, ["inverse", "label"]) || plural(from_spec, from))
-    name = singular(from_spec, from) |> String.downcase()
 
     rows =
       case answer do
@@ -640,19 +672,13 @@ defmodule AtlasControl.Pages do
     empty =
       case answer do
         %{"error" => error} -> "#{error}."
-        _ when add? -> "No #{String.downcase(title)} yet. Press #{add_key} to add one."
+        _ when add? -> "No #{String.downcase(title)} yet. Press #{create_key} to create one."
         _ -> "No #{String.downcase(title)} yet."
       end
 
     actions =
       if add?,
-        do: [
-          Blocks.action(
-            label: "Add #{name}",
-            key: add_key,
-            to: path({:new, from, {relation, key}})
-          )
-        ],
+        do: [action(:create, from_spec, from, path({:new, from, {relation, key}}), create_key)],
         else: []
 
     {title, Blocks.list(rows: rows, empty: empty, actions: actions)}
@@ -1149,6 +1175,8 @@ defmodule AtlasControl.Pages do
   defp count(keys), do: Integer.to_string(length(keys))
 
   defp singular(spec, kind), do: spec["label"] || humanize(kind)
+  # A kind as an action names it: its label in lower case.
+  defp noun(spec, kind), do: spec |> singular(kind) |> String.downcase()
   defp plural(spec, kind), do: humanize(spec["plural"] || kind <> "s")
 
   defp humanize(name), do: name |> String.replace("_", " ") |> String.capitalize()

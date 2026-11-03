@@ -14,7 +14,7 @@ atlas tui --env test
 
 | Step | Keys | What you should see |
 |---|---|---|
-| A long title | `n`, type a title longer than the field | The title wraps onto the next row of its field; nothing is cut off. `enter` or ↓ goes on to the description. |
+| A long title | `c`, type a title longer than the field | The title wraps onto the next row of its field; nothing is cut off. `enter` or ↓ goes on to the description. |
 | A description | ↓ into **Description**, type `## Why`, `enter`, `enter`, a paragraph, `enter`, `enter`, `## What`, `enter`, `- one`, `enter`, `- two` | The description is a text area: `enter` starts a new line, blank lines stay. The help line says `↵ new line   ↑↓←→ move   tab next field   ctrl-s save`. |
 | Move around | ↑ ↓ ← →, Home, End, backspace | The cursor (a reversed cell) moves between lines and within a line; typing goes where it is; backspace at the start of a line joins it to the line above. ↑ on the first line or ↓ on the last leaves the description; `tab` always goes on to the next field. |
 | A long description | keep typing lines | Longer than the screen, the text area scrolls around the cursor and says how much is out of sight (`↑ 4 more above · ↓ 2 more below`). |
@@ -22,7 +22,7 @@ atlas tui --env test
 | Two parts (IS-Atlas-48) | open a scene, a use case or an issue with a long description | The page has two parts: **Content** (the item, its fields and description) and **References** (its use cases, issues or pull requests, and what it is in). From 120 columns they are side by side, narrower one above the other. The description never pushes the references out of view: when it is longer than its part, the part ends in `… N more lines`. |
 | Scroll the content | `tab`, then ↑/↓ (or `pgup`/`pgdn`) | The focus moves to the content (its frame lights up; the help line says `↑↓ scroll`). The description scrolls on its own (`↑ N lines above`); the references stay where they are. `tab` again goes back to the references, where ↑/↓ move the selected row. |
 | Resize | make the terminal wider or narrower | The parts go side by side or one above the other at once. |
-| Change | `e`, ↓ to **Description**, edit, `ctrl-s` | The change form opens the description with all its lines; ↓ into it starts at its first line, ↑ into it from below at its end. |
+| Update | `u`, ↓ to **Description**, edit, `ctrl-s` | The change form opens the description with all its lines; ↓ into it starts at its first line, ↑ into it from below at its end. |
 
 In TUI 2, the scene changes by itself after each save (`updated by hint at …`), with the same lines.
 

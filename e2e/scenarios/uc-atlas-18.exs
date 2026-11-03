@@ -83,10 +83,10 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     see(t1, "Proposed: 3 steps")
     press(t1, "Enter")
     see(t1, "Proposed: 1 step", 5_000)
-    see(t1, ~r/Before\s+Step 2 \(New use case in #{key}\) was refused: title is required\./)
+    see(t1, ~r/Before\s+Step 2 \(Create use case in #{key}\) was refused: title is required\./)
     see(t1, ~r/Stored\s+before\s+it:\s+step\s+1\./)
     see(t1, ~r/Not\s+run:\s+step\s+3\./)
-    see(t1, "[✓] 1. New use case in #{key}")
+    see(t1, "[✓] 1. Create use case in #{key}")
     see(t1, "Watch the third step")
 
     {got, _} = atlas_json(i, ["get", key])
@@ -113,7 +113,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
 
     see(
       t1,
-      ~r/Before\s+Step 1 \(New use case in #{key}\) was refused: #{key} does not exist/,
+      ~r/Before\s+Step 1 \(Create use case in #{key}\) was refused: #{key} does not exist/,
       5_000
     )
 
@@ -131,7 +131,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     type(t1, "rename to A renamed scene")
     press(t1, "Enter")
     see(t1, "Done: 1 of 1 stored, without asking", 10_000)
-    see(t1, "[✓] 1. Change scene #{key}")
+    see(t1, "[✓] 1. Update #{key}")
     # Planning comes first, so this is not the 1-second hint of a save.
     see(t2, "Scene #{key}: A renamed scene", 5_000)
     press(t1, "Enter")

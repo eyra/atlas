@@ -16,9 +16,9 @@ In TUI 1:
 
 | Step | Keys | What you should see |
 |---|---|---|
-| An issue | a scene (`n`), a use case in it (`a`), an issue in that (`a`), each with a title and `ctrl-s` | The issue, and under it **Pull requests**: `No pull requests yet. Press a to add one.` |
-| Link | `a`, paste or type `https://github.com/eyra/atlas/pull/12`, `ctrl-s` | The form asks only for the URL. `✓ Stored as PR-eyra-atlas-12`: the id is made from the URL (owner, repository, number; a `.` in a name becomes `_`). The pull request opens, labelled by its URL, with `In issue IS-Atlas-NN`. |
-| Open | `esc` back to the issue, ↑/↓, `enter` | The pull request. The URL is what it is, and title, state and draft are GitHub's, filled by a GitHub connector later. They show only once filled. `e Change` only moves it to another issue (IS-Atlas-59, see UC-Atlas-30). |
+| An issue | a scene (`c`), a use case in it (`c`), an issue in that (`c`), each with a title and `ctrl-s` | The issue, and under it **Pull requests**: `No pull requests yet. Press c to create one.` |
+| Link | `c`, paste or type `https://github.com/eyra/atlas/pull/12`, `ctrl-s` | The form asks only for the URL. `✓ Stored as PR-eyra-atlas-12`: the id is made from the URL (owner, repository, number; a `.` in a name becomes `_`). The pull request opens, labelled by its URL, with `In issue IS-Atlas-NN`. |
+| Open | `esc` back to the issue, ↑/↓, `enter` | The pull request. The URL is what it is, and title, state and draft are GitHub's, filled by a GitHub connector later. They show only once filled. `u Update pull request` only moves it to another issue (IS-Atlas-59, see UC-Atlas-30). |
 | Open in the browser (IS-Atlas-47) | on the pull request's page, or on its row in the issue's list, `o` | The footer shows `o Open in browser`. The browser shows the pull request on GitHub, and the TUI says `Opened https://… in the browser`. Only http and https addresses are opened. |
 | Remove | `d`, then `y` | `✓ Stored …`. You are back in the issue, without it. |
 
