@@ -65,6 +65,13 @@ defmodule AtlasControl.FakeStore do
               "error" => "name must look like #word/1"
             }
           }
+        },
+        # Reached only through the facts that point at it, as `rela/atlas.json` says.
+        "member" => %{
+          "label" => "Member",
+          "plural" => "members",
+          "top" => false,
+          "properties" => %{"name" => %{"type" => "string", "required" => true}}
         }
       },
       "relations" => %{
@@ -73,6 +80,7 @@ defmodule AtlasControl.FakeStore do
           "from" => ["part"],
           "to" => ["widget"],
           "max_outgoing" => 1,
+          "parent" => true,
           "inverse" => %{"id" => "parts", "label" => "parts"}
         },
         "on_part" => %{
@@ -80,6 +88,7 @@ defmodule AtlasControl.FakeStore do
           "from" => ["tag"],
           "to" => ["part"],
           "max_outgoing" => 1,
+          "parent" => true,
           "inverse" => %{"id" => "tags", "label" => "tags"},
           # As `rela/atlas.json` adds it: one live tag per part; a dropped one does not count.
           "limit" => %{
@@ -88,6 +97,22 @@ defmodule AtlasControl.FakeStore do
             "values" => ["live", "kept"],
             "error" => "{parent} already has {child} ({value}); one tag per part"
           }
+        },
+        # Associations: at most one, but not a parent.
+        "checked_by" => %{
+          "label" => "checked by",
+          "from" => ["widget", "part"],
+          "to" => ["member"],
+          "max_outgoing" => 1,
+          "inverse" => %{"id" => "checked", "label" => "checked"}
+        },
+        # History only: a migration sets it.
+        "seen_in" => %{
+          "label" => "also seen in",
+          "from" => ["widget"],
+          "to" => ["tag"],
+          "set_by" => "migration",
+          "inverse" => %{"id" => "also_seen", "label" => "also seen"}
         }
       }
     }
@@ -97,6 +122,13 @@ defmodule AtlasControl.FakeStore do
 
   def put(key, values, kind \\ "widget", links \\ %{}),
     do: GenServer.call(__MODULE__, {:put, kind, key, values, links})
+
+  @doc "The fact that set a link, as State answers it in `origins`."
+  def origin(kind, key, relation, origin),
+    do: GenServer.call(__MODULE__, {:origin, kind, key, relation, origin})
+
+  @doc "Every fact content State was sent, oldest first."
+  def sent, do: GenServer.call(__MODULE__, :sent)
 
   def link(part, widget), do: put(part, %{"title" => part}, "part", %{"of_widget" => [widget]})
   def silent(on?), do: GenServer.call(__MODULE__, {:silent, on?})
@@ -115,7 +147,16 @@ defmodule AtlasControl.FakeStore do
     :ok = AtlasBus.attach(AtlasBus.store())
 
     {:ok,
-     %{facts: %{}, position: 0, silent: false, reserved: MapSet.new(), last: nil, refusing: %{}}}
+     %{
+       facts: %{},
+       position: 0,
+       silent: false,
+       reserved: MapSet.new(),
+       last: nil,
+       refusing: %{},
+       origins: %{},
+       sent: []
+     }}
   end
 
   @impl true
@@ -124,6 +165,11 @@ defmodule AtlasControl.FakeStore do
 
   def handle_call({:silent, on?}, _from, s), do: {:reply, :ok, %{s | silent: on?}}
   def handle_call(:last_fact, _from, s), do: {:reply, s.last, s}
+
+  def handle_call({:origin, kind, key, relation, origin}, _from, s),
+    do: {:reply, :ok, put_in(s.origins[{kind, key, relation}], origin)}
+
+  def handle_call(:sent, _from, s), do: {:reply, Enum.reverse(s.sent), s}
 
   def handle_call({:refuse, key, reason}, _from, s),
     do: {:reply, :ok, put_in(s.refusing[key], reason)}
@@ -157,6 +203,7 @@ defmodule AtlasControl.FakeStore do
                   "key" => key,
                   "values" => values,
                   "links" => links,
+                  "origins" => origins(s, kind, key),
                   "version" => "v#{n}"
                 },
                 "incoming" => incoming
@@ -184,6 +231,7 @@ defmodule AtlasControl.FakeStore do
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = e, %{"op" => op, "key" => key} = c}, s) do
     s = %{s | last: c}
     about = %{"op" => op, "key" => key}
+    s = %{s | sent: [c | s.sent]}
     id = {e.kind, key}
 
     cond do
@@ -215,7 +263,13 @@ defmodule AtlasControl.FakeStore do
 
             "change" ->
               Map.update!(s.facts, id, fn {old, n, l} ->
-                {Map.merge(old, c["values"]), n + 1, Map.merge(l, c["links"] || %{})}
+                l =
+                  Enum.reduce(c["links"] || %{}, l, fn
+                    {relation, []}, acc -> Map.delete(acc, relation)
+                    {relation, keys}, acc -> Map.put(acc, relation, keys)
+                  end)
+
+                {Map.merge(old, c["values"]), n + 1, l}
               end)
           end
 
@@ -223,6 +277,10 @@ defmodule AtlasControl.FakeStore do
         :ok = AtlasBus.send(Envelope.reply(e, "stored", position: s.position), about)
         {:noreply, s}
     end
+  end
+
+  defp origins(s, kind, key) do
+    for {{^kind, ^key, relation}, origin} <- s.origins, into: %{}, do: {relation, origin}
   end
 
   defp missing(kind, values) do

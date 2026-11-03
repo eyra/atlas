@@ -12,7 +12,7 @@ scenario "UC-Atlas-05: Move the plan into Atlas", fn %{t2: t2, instance: i} ->
       "pull_requests" => [
         %{"url" => "https://github.com/eyra/atlas-e2e/pull/501", "issue" => "IS-01"}
       ],
-      "stages" => %{"IS-01" => "testing"}
+      "stages" => %{"IS-01" => "development"}
     })
   )
 
@@ -58,7 +58,7 @@ scenario "UC-Atlas-05: Move the plan into Atlas", fn %{t2: t2, instance: i} ->
 
     {got, _} = atlas_json(i, ["get", issue])
     got["values"]["description"] =~ "it names #{second} and" || raise inspect(got["values"])
-    got["values"]["stage"] == "testing" || raise inspect(got["values"])
+    got["values"]["stage"] == "development" || raise inspect(got["values"])
 
     hd(got["lists"])["rows"] |> hd() |> Map.fetch!("key") == "PR-eyra-atlas-e2e-501" ||
       raise inspect(got)

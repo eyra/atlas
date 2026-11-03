@@ -27,8 +27,8 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
     press(t1, "u")
     see(t1, "Update #{issue}")
     see(t1, "‹ #{from}: Where the issue starts ›")
-    # Title, stage, completed, description, then the use case.
-    press(t1, ["Tab", "Tab", "Tab", "Tab", "Right"])
+    # Title, stage, description, then the use case.
+    press(t1, ["Tab", "Tab", "Tab", "Right"])
     see(t1, "‹ #{to}: Where the issue goes ›")
     at = press(t1, "C-s")
     stored(t1, ~r/In use case\s+#{to}/, at)

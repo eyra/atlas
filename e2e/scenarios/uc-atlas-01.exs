@@ -26,8 +26,7 @@ scenario "UC-Atlas-01: Manage scenes", fn %{t1: t1, t2: t2, instance: instance} 
     press(t1, "Escape")
     see(t1, ~r/› SC-Atlas-\d+  Write the first scene/)
     open_row(t1, "Write the first scene")
-    screen = see(t1, ~r/Flux group\s+Refine/)
-    screen =~ ~r/Completed\s+no/ || raise "completed is not no"
+    see(t1, ~r/Flux group\s+Refine/)
     refute_see(t1, "Flux id")
     open_row(t2, "Write the first scene")
     see(t2, ~r/Scene SC-Atlas-\d+: Write the first scene/)

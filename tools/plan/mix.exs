@@ -14,5 +14,5 @@ defmodule AtlasPlan.MixProject do
     ]
   end
 
-  def application, do: [extra_applications: [:logger]]
+  def application, do: [extra_applications: [:logger, :inets, :ssl]]
 end

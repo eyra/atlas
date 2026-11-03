@@ -23,6 +23,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
 - `docs/guides/uc-atlas-30.md`: move an item to another parent, in the TUI and with `atlas set` (UC-Atlas-30, IS-Atlas-59).
 - `docs/guides/uc-atlas-31.md`: an issue has one open or merged pull request; a second is refused, and says why (UC-Atlas-31, IS-Atlas-60).
+- `docs/guides/uc-atlas-32.md`: completed means accepted or merged; completable is an association, shown with the fact that set it (UC-Atlas-32).
 
 ```sh
 atlas                     # prod: starts what is needed in the background, then opens a TUI
@@ -36,7 +37,8 @@ Agents use the same Control as the TUI, from the command line: `atlas help`, `pu
 
 ```sh
 atlas put use_case --in SC-Atlas-05 --title "Read items from the command line" --description-file uc.md --json
-atlas set IS-Atlas-33 stage=testing --json
+atlas set IS-Atlas-33 stage=development --json
+atlas set UC-Atlas-05 accepted_by=melle --cause "tested it" --json   # an association; empty removes it
 atlas put pull_request --url https://github.com/eyra/atlas/pull/14 --in IS-Atlas-33 --json
 ```
 
