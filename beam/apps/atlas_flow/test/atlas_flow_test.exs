@@ -201,6 +201,23 @@ defmodule AtlasFlowTest do
       eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
     end
 
+    test "handed over before Flow's first look: the first look writes what is expected only" do
+      FakeState.put("clerk", %{"key" => "cy"})
+
+      # Made a moment ago, nothing expected yet, and already handed to cy by ada.
+      FakeState.put("box", %{
+        "key" => "B-1",
+        "links" => %{"owned_by" => ["cy"]},
+        "origins" => %{"owned_by" => %{"keys" => ["cy"], "by" => "ada", "cause" => "handed"}}
+      })
+
+      engine()
+      eventually(fn -> FakeState.get("box", "B-1")["values"]["todo"] == "Pack it" end)
+      assert [%{"values" => %{"todo" => "Pack it"}} = sent] = FakeState.sent()
+      refute Map.has_key?(sent, "links")
+      assert FakeState.get("box", "B-1")["links"]["owned_by"] == ["cy"]
+    end
+
     test "an owner Flow, a migration or nobody set follows the state" do
       FakeState.put("box", %{
         "key" => "B-1",

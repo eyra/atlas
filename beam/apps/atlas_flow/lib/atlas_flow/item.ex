@@ -137,7 +137,10 @@ defmodule AtlasFlow.Item do
 
     owner = Definition.owner(current)
     relation = flow["owner_relation"]
-    moved? = values != %{}
+    # A move is a change of state: what is expected changes from one thing to another. The
+    # first look at a fact (nothing expected yet) is none, so an owner handed over before
+    # it stays.
+    moved? = values != %{} and blank(fact["values"][field]) != nil
 
     owner? =
       if (relation && (get_in(fact, ["links", relation]) || []) != List.wrap(owner)) and

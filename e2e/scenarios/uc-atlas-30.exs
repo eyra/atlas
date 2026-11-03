@@ -71,14 +71,15 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
     home(t1)
     see(t1, "c Create scene")
     open_row(t1, "A scene with two use cases")
-    # A person at the TUI also gets Accept (UC-Atlas-32), once a scenario made that person.
-    see(t1, ~r/u Update scene\s+d Delete scene\s+(a Accept\s+)?c Create use case/)
+    # A person at the TUI also gets Accept (UC-Atlas-32), once a scenario made that person;
+    # every assignable fact h Hand to… (IS-Atlas-83).
+    see(t1, ~r/u Update scene\s+d Delete scene\s+(a Accept\s+)?h Hand to…\s+c Create use case/)
     press(t1, "c")
     see(t1, ~r/^ Create use case in #{scene}$/m)
     see(t1, "[ Create ]")
     press(t1, "Escape")
     open_row(t1, "Where the issue starts")
-    see(t1, ~r/u Update use case\s+d Delete use case\s+(a Accept\s+)?c Create issue/)
+    see(t1, ~r/u Update use case\s+d Delete use case\s+(a Accept\s+)?h Hand to…\s+c Create issue/)
     press(t1, "u")
     see(t1, ~r/^ Update #{from}$/m)
     see(t1, "[ Update ]")
