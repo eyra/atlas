@@ -242,7 +242,9 @@ defmodule AtlasControl.Pages do
   end
 
   defp completion_from(description, kind) do
-    for rule <- completion_rules(description, kind),
+    while = List.wrap(get_in(description, ["entities", kind, "progress", "while"]))
+
+    for rule <- completion_rules(description, kind) ++ while,
         kind <-
           (case rule do
              %{"over" => relation} -> get_in(description, ["relations", relation, "from"])
@@ -1375,7 +1377,11 @@ defmodule AtlasControl.Pages do
           {"#{key} #{value}", nil}
 
         _ ->
-          {nil, nil}
+          # Not done, but showing something else while another fact holds.
+          case get_in(fact, ["progress", "while"]) do
+            %{"key" => key, "value" => value} -> {"#{key} #{value}", nil}
+            _ -> {nil, nil}
+          end
       end
 
     text =

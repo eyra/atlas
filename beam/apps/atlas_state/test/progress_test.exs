@@ -190,6 +190,48 @@ defmodule AtlasState.ProgressTest do
     assert crate.completion == %{"done" => true, "by" => "signed_by", "keys" => ["K-1"]}
   end
 
+  test "while a label on it is pending, a jar shows packing; nothing stored, why said" do
+    description =
+      put_in(@description, ["entities", "jar", "progress"], %{
+        "own" => "phase",
+        "while" => [
+          %{"over" => "on_jar", "field" => "state", "value" => "pending", "shows" => "packing"}
+        ]
+      })
+
+    pending = fact("L-1", %{"state" => "pending"}, %{"on_jar" => ["J-1"]})
+    dropped = fact("L-2", %{"state" => "dropped"}, %{"on_jar" => ["J-2"]})
+    jars = [fact("J-1", %{"phase" => "draft"}), fact("J-2", %{"phase" => "draft"})]
+
+    {:ok, [one, two]} =
+      Progress.annotate(description, "jar", jars, fn
+        "label" -> {:ok, [pending, dropped]}
+        _ -> {:ok, []}
+      end)
+
+    assert %{
+             "value" => "packing",
+             "label" => "Packing",
+             "while" => %{"over" => "on_jar", "key" => "L-1"}
+           } =
+             one.progress
+
+    # A label no longer pending does not count: its own phase again.
+    assert two.progress == %{"value" => "draft", "label" => "draft"}
+
+    # A crate rolls up what its jars show.
+    jars = [fact("J-1", %{"phase" => "draft"}, %{"in_crate" => ["C-1"]})]
+
+    {:ok, [crate]} =
+      Progress.annotate(description, "crate", [fact("C-1", %{})], fn
+        "label" -> {:ok, [pending]}
+        "jar" -> {:ok, jars}
+        _ -> {:ok, []}
+      end)
+
+    assert %{"value" => "packing", "count" => 1, "of" => 1} = crate.progress
+  end
+
   test "a kind without a rule is left as it is, and nothing is read" do
     facts = [fact("L-1", %{"state" => "sent"})]
 

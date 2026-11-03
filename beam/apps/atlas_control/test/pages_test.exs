@@ -417,6 +417,41 @@ defmodule AtlasControl.PagesTest do
                Enum.find(item["fields"], &(&1["label"] == "Progress"))
     end
 
+    test "showing something else while another fact holds: the page says why" do
+      answer = %{
+        "fact" => %{
+          "key" => "P-1",
+          "values" => %{"title" => "Wheel"},
+          "links" => %{"of_widget" => ["W-1"]},
+          "progress" => %{
+            "value" => "fine",
+            "label" => "Fine",
+            "while" => %{
+              "over" => "on_part",
+              "key" => "T-a-1",
+              "field" => "name",
+              "value" => "open"
+            }
+          },
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "part", "P-1"}, @completing, [answer, %{"facts" => []}])
+
+      assert %{"value" => "Fine · T-a-1 open"} =
+               Enum.find(item["fields"], &(&1["label"] == "Progress"))
+
+      while =
+        put_in(@completing, ["entities", "widget", "progress", "while"], [
+          %{"over" => "of_widget"}
+        ])
+
+      assert "part" in Pages.progress_from(while, "widget")
+    end
+
     test "not done, without children: its own field says it; no Progress line" do
       answer = %{
         "fact" => %{

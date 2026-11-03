@@ -27,13 +27,25 @@ defmodule AtlasState.Completion do
     end
   end
 
-  @doc "The kinds whose facts a `kind`'s completion reads, besides its own."
-  def needs(description, kind) do
-    for rule <- rules(description, kind),
+  @doc """
+  The kinds whose facts a `kind`'s completion reads, besides its own; with `rules`, the
+  kinds those rules read.
+  """
+  def needs(description, kind), do: needs_of(description, rules(description, kind))
+
+  def needs_of(description, rules) do
+    for rule <- rules,
         kind <- other_kinds(description, rule),
         uniq: true,
         do: kind
   end
+
+  @doc """
+  Whether one rule of the same shape (`over` or `through`, with `field` and `value`)
+  holds for `fact`: why, or nil. Progress uses it for what a fact shows while something
+  else holds (`progress.while`).
+  """
+  def matches(description, lists, rule, fact), do: holds(description, lists, rule, fact)
 
   defp other_kinds(description, %{"over" => relation}),
     do: get_in(description, ["relations", relation, "from"]) || []
