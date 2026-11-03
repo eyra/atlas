@@ -31,38 +31,28 @@ scenario "UC-Atlas-25: See how far a scene and its use cases are", fn %{
 
   step "An issue's stage changes its use case's row in both TUIs within 1 s", fn ->
     %{built: built, one: one, two: two} = keys.()
-    {_, at} = atlas_json(i, ["set", one, "stage=testing"])
+    {_, at} = atlas_json(i, ["set", one, "stage=development"])
     by_hint(t1, row.(built, "Specification · 1/2"), at)
 
-    {_, at} = atlas_json(i, ["set", two, "stage=testing"])
-    by_hint(t1, row.(built, "Testing · 2/2"), at)
+    {_, at} = atlas_json(i, ["set", two, "stage=development"])
+    by_hint(t1, row.(built, "Development · 2/2"), at)
 
-    {_, at} = atlas_json(i, ["set", one, "stage=development"])
-    by_hint(t1, row.(built, "Development · 1/2"), at)
+    {_, at} = atlas_json(i, ["set", one, "stage=design"])
+    by_hint(t1, row.(built, "Design · 1/2"), at)
   end
 
   step "Two levels up: an issue changes its scene's row", fn ->
     %{scene: scene, built: built, empty: empty, one: one} = keys.()
-    {_, at} = atlas_json(i, ["set", one, "stage=testing"])
-    by_hint(t1, row.(built, "Testing · 2/2"), at)
+    {_, at} = atlas_json(i, ["set", one, "stage=development"])
+    by_hint(t1, row.(built, "Development · 2/2"), at)
 
     {third, at} = atlas_json(i, ["put", "issue", "--in", empty, "--title", "The third issue"])
     by_hint(t1, row.(empty, "Specification · 1/1"), at)
     by_hint(t2, row.(scene, "Specification · 1/2"), at)
 
-    {_, at} = atlas_json(i, ["set", third["key"], "stage=testing"])
-    by_hint(t2, row.(scene, "Testing · 2/2"), at)
+    {_, at} = atlas_json(i, ["set", third["key"], "stage=development"])
+    by_hint(t2, row.(scene, "Development · 2/2"), at)
     Process.put(:uc25, Map.put(keys.(), :third, third["key"]))
-  end
-
-  step "Done when every issue under it is completed", fn ->
-    %{scene: scene, built: built, empty: empty, one: one, two: two, third: third} = keys.()
-    for issue <- [one, two], do: atlas_json(i, ["set", issue, "completed=true"])
-    see(t1, row.(built, "Done · 2/2"))
-
-    {_, at} = atlas_json(i, ["set", third, "completed=true"])
-    by_hint(t1, row.(empty, "Done · 1/1"), at)
-    by_hint(t2, row.(scene, "Done · 2/2"), at)
   end
 
   step "The item page shows Flux's status as its Flux group", fn ->

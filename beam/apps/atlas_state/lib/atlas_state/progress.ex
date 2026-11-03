@@ -12,13 +12,18 @@ defmodule AtlasState.Progress do
   - `own`: the fact's own property, shown when it has no children.
 
   For every kind (top-level `progress`): `order` (the values, least far first),
-  `done` (the boolean property that marks a fact finished) and `done_label`.
+  `done_label`, and `to_test` (`%{"value", "label"}`: what a fact whose children are all
+  completed shows while it is not completed itself; its value belongs in `order`).
 
-  With children, a fact is done when every child is (or it is itself); otherwise it is
-  as far as its least far child, with how many children are that far, of all of them:
-  `%{"value", "label", "count", "of"}`, or `%{"done" => true, "label", "count", "of"}`.
-  Without children it shows its own value (no count), or done. Nil when there is none.
+  A fact is done only when it is completed itself (`AtlasState.Completion`), never
+  because its children are. With children: done when completed; "to test" when every
+  child is completed and it is not; otherwise as far as its least far child. Each with
+  how many children are that far, of all of them: `%{"value", "label", "count", "of"}`,
+  or `%{"done" => true, "label", "count", "of"}`. Without children it shows its own
+  value (no count), or done. Nil when there is none.
   """
+
+  alias AtlasState.Completion
 
   # Rules that point back at a kind already on the way down end here.
   @depth 8
@@ -32,32 +37,48 @@ defmodule AtlasState.Progress do
   end
 
   @doc """
-  `facts` of `kind` (as rela gives them), each with `:progress` when the kind has a rule.
-  `list` reads every fact of a kind: `list.(kind)` is `{:ok, facts}` or an error, which
-  is returned as it is.
+  `facts` of `kind` (as rela gives them), each with `:progress` when the kind has a
+  progress rule and `:completion` (why it is completed, or nil) when it has a completion
+  rule. `list` reads every fact of a kind: `list.(kind)` is `{:ok, facts}` or an error,
+  which is returned as it is.
   """
   def annotate(description, kind, facts, list) do
-    case rule(description, kind) do
-      nil ->
-        {:ok, facts}
+    progress? = rule(description, kind) != nil
+    completion? = Completion.rules(description, kind) != []
 
-      _rule ->
-        with {:ok, lists} <- fetch(description, needs(description, kind, @depth), list) do
-          {:ok,
-           Enum.map(
-             facts,
-             &Map.put(&1, :progress, progress(description, lists, kind, &1, @depth))
-           )}
-        end
+    if progress? or completion? do
+      with {:ok, lists} <- fetch(description, needs(description, kind, @depth), list) do
+        {:ok,
+         Enum.map(facts, fn fact ->
+           fact
+           |> then(
+             &if(progress?,
+               do: Map.put(&1, :progress, progress(description, lists, kind, &1, @depth)),
+               else: &1
+             )
+           )
+           |> then(
+             &if(completion?,
+               do: Map.put(&1, :completion, Completion.of(description, lists, kind, &1)),
+               else: &1
+             )
+           )
+         end)}
+      end
+    else
+      {:ok, facts}
     end
   end
 
+  # The kinds to read: the children, at any depth, and what each one's completion reads.
   defp needs(_description, _kind, 0), do: MapSet.new()
 
   defp needs(description, kind, depth) do
+    own = MapSet.new(Completion.needs(description, kind))
+
     case child_kind(description, kind) do
-      nil -> MapSet.new()
-      child -> MapSet.put(needs(description, child, depth - 1), child)
+      nil -> own
+      child -> own |> MapSet.union(needs(description, child, depth - 1)) |> MapSet.put(child)
     end
   end
 
@@ -87,6 +108,7 @@ defmodule AtlasState.Progress do
   defp progress(description, lists, kind, fact, depth) do
     rule = rule(description, kind) || %{}
     child = child_kind(description, kind)
+    completed? = Completion.of(description, lists, kind, fact) != nil
 
     children =
       if child,
@@ -100,9 +122,9 @@ defmodule AtlasState.Progress do
     cond do
       children != [] ->
         values = Enum.map(children, &child_value(description, lists, child, rule, &1, depth - 1))
-        roll_up(description, values, done?(description, fact))
+        roll_up(description, values, completed?)
 
-      done?(description, fact) ->
+      completed? ->
         done(description)
 
       true ->
@@ -114,19 +136,22 @@ defmodule AtlasState.Progress do
   defp child_value(description, lists, kind, parent_rule, fact, depth) do
     cond do
       rule(description, kind) -> progress(description, lists, kind, fact, depth)
-      done?(description, fact) -> done(description)
+      Completion.of(description, lists, kind, fact) -> done(description)
       true -> own(description, kind, fact, parent_rule["field"])
     end
   end
 
-  defp roll_up(description, values, done?) do
+  defp roll_up(description, values, completed?) do
     of = length(values)
     finished = Enum.count(values, &match?(%{"done" => true}, &1))
     open = Enum.reject(values, &(is_nil(&1) or match?(%{"done" => true}, &1)))
 
     cond do
-      done? or finished == of ->
+      completed? ->
         Map.merge(done(description), %{"count" => finished, "of" => of})
+
+      finished == of ->
+        Map.merge(to_test(description), %{"count" => finished, "of" => of})
 
       open == [] ->
         nil
@@ -151,15 +176,15 @@ defmodule AtlasState.Progress do
     end
   end
 
-  defp done?(description, fact) do
-    case get_in(description, ["progress", "done"]) do
-      nil -> false
-      field -> fact.properties[field] in [true, "true"]
-    end
-  end
-
   defp done(description),
     do: %{"done" => true, "label" => get_in(description, ["progress", "done_label"]) || "Done"}
+
+  defp to_test(description) do
+    case get_in(description, ["progress", "to_test"]) do
+      %{"value" => value} = to_test -> %{"value" => value, "label" => to_test["label"] || value}
+      _ -> %{"value" => "to_test", "label" => "To test"}
+    end
+  end
 
   # A value the order does not know counts as the least far.
   defp rank(description, value) do

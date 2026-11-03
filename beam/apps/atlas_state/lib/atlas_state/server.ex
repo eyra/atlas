@@ -9,23 +9,27 @@ defmodule AtlasState.Server do
     for those that point at `key`), one fact (`"key" => key`) with the keys of the facts
     that point at it and, for a copy of an outside fact, when a connector last read it
     (`"copy"`, see `AtlasState.Copies`), or (kind `_description`) rela's description.
-    Facts carry their outgoing `links`, and their `progress` when the description has a
-    rule for their kind (`AtlasState.Progress`): worked out on every read, never stored.
+    Facts carry their outgoing `links`, with the `origins` of those links (the fact that
+    set each: since, by, cause; `AtlasState.Links`), and their `progress` when the
+    description has a rule for their kind (`AtlasState.Progress`), and why they are
+    completed (`completion`, `AtlasState.Completion`): worked out on every read, never
+    stored. One fact also carries the `history` of its links.
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
-  "links" => %{relation => [keys]}, "cause" => why, optional}`. On a create the links are
-  the fact's first; on a change each relation named is replaced by the keys given, so a
-  fact moves to another parent; the hint then reaches every listener of its kind, on
-  the old parent's page and the new one's. The cause is kept with State's answer and
-  goes along with the hint.
+  "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional}`.
+  On a create the links are the fact's first; on a change each relation named is replaced
+  by the keys given (`[]` removes its links), so a fact moves to another parent or an
+  association is set or removed; the hint then reaches every listener of its kind, on
+  the old parent's page and the new one's. The cause and who sent it are kept with
+  State's answer and go along with the hint.
   """
   use GenServer
 
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Copies, Description, Ledger, Progress, Rela}
+  alias AtlasState.{Copies, Description, Ledger, Links, Progress, Rela}
 
   @description "_description"
 
@@ -34,19 +38,23 @@ defmodule AtlasState.Server do
   @impl true
   def init(opts) do
     :ok = AtlasBus.attach(AtlasBus.store())
-    ledger = Ledger.open(Keyword.fetch!(opts, :data_dir))
+    dir = Keyword.fetch!(opts, :data_dir)
 
     {:ok,
      %{
        rela: Keyword.fetch!(opts, :rela),
-       ledger: ledger,
+       ledger: Ledger.open(dir),
+       links: Links.open(dir),
        description: nil,
        extra: Keyword.get(opts, :description_extra)
      }}
   end
 
   @impl true
-  def terminate(_reason, state), do: Ledger.close(state.ledger)
+  def terminate(_reason, state) do
+    Ledger.close(state.ledger)
+    Links.close(state.links)
+  end
 
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = envelope, content}, state) do
@@ -74,14 +82,15 @@ defmodule AtlasState.Server do
     about = %{"op" => content_op(content), "key" => content_key(content)}
     # Who or what made the change and why ("GitHub connector, read at …"), when said.
     about =
-      case content do
-        %{"cause" => cause} when is_binary(cause) -> Map.put(about, "cause", cause)
-        _ -> about
-      end
+      for name <- ["cause", "by"],
+          is_binary(content[name]),
+          into: about,
+          do: {name, content[name]}
 
     case result do
       :stored ->
         position = Ledger.stored(state.ledger, envelope.id, about)
+        remember_links(state, envelope.kind, content, about, position)
         reply(envelope, "stored", about, position)
 
       {:refused, reasons} ->
@@ -100,6 +109,25 @@ defmodule AtlasState.Server do
         reply(envelope, "refused", Map.put(about, "reasons", ["rela is not reachable"]), nil)
     end
   end
+
+  # The fact that set each link it names: when, by whom, why (`AtlasState.Links`).
+  defp remember_links(state, kind, %{"op" => "delete", "key" => key}, _about, _position),
+    do: Links.forget(state.links, kind, key)
+
+  defp remember_links(state, kind, %{"key" => key, "links" => links}, about, position)
+       when is_map(links) do
+    entry =
+      about
+      |> Map.take(["by", "cause"])
+      |> Map.merge(%{"since" => now(), "position" => position})
+
+    for {relation, keys} <- links, do: Links.record(state.links, kind, key, relation, keys, entry)
+    :ok
+  end
+
+  defp remember_links(_state, _kind, _content, _about, _position), do: :ok
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
   defp reply(envelope, class, content, position) do
     case AtlasBus.send(Envelope.reply(envelope, class, position: position), content) do
@@ -160,7 +188,7 @@ defmodule AtlasState.Server do
              Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
            end),
          {:ok, facts} <- with_progress(state, kind, facts) do
-      %{"facts" => Enum.map(facts, &wire/1)}
+      %{"facts" => Enum.map(facts, &wire(state, kind, &1))}
     else
       {:error, _} -> %{"error" => "rela is not reachable"}
     end
@@ -170,7 +198,11 @@ defmodule AtlasState.Server do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
          {:ok, [fact]} <- with_progress(state, kind, [fact]),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
-      answer = %{"fact" => wire(fact), "incoming" => incoming}
+      answer = %{
+        "fact" => wire(state, kind, fact),
+        "incoming" => incoming,
+        "history" => Links.all(state.links, kind, key)
+      }
 
       case Copies.get(kind, key) do
         nil -> answer
@@ -199,15 +231,19 @@ defmodule AtlasState.Server do
     end)
   end
 
-  defp wire(fact) do
+  defp wire(state, kind, fact) do
+    links = fact[:links] || %{}
+
     wired = %{
       "key" => fact.key,
       "values" => fact.properties,
-      "links" => fact[:links] || %{},
+      "links" => links,
+      "origins" => Links.origins(state.links, kind, fact.key, links),
       "version" => fact.version
     }
 
-    if fact[:progress], do: Map.put(wired, "progress", fact.progress), else: wired
+    wired = if fact[:progress], do: Map.put(wired, "progress", fact.progress), else: wired
+    if fact[:completion], do: Map.put(wired, "completion", fact.completion), else: wired
   end
 
   # Facts

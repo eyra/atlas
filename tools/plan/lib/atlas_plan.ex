@@ -17,7 +17,7 @@ defmodule AtlasPlan do
     out (someone created an item meanwhile); running it again goes on from there.
 
   The links file: `{"pull_requests": [{"url": ..., "issue": "IS-01"}],
-  "stages": {"IS-02": "testing"}}`. A stage is set on an issue created in the same run;
+  "stages": {"IS-02": "development"}}`. A stage is set on an issue created in the same run;
   linking a pull request again from the same issue changes nothing.
   """
 

@@ -7,7 +7,8 @@ defmodule AtlasAgent do
   - `put/4` opens the create form of a kind (under a parent, when given only its key),
     fills the fields it asks, submits, and answers the key Control made, or why it was
     refused.
-  - `set/3` changes fields of one fact through its change form.
+  - `set/3` changes fields of one fact through its change form, and the links of an
+    association (`<association>=<key>`; empty removes them) through that association's form.
   - `delete/2` deletes one fact through the confirm the TUI's d opens.
   - `get/2` reads one fact: its page (fields, and the lists of facts under it) and the
     exact values of its change form.
@@ -25,9 +26,10 @@ defmodule AtlasAgent do
   @doc """
   Connect to Control of `env`. Its address comes from `env/<env>.json`, or from
   `ATLAS_ENV_FILE` (a private instance), whose `"env"` must be the same environment.
+  `as` is what the client says it is: `agent`, or `migration`.
   """
-  def connect(env) do
-    with {:ok, settings} <- settings(env), do: Client.connect(env, settings)
+  def connect(env, as \\ "agent") do
+    with {:ok, settings} <- settings(env), do: Client.connect(env, settings, as)
   end
 
   @doc "The settings of `env`: `env/<env>.json`, or `ATLAS_ENV_FILE` for a private instance."
@@ -54,25 +56,67 @@ defmodule AtlasAgent do
   fact it belongs under, or nil. Answers `{:ok, key}`, `{:refused, reasons}` or
   `{:error, text}`.
   """
-  def put(client, kind, values, parent \\ nil) do
+  def put(client, kind, values, parent \\ nil, cause \\ nil) do
     with {:ok, form} <- create_form(client, kind, parent),
          :ok <- asked(form, values, :create) do
-      case Client.submit(client, form["submit_to"], values) do
+      case Client.submit(client, form["submit_to"], values, cause) do
         {:stored, page} -> {:ok, Client.key_of(page["path"])}
         other -> other
       end
     end
   end
 
-  @doc "Change `values` (field name to text) of the fact with `key`; the rest stays."
-  def set(client, key, values) do
-    with {:ok, form} <- change_form(client, key),
-         :ok <- asked(form, values, :change) do
-      case Client.submit(client, form["submit_to"], values) do
-        {:stored, _page} -> {:ok, key}
-        other -> other
+  @doc """
+  Change `values` (field name to text) of the fact with `key`; the rest stays. A name the
+  change form does not ask, but that is an association of the fact, sets its links: the
+  keys named (separated by commas); none removes them. `cause` says why.
+  """
+  def set(client, key, values, cause \\ nil) do
+    with {:ok, form} <- change_form(client, key) do
+      asked = for input <- form["inputs"] || [], input["kind"] != "readonly", do: input["name"]
+      {fields, links} = Map.split(values, asked)
+
+      with :ok <- set_links(client, key, form, links, cause) do
+        if fields == %{} and links != %{} do
+          {:ok, key}
+        else
+          case Client.submit(client, form["submit_to"], fields, cause) do
+            {:stored, _page} -> {:ok, key}
+            other -> other
+          end
+        end
       end
     end
+  end
+
+  # Each association through its own form. A name that is no association of the fact is
+  # answered with what the change form asks; one Control does not let a client set, with
+  # why.
+  defp set_links(client, key, change, links, cause) do
+    Enum.reduce_while(links, :ok, fn {relation, keys}, :ok ->
+      result =
+        with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}/links/#{enc(relation)}") do
+          case {Client.blocks(page, "form"), Client.blocks(page, "confirm")} do
+            {[form], _} ->
+              note = if cause, do: %{"note" => cause}, else: %{}
+
+              case Client.submit(client, form["submit_to"], Map.merge(%{"to" => keys}, note)) do
+                {:stored, _} -> :ok
+                other -> other
+              end
+
+            {[], [%{"text" => text} | _]} ->
+              if String.contains?(text, " is not set here"),
+                do: {:refused, [text]},
+                else: asked(change, %{relation => keys}, :change)
+
+            _ ->
+              asked(change, %{relation => keys}, :change)
+          end
+        end
+
+      if result == :ok, do: {:cont, :ok}, else: {:halt, result}
+    end)
   end
 
   @doc """
@@ -106,9 +150,11 @@ defmodule AtlasAgent do
   end
 
   @doc """
-  One fact: `%{"key", "path", "title", "fields" => [[label, value]], "lists" =>
-  [%{"title", "rows"}], "values" => %{name => text}}`. `values` are what its change form
-  holds, so exactly what was stored; empty when it has no change form.
+  One fact: `%{"key", "path", "title", "fields" => [[label, value]], "origins" =>
+  %{label => %{"since", "by", "cause"}}, "lists" => [%{"title", "rows"}], "values" =>
+  %{name => text}}`. `origins` holds the fact that set a field's value, for a link. `values`
+  are what its change form holds, so exactly what was stored; empty when it has no change
+  form.
   """
   def get(client, key) do
     with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}") do
@@ -118,12 +164,19 @@ defmodule AtlasAgent do
           # that offers no key to change it (one only the agent writes).
           values = edit_values(client, page["path"] <> "/edit")
 
+          # The fact that set a value (a link): since, by, cause, by the field's label.
+          origins =
+            for %{"origin" => %{} = origin} = pair <- item["fields"] || [],
+                into: %{},
+                do: {pair["label"], origin}
+
           {:ok,
            %{
              "key" => key,
              "path" => page["path"],
              "title" => item["title"],
              "fields" => Enum.map(item["fields"] || [], &[&1["label"], &1["value"]]),
+             "origins" => origins,
              "lists" => lists(page),
              "values" => values
            }}

@@ -6,7 +6,8 @@ defmodule AtlasAgent.Tools do
 
   - `put`, one per kind: the inputs of its create form (as Control sends them) and the
     kind it goes in, when it belongs under one.
-  - `set`, one per kind: the fields a person may change.
+  - `set`, one per kind: the fields a user may change, and the associations a client may
+    link (`<association>=<key>`); not those only a migration or connector sets.
   - `delete`: one fact by its key, refused while anything hangs under it.
   - `get`, `list` and `help`: reading.
 
@@ -75,12 +76,15 @@ defmodule AtlasAgent.Tools do
     }
   end
 
-  @doc "The set tool of a kind: the fields a person may change, and what each takes."
+  @doc "The set tool of a kind: the fields a user may change, and what each takes."
   def set(kind) do
     fields =
-      for line <- String.split(field(kind, "Fields") || "", "\n"),
+      for line <-
+            String.split(field(kind, "Fields") || "", "\n") ++
+              String.split(field(kind, "Links") || "", "\n"),
           [name, what] <- [String.split(line, ": ", parts: 2)],
           not String.contains?(what, "never in a form"),
+          not String.contains?(what, "never by hand"),
           do: %{"name" => name, "takes" => what}
 
     %{

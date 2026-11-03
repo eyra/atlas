@@ -16,15 +16,18 @@ defmodule AtlasAgent.Client do
   @page_wait 10_000
   @stored_wait 60_000
 
-  @doc "Connect to Control at `settings[\"control\"]` and say hello for `env`."
-  def connect(env, settings) do
+  @doc """
+  Connect to Control at `settings[\"control\"]` and say hello for `env`, as `as`: an
+  `agent`, or a `migration` (which may set what the description marks as set by one).
+  """
+  def connect(env, settings, as \\ "agent") do
     host = settings["control"]["host"] |> String.to_charlist()
     port = settings["control"]["port"]
     options = [:binary, packet: :line, active: false, buffer: 4_194_304]
 
     with {:ok, socket} <- tcp_connect(host, port, options, env),
          client = %__MODULE__{socket: socket, env: env},
-         :ok <- send_line(client, %{"op" => "hello", "env" => env, "client" => "agent"}),
+         :ok <- send_line(client, %{"op" => "hello", "env" => env, "client" => as}),
          {:ok, _welcome} <- await(client, @page_wait, &welcome/1),
          # Control shows its start page after the welcome; it is not what anyone asked.
          {:ok, _home} <- await(client, @page_wait, &page(&1, ["open"])) do
@@ -42,11 +45,14 @@ defmodule AtlasAgent.Client do
   end
 
   @doc """
-  Submit `values` (text) to a form's `submit_to`. Answers `{:stored, page}` with the page
-  Control shows after it was stored, or `{:refused, reasons}`.
+  Submit `values` (text) to a form's `submit_to`, with why (`cause`) when given. Answers
+  `{:stored, page}` with the page Control shows after it was stored, or `{:refused, reasons}`.
   """
-  def submit(client, to, values) do
-    with :ok <- send_line(client, %{"op" => "submit", "to" => to, "values" => values}),
+  def submit(client, to, values, cause \\ nil) do
+    message = %{"op" => "submit", "to" => to, "values" => values}
+    message = if cause, do: Map.put(message, "cause", cause), else: message
+
+    with :ok <- send_line(client, message),
          {:ok, page} <- await(client, @stored_wait, &page(&1, ["stored", "refused"])) do
       case page["reason"] do
         "stored" ->

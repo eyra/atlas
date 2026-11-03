@@ -2,7 +2,7 @@ defmodule AtlasAgent.Record do
   @moduledoc """
   What the agent did, kept as facts in State (UC-Atlas-19): each request, each step of
   its plan with what became of it, and the request's outcome. Every change the agent
-  makes is so a fact with its cause, which a person can see and overrule.
+  makes is so a fact with its cause, which Melle can see and overrule.
 
   Which kinds hold the record is data: the kinds page (`/_kinds`) says, per kind, when it
   is an "Agent record" (`request` or `step`), from `rela/atlas.json`. This code names no

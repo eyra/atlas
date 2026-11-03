@@ -19,7 +19,7 @@ defmodule AtlasBus.BoundaryTest do
   @clients [{"clients/tui", "AtlasTui"}, {"clients/agent", "AtlasAgent"}]
 
   # Names of the entities rela describes today. Extend it when rela describes more.
-  @entities ~r/\b(scenes?|use[ _-]?cases?|issues?|pull[ _-]?requests?)\b/i
+  @entities ~r/\b(scenes?|use[ _-]?cases?|issues?|pull[ _-]?requests?|persons?|people)\b/i
 
   # Checks, as functions of source text, so they can be tested on purpose-made violations.
 

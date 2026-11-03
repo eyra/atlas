@@ -17,9 +17,9 @@ In TUI 1:
 | Step | Keys | What you should see |
 |---|---|---|
 | A use case | `c` and a title for a scene, `ctrl-s`; then `c` and a title for a use case in it, `ctrl-s` | The use case, and under it **Issues**: `No issues yet. Press c to create one.` |
-| Create | `c`, a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `✓ Stored as IS-Atlas-01 …`: the code is made for you. The issue opens with `In use case UC-Atlas-NN`, stage Specification and completed no by default, and an empty **Pull requests** list. |
+| Create | `c`, a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `✓ Stored as IS-Atlas-01 …`: the code is made for you. The issue opens with `In use case UC-Atlas-NN`, stage Specification by default, and an empty **Pull requests** list. |
 | Open | `esc` back to the use case, ↑/↓, `enter` | The issue with its fields. An issue has a stage, not a status. Flux ref and Flux id show only once a Flux sync has filled them, so not for issues made in Atlas. |
-| Update | `u`; ↓ to **Stage** and ←/→ to choose; ↓ to **Completed**, → for yes; `ctrl-s` | The code is shown read-only, and there are no Flux fields to fill in. `✓ Stored …` and the changed issue. In the use case its row reads `IS-Atlas-01 · Design · completed`. |
+| Update | `u`; ↓ to **Stage** and ←/→ to choose; `ctrl-s` | The code is shown read-only, and there are no Flux fields to fill in. `✓ Stored …` and the changed issue. In the use case its row reads `IS-Atlas-01 · Design`. An issue has no completed field: it is completed when its pull request is merged (UC-Atlas-32). |
 | Remove | `d`, then `y` | `✓ Stored …`. You are back in the use case, without it. |
 
 Keep TUI 2 open on the same use case: each change shows up there by itself (`updated by hint at …`).

@@ -87,8 +87,8 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
   step "Update: a line on top; arrows move; TUI 2 by hint", fn ->
     press(t1, "u")
     see(t1, ~r/Update SC-Atlas-\d+/)
-    # Title, Status, Completed, then into the description at its first line.
-    press(t1, ["Down", "Down", "Down"])
+    # Title, Status, then into the description at its first line.
+    press(t1, ["Down", "Down"])
     see(t1, "↵ new line")
     type(t1, "Intro")
     press(t1, "Enter")

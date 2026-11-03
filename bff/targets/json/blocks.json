@@ -273,6 +273,26 @@
     {
       "fields": [
         {
+          "name": "since",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "by",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "cause",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "origin"
+    },
+    {
+      "fields": [
+        {
           "name": "label",
           "required": true,
           "type": "string"
@@ -281,6 +301,11 @@
           "name": "value",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "origin",
+          "required": false,
+          "type": "origin"
         }
       ],
       "name": "pair"
@@ -376,7 +401,7 @@
       "name": "step"
     }
   ],
-  "version": "0.7.0",
+  "version": "0.8.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

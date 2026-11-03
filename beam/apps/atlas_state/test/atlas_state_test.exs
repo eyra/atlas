@@ -17,7 +17,13 @@ defmodule AtlasStateTest do
   defp fact(op, key, values \\ %{}, opts \\ []) do
     envelope = Envelope.new("fact", Keyword.get(opts, :kind, "widget"), Keyword.take(opts, [:id]))
     content = %{"op" => op, "key" => key, "values" => values, "version" => opts[:version]}
-    content = if opts[:links], do: Map.put(content, "links", opts[:links]), else: content
+
+    content =
+      for name <- [:links, :cause, :by],
+          opts[name] != nil,
+          into: content,
+          do: {Atom.to_string(name), opts[name]}
+
     send_and_wait(envelope, content)
   end
 
@@ -255,6 +261,71 @@ defmodule AtlasStateTest do
                kind: "part",
                links: %{"of_widget" => ["W-9"]}
              )
+  end
+
+  test "a change sets or removes the links it names; reads say since when, by whom and why",
+       _ do
+    fact("create", "M-1", %{"title" => "Ada"}, kind: "maker")
+    fact("create", "W-1", %{"title" => "One"})
+
+    assert {"stored", %{"by" => "ada", "cause" => "made it"}, position} =
+             fact("change", "W-1", %{},
+               links: %{"made_by" => ["M-1"]},
+               by: "ada",
+               cause: "made it"
+             )
+
+    assert %{"fact" => %{"links" => %{"made_by" => ["M-1"]}, "origins" => origins}} =
+             read("widget", %{"key" => "W-1"})
+
+    assert %{"made_by" => %{"keys" => ["M-1"], "by" => "ada", "cause" => "made it"}} = origins
+    assert %{"position" => ^position, "since" => since} = origins["made_by"]
+    assert {:ok, _, 0} = DateTime.from_iso8601(since)
+    # The fake lists every kind's facts at once.
+    assert %{"origins" => ^origins} = Enum.find(read("widget")["facts"], &(&1["key"] == "W-1"))
+
+    # Removing it is a fact too: the origin then says who removed it and why.
+    assert {"stored", _, _} =
+             fact("change", "W-1", %{}, links: %{"made_by" => []}, by: "bob", cause: "not hers")
+
+    assert %{"fact" => fact, "history" => %{"made_by" => [first, second]}} =
+             read("widget", %{"key" => "W-1"})
+
+    assert fact["links"] == %{}
+    assert %{"made_by" => %{"keys" => [], "by" => "bob", "cause" => "not hers"}} = fact["origins"]
+    assert first["keys"] == ["M-1"] and second["keys"] == []
+  end
+
+  test "a link set behind State's back has no origin", %{rela: rela} do
+    fact("create", "M-1", %{"title" => "Ada"}, kind: "maker")
+    fact("create", "W-1", %{"title" => "One"})
+    fact("change", "W-1", %{}, links: %{"made_by" => ["M-1"]})
+    fact("create", "M-2", %{"title" => "Bob"}, kind: "maker")
+    FakeRela.link(rela, "W-1", "M-2", "made_by")
+
+    assert %{"fact" => %{"links" => %{"made_by" => ["M-2"]}, "origins" => %{}}} =
+             read("widget", %{"key" => "W-1"})
+  end
+
+  test "a change's links are checked like a create's", _ do
+    fact("create", "W-1", %{"title" => "One"})
+
+    assert {"refused", %{"reasons" => ["made_by allows at most 1"]}, nil} =
+             fact("change", "W-1", %{}, links: %{"made_by" => ["M-1", "M-2"]})
+
+    assert {"refused", %{"reasons" => ["M-9 does not exist"]}, nil} =
+             fact("change", "W-1", %{}, links: %{"made_by" => ["M-9"]})
+
+    assert {"refused", %{"reasons" => ["of_widget does not start at widget"]}, nil} =
+             fact("change", "W-1", %{}, links: %{"of_widget" => []})
+  end
+
+  test "a deleted fact's links are forgotten", _ do
+    fact("create", "M-1", %{"title" => "Ada"}, kind: "maker")
+    fact("create", "W-1", %{"title" => "One"}, links: %{"made_by" => ["M-1"]})
+    assert %{"history" => %{"made_by" => [_]}} = read("widget", %{"key" => "W-1"})
+    fact("delete", "W-1")
+    assert %{"fact" => nil} = read("widget", %{"key" => "W-1"})
   end
 
   test "a change can move a fact to another parent; reads follow it", %{rela: rela} do

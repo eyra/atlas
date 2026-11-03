@@ -61,7 +61,7 @@ defmodule AtlasAgent.ToolsTest do
     assert Tools.put(top, @form)["in"] == nil
   end
 
-  test "set: the fields a person may change, not those only a connector fills" do
+  test "set: the fields a user may change, not those only a connector fills" do
     tool = Tools.set(@part)
     # Named as Control names the update action on every page.
     assert tool["title"] == "Update part"
