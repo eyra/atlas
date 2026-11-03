@@ -9,7 +9,11 @@ defmodule AtlasState.Progress do
   - `over`: the relation whose facts point at this one: its children;
   - `field`: the children's property that says how far each is, for a child kind
     without a rule of its own (a child with a rule gives its own progress);
-  - `own`: the fact's own property, shown when it has no children.
+  - `own`: the fact's own property, shown when it has no children;
+  - `while`: what it shows instead of its own property while something holds: a list of
+    `%{"over" | "through" => relation, "field", "value", "shows"}` (development while a
+    fact under it is open), shaped as a completion rule
+    (`AtlasState.Completion`). The progress then says why (`"while"`: the fact that holds).
 
   For every kind (top-level `progress`): `order` (the values, least far first),
   `done_label`, and `to_test` (`%{"value", "label"}`: what a fact whose children are all
@@ -70,11 +74,16 @@ defmodule AtlasState.Progress do
     end
   end
 
-  # The kinds to read: the children, at any depth, and what each one's completion reads.
+  # The kinds to read: the children, at any depth, and what each one's completion and
+  # `while` rules read.
   defp needs(_description, _kind, 0), do: MapSet.new()
 
   defp needs(description, kind, depth) do
-    own = MapSet.new(Completion.needs(description, kind))
+    own =
+      MapSet.new(
+        Completion.needs(description, kind) ++
+          Completion.needs_of(description, while_rules(description, kind))
+      )
 
     case child_kind(description, kind) do
       nil -> own
@@ -128,8 +137,38 @@ defmodule AtlasState.Progress do
         done(description)
 
       true ->
-        own(description, kind, fact, rule["own"])
+        while(description, lists, kind, fact) || own(description, kind, fact, rule["own"])
     end
+  end
+
+  defp while_rules(description, kind) do
+    case get_in(description, ["entities", kind, "progress", "while"]) do
+      rules when is_list(rules) -> Enum.filter(rules, &is_map/1)
+      %{} = rule -> [rule]
+      _ -> []
+    end
+  end
+
+  # What the fact shows while one of its `while` rules holds, and why; else nil.
+  defp while(description, lists, kind, fact) do
+    own = get_in(description, ["entities", kind, "progress", "own"])
+
+    Enum.find_value(while_rules(description, kind), fn rule ->
+      case Completion.matches(description, lists, rule, fact) do
+        nil ->
+          nil
+
+        why ->
+          value = rule["shows"]
+          labels = get_in(description, ["entities", kind, "properties", own, "labels"]) || %{}
+
+          %{
+            "value" => value,
+            "label" => labels[value] || to_string(value),
+            "while" => Map.delete(why, "done")
+          }
+      end
+    end)
   end
 
   # How far one child is: its own progress when its kind has a rule, else its `field`.
