@@ -161,7 +161,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
          see(t1, "l Open work")
          press(t1, "l")
          see(t1, ~r/Atlas · test.*\s+Open work$/m)
-         see(t1, ~r/#{handed}\s+A scene handed over at once/)
+         # A long list goes below the screen; its rows are checked from the command line.
 
          row = fn ->
            {rows, _} = atlas_json(i, ["list", "assignment"])
@@ -174,7 +174,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
            ~r/^ada · Break it down into use cases and issues · Deadline 2099-03-04 09:30/ ||
            raise inspect(mine)
 
-         # Its deadline passes: it is late, and comes first.
+         # Its deadline passes: it is late, and comes first, also on the screen.
          {_, at} = atlas_json(i, ["set", "AS-#{handed}", "deadline=2020-05-06 07:08"])
          by_hint(t1, ~r/#{handed}\s+A scene handed over at once/, at)
          {mine, [first | _]} = row.()

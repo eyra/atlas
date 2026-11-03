@@ -1459,6 +1459,7 @@ defmodule AtlasControl.PagesTest do
       Pages.render({:list, "card"}, @open, [%{"facts" => []}, %{"facts" => []}])
 
     assert empty["rows"] == [] and empty["empty"] == "Nothing is held."
+  end
 
   # What to do (IS-Atlas-54): a flow on widgets, on their card; its state is the card's step.
   @todo @carded
