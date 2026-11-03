@@ -3,8 +3,9 @@ defmodule AtlasTui.Model do
   What the TUI shows and how keys change it. Pure: `message/2` takes what Control sent,
   `key/2` returns the new model and effects (`{:send, message}`, `:quit`).
 
-  The TUI knows blocks only. Which keys open what comes from the blocks' actions; the
-  TUI adds moving around, going back, refreshing and quitting.
+  The TUI knows blocks only. Which keys open what comes from the blocks' actions and
+  links; the TUI adds moving around, going back, refreshing and quitting. A link's key
+  gives the effect `{:open_url, url}`, only for an http or https address.
 
   `:` asks the agent (UC-Atlas-17): a request line, then the agent's `plan` block over
   the page. Effects to the agent are `{:agent, message}`; what it answers comes in
@@ -209,6 +210,34 @@ defmodule AtlasTui.Model do
     end)
   end
 
+  @doc "The web addresses the keys open: the item's, then the selected row's."
+  def links(model) do
+    selected =
+      case list(model) do
+        %ListBlock{rows: rows} -> Enum.at(rows || [], model.selected)
+        nil -> nil
+      end
+
+    Enum.flat_map(model.blocks, fn
+      %Item{links: links} -> links || []
+      _ -> []
+    end) ++ ((selected && selected.links) || [])
+  end
+
+  @doc "Whether the TUI opens `url`: only an http or https address with a host."
+  def openable?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host}
+      when scheme in ["http", "https"] and host not in [nil, ""] ->
+        not String.match?(url, ~r/[\s\x00-\x1f]/)
+
+      _ ->
+        false
+    end
+  end
+
+  def openable?(_url), do: false
+
   @doc "What can take focus in a form: its inputs (not the read-only ones), then the buttons."
   def focusable(%Form{inputs: inputs}),
     do: Enum.reject(inputs, &(&1.kind == "readonly")) ++ [:submit, :cancel]
@@ -382,10 +411,14 @@ defmodule AtlasTui.Model do
   defp browse_key(model, key) do
     rows = (list(model) && list(model).rows) || []
     action = Enum.find(actions(model), &(key == {:char, &1.key}))
+    link = Enum.find(links(model), &(key == {:char, &1.key}))
 
     case key do
       _ when action != nil ->
         open(model, action.to)
+
+      _ when link != nil ->
+        open_url(model, link.url)
 
       # Moving in a list brings its selected row back in sight.
       k when k in [:up, {:char, "k"}] ->
@@ -531,6 +564,16 @@ defmodule AtlasTui.Model do
 
   defp open(model, nil), do: {model, []}
   defp open(model, to), do: {%{model | notice: nil}, [{:send, %{"op" => "open", "to" => to}}]}
+
+  defp open_url(model, url) do
+    if openable?(url),
+      do:
+        {%{model | notice: %{tone: "info", text: "Opened #{url} in the browser"}},
+         [{:open_url, url}]},
+      else:
+        {%{model | notice: %{tone: "error", text: "Not opened: only http and https addresses"}},
+         []}
+  end
 
   defp submit(model, to, values),
     do: {%{model | waiting: true}, [{:send, %{"op" => "submit", "to" => to, "values" => values}}]}

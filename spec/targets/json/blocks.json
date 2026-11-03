@@ -42,6 +42,11 @@
           "name": "actions",
           "required": false,
           "type": "list of action"
+        },
+        {
+          "name": "links",
+          "required": false,
+          "type": "list of link"
         }
       ],
       "name": "item"
@@ -223,6 +228,26 @@
           "type": "string"
         },
         {
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "url",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "link"
+    },
+    {
+      "fields": [
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
           "name": "detail",
           "required": false,
           "type": "string"
@@ -231,6 +256,11 @@
           "name": "to",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "links",
+          "required": false,
+          "type": "list of link"
         }
       ],
       "name": "row"
@@ -341,7 +371,7 @@
       "name": "step"
     }
   ],
-  "version": "0.3.0",
+  "version": "0.4.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

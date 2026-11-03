@@ -38,7 +38,7 @@ Following each step closely, stopping a run with `esc` and what happens on a ref
 
 - **The agent** is `atlas steer`, started by the TUI on the first `:` as a child process and kept while the TUI runs. It is a Control client of its own, with its own connections, like `atlas put`. The TUI and the agent talk in JSON lines (`AtlasAgent.Steer`). Its log is `steer.log` beside the environment's other logs.
 - **The plan** comes from the planner of UC-Atlas-16 (`agent.planner` in `env/<env>.json`), checked against Control's forms. The agent writes only on `enter`, and only the kept steps of the plan you saw, with the values you left.
-- **The plan is a block** of Control's contract: `plan` with its `step`s (spec 0.3.0). An iOS or macOS client renders the same thing. Today the agent sends it; once Runtime runs agents (SC-Atlas-02), Control will.
+- **The plan is a block** of Control's contract: `plan` with its `step`s (spec 0.4.0). An iOS or macOS client renders the same thing. Today the agent sends it; once Runtime runs agents (SC-Atlas-02), Control will.
 
 ## What changed for this
 

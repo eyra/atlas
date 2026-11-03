@@ -121,6 +121,55 @@ defmodule AtlasTuiTest do
     assert {_, [:quit]} = press(m, [{:char, "q"}])
   end
 
+  test "a link opens its web address: the item's, and the selected row's" do
+    url = "https://example.org/things/2"
+    link = %{"label" => "Open in browser", "key" => "o", "url" => url}
+    [list] = @list["blocks"]
+    rows = List.update_at(list["props"]["rows"], 1, &Map.put(&1, "links", [link]))
+    m = model(%{@list | "blocks" => [put_in(list["props"]["rows"], rows)]})
+
+    # Only the selected row's link: none on the first row.
+    refute screen(m) =~ "o Open in browser"
+    assert {_, []} = press(m, [{:char, "o"}])
+
+    {m, _} = press(m, [:down])
+    assert screen(m) =~ "n New thing   o Open in browser   ↑↓ move"
+    {m, effects} = press(m, [{:char, "o"}])
+    assert effects == [{:open_url, url}]
+    assert screen(m) =~ "i Opened #{url} in the browser"
+
+    item = %{
+      "type" => "item",
+      "props" => %{"title" => "Thing T-2", "fields" => [], "links" => [link]}
+    }
+
+    assert {_, [{:open_url, ^url}]} =
+             press(model(%{@list | "blocks" => [item]}), [{:char, "o"}])
+
+    # A help too long for one line goes on on the next; no entry is cut or lost.
+    narrow =
+      model(%{@list | "back" => "/", "blocks" => [item]})
+      |> View.render(40, 20, 5)
+      |> View.plain()
+      |> String.split("\n")
+
+    help = Enum.filter(narrow, &(&1 =~ ~r/Open in browser|esc back|q quit/))
+    assert help == [" o Open in browser   r refresh   : ask", " esc back   q quit"]
+    assert length(narrow) == 20
+
+    # Anything but http and https is never opened.
+    for bad <- ["file:///etc/passwd", "javascript:alert(1)", "https://", "https://a b"] do
+      item = put_in(item, ["props", "links"], [%{link | "url" => bad}])
+      {m, effects} = press(model(%{@list | "blocks" => [item]}), [{:char, "o"}])
+      assert effects == []
+      assert screen(m) =~ "Not opened: only http and https addresses"
+    end
+
+    assert AtlasTui.Browser.open("file:///etc/passwd", %{}) == {:error, :not_http}
+    assert AtlasTui.Browser.command(%{"browser" => "/tmp/stand-in"}) == "/tmp/stand-in"
+    assert AtlasTui.Browser.command(%{}) in ["open", "xdg-open"]
+  end
+
   test "a hint redraws the list and keeps the selected row" do
     {m, _} = press(model(@list), [:down])
     hinted = Model.message(m, %{@list | "reason" => "hint", "position" => 4})
