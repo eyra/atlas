@@ -671,7 +671,6 @@ defmodule AtlasControl.Session do
       end
 
     as_of = position || Enum.find_value(answers, & &1["position"])
-    Logger.info("DEBUG78 session #{inspect(self())} #{state.by} #{inspect(state.by_kind)} #{reason} #{inspect(route)}")
 
     send_client(
       state,
