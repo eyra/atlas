@@ -5,8 +5,9 @@
 #                      they are not answering, and restarts a core from an older build
 #   atlas tui          the same; open as many as you like, each in its own terminal
 #   atlas stop         stop the core (rela keeps running)
-#   atlas restart      stop the core and start this build in the background
-#   atlas status       what runs, and which build
+#   atlas restart      stop the core and start this build in the background; rela too, when
+#                      it runs an older description than this build (its data stays)
+#   atlas status       what runs, which build, and whether rela runs this build's description
 #   atlas logs         follow the core's log
 #   atlas where        the folder the build comes from
 #   atlas main-clone   the main clone, which `atlas tui` updates to the newest develop
@@ -48,7 +49,7 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
-usage() { sed -n '2,41p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,42p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
 caller="$PWD"
 no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
@@ -187,10 +188,46 @@ main_clone() {
   (cd "$common/.." && pwd -P)
 }
 
+# rela keeps the description it started with. When this build's differs (a merge changed
+# rela/schema.yaml), rela is restarted on it first, its data kept (IS-Atlas-73). When the
+# new description would leave data without a description (a removed kind or field that
+# still has data), nothing is started: that needs a migration first.
+ensure_rela() {
+  local description="$root/rela/scripts/description.sh" orphans holder
+  if ! curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null; then
+    "$root/rela/scripts/start-bg.sh"
+    return
+  fi
+  "$description" same && return 0
+
+  if ! orphans="$("$description" fits)"; then
+    echo "atlas: rela $env runs an older description, and this build's no longer describes data it holds:" >&2
+    echo "$orphans" | sed 's/^/  /' >&2
+    echo "atlas: migrate that data first ($(migrations)), then: atlas restart --env $env" >&2
+    exit 1
+  fi
+
+  if ! "$root/rela/scripts/stop.sh" >/dev/null 2>&1; then
+    holder="$(lsof -nP -t -iTCP:"$ATLAS_RELA_PORT" -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+    echo "atlas: rela $env runs an older description than this build, and atlas did not start it, so it cannot restart it." >&2
+    echo "atlas: stop it (kill ${holder:-<pid>}), then: atlas restart --env $env" >&2
+    exit 1
+  fi
+  "$root/rela/scripts/start-bg.sh" >/dev/null
+  echo "atlas: rela $env ran an older description; restarted it on this build's (its data stays)"
+}
+
+# The migrations this script offers, from its own usage above.
+migrations() {
+  local found
+  found="$(sed -n 's/^#   \(atlas migrate-[a-z-]*\).*/\1 --env '"$env"'/p' "$root/bin/atlas" | paste -sd ',' - | sed 's/,/, /g')"
+  echo "${found:-see docs/guides/prod.md}"
+}
+
 case "$cmd" in
   tui)
     update_build
-    curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null || "$root/rela/scripts/start-bg.sh"
+    ensure_rela
     clean_build
     ensure_core
     # Ctrl-S saves a form; without this the terminal would take it as "pause output".
@@ -203,11 +240,8 @@ case "$cmd" in
     exit $status
     ;;
   up)
-    if curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null; then
-      echo "rela $env: answering at $rela_url"
-    else
-      "$root/rela/scripts/start-bg.sh"
-    fi
+    ensure_rela
+    echo "rela $env: answering at $rela_url"
     clean_build
     cd "$root/beam"
     exec mix run --no-halt
@@ -215,7 +249,7 @@ case "$cmd" in
   stop) stop_core; echo "atlas: core stopped (rela keeps running)" ;;
   restart)
     stop_core
-    curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null || "$root/rela/scripts/start-bg.sh"
+    ensure_rela
     start_core
     ;;
   status)
@@ -229,6 +263,11 @@ case "$cmd" in
       echo "core:   not running"
     fi
     "$root/rela/scripts/status.sh" 2>&1 | sed 's/^/rela:   /' || true
+    if "$root/rela/scripts/description.sh" same; then
+      echo "rela:   description: this build's"
+    else
+      echo "rela:   description: older than this build's; atlas restart --env $env restarts rela on it"
+    fi
     ;;
   logs) exec tail -f "$log" ;;
   where) echo "$root" ;;
@@ -252,7 +291,7 @@ case "$cmd" in
     kind_named=""
     for arg in ${args[@]+"${args[@]}"}; do case "$arg" in -*) ;; *) kind_named=1 ;; esac; done
     if [ "$cmd" = help ] && [ -z "$kind_named" ] && [[ " ${args[*]-} " != *" --json "* ]]; then
-      sed -n '2,41p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
+      sed -n '2,42p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
     fi
     clean_build
     cd "$root/clients/agent"

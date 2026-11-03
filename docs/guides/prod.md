@@ -14,6 +14,8 @@ The same as `atlas tui --env prod`: it starts rela prod and the prod core in the
 
 More: `atlas status`, `atlas logs`, `atlas stop`, `atlas restart`; `atlas env` shows which environment a command works on.
 
+rela keeps the description it started with. When a merge changes `rela/schema.yaml`, `atlas restart` (and `atlas`, when it starts the core) restarts rela on the new description first, its data kept, and says so: `rela prod ran an older description; restarted it`. `atlas status` says whether rela runs this build's description. When the new description no longer describes data rela holds (a removed kind or field that still has data), nothing starts: `atlas` names that data and the migration to run first (IS-Atlas-73).
+
 ## Where it runs
 
 | | Test | Prod |
