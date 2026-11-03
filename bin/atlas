@@ -234,8 +234,11 @@ case "$cmd" in
     ;;
   # The clients run in their own folders; a path the caller gives is read from where they called.
   put|set|get|list|tools|plan|help)
-    # `atlas help` (not --json) starts with this script's own commands.
-    if [ "$cmd" = help ] && [[ " ${args[*]-} " != *" --json "* ]]; then
+    # `atlas help` (not --json) starts with this script's own commands; `atlas help <kind>`
+    # shows that kind only.
+    kind_named=""
+    for arg in ${args[@]+"${args[@]}"}; do case "$arg" in -*) ;; *) kind_named=1 ;; esac; done
+    if [ "$cmd" = help ] && [ -z "$kind_named" ] && [[ " ${args[*]-} " != *" --json "* ]]; then
       sed -n '2,36p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
     fi
     cd "$root/clients/agent"
