@@ -5,6 +5,10 @@ defmodule AtlasE2E.Instance do
   with `--env test`. It never uses the ports or data of `env/test.json` or
   `env/prod.json` (Melle's instances) or the live store.
 
+  The TUIs open web addresses with a stand-in (`"browser"` in the settings) that only
+  writes each address to `opened.txt` in the run's folder (`opened/1`), so a run never
+  opens a browser.
+
   rela's binaries are shared between runs (`ATLAS_E2E_RELA_BIN`, by default the test
   instance's `~/.local/share/atlas/test/bin`); `rela/scripts/start-test.sh` downloads the
   pinned version there when it is missing.
@@ -25,8 +29,14 @@ defmodule AtlasE2E.Instance do
       System.get_env("ATLAS_E2E_RELA_BIN") ||
         Path.join(System.user_home!(), ".local/share/atlas/test/bin")
 
+    browser = Path.join(dir, "browser")
+    opened = Path.join(dir, "opened.txt")
+    File.write!(browser, "#!/bin/sh\nprintf '%s\\n' \"$1\" >> '#{opened}'\n")
+    File.chmod!(browser, 0o755)
+
     settings = %{
       "env" => "test",
+      "browser" => browser,
       "control" => %{"host" => "127.0.0.1", "port" => control_port},
       "rela" => %{
         "url" => "http://127.0.0.1:#{rela_port}/api/v1",
@@ -76,6 +86,14 @@ defmodule AtlasE2E.Instance do
   @doc "The files worth keeping when a run fails: the core's log and rela's."
   def logs(instance),
     do: Path.wildcard(Path.join(instance.dir, "*.log"))
+
+  @doc "The web addresses the TUIs opened, through the stand-in browser, in order."
+  def opened(instance) do
+    case File.read(Path.join(instance.dir, "opened.txt")) do
+      {:ok, text} -> String.split(text, "\n", trim: true)
+      {:error, _} -> []
+    end
+  end
 
   @doc "GET from rela itself, to check what it stored."
   def rela_get(instance, path) do

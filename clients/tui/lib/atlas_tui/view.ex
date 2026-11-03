@@ -46,18 +46,24 @@ defmodule AtlasTui.View do
       [{:dim, String.duplicate("─", width)}]
     ]
 
-    # The footer: help, a rule, the notice and the status line.
-    room = max(height - length(header) - 4, 1)
-    lines = body(model, width, room)
+    # The footer: help (on more lines when it does not fit on one), a rule, the notice and
+    # the status line. A page longer than its room adds scrolling to the help.
+    room_for = fn help -> max(height - length(header) - 3 - length(help), 1) end
+    short = help_lines(help(model, false), width)
+    lines = body(model, width, room_for.(short))
+    help = help_lines(help(model, length(lines) > room_for.(short)), width)
+    room = room_for.(help)
+    lines = if room == room_for.(short), do: lines, else: body(model, width, room)
     body = window(lines, model, room)
     body = body ++ Elixir.List.duplicate([], room - length(body))
 
-    footer = [
-      help_line(model, length(lines) > room),
-      [{:dim, String.duplicate("─", width)}],
-      notice(model),
-      status(model, reconcile_seconds)
-    ]
+    footer =
+      footer_help(model, help) ++
+        [
+          [{:dim, String.duplicate("─", width)}],
+          notice(model),
+          status(model, reconcile_seconds)
+        ]
 
     Enum.map(header ++ body ++ footer, &fit(&1, width))
   end
@@ -508,11 +514,13 @@ defmodule AtlasTui.View do
 
   # Footer
 
-  # The help line, or the request line while `:` is open.
-  defp help_line(%Model{ask: text}, _long) when is_binary(text),
-    do: [{:bold, " : "}, {:plain, text}, {:cursor, " "}, {:dim, "   ↵ ask the agent   esc close"}]
+  # The help, or the request line while `:` is open.
+  defp footer_help(%Model{ask: text}, _help) when is_binary(text),
+    do: [
+      [{:bold, " : "}, {:plain, text}, {:cursor, " "}, {:dim, "   ↵ ask the agent   esc close"}]
+    ]
 
-  defp help_line(model, long), do: [{:dim, " " <> help(model, long)}]
+  defp footer_help(_model, help), do: Enum.map(help, &[{:dim, " " <> &1}])
 
   defp help(model, long) do
     cond do
@@ -538,7 +546,7 @@ defmodule AtlasTui.View do
         if confirm.confirm_to, do: "y confirm   n cancel", else: "↵ back"
 
       true ->
-        Enum.map_join(Model.actions(model), "   ", &"#{&1.key} #{&1.label}") <>
+        Enum.map_join(Model.actions(model) ++ Model.links(model), "   ", &"#{&1.key} #{&1.label}") <>
           nav(model, long)
     end
   end
@@ -554,6 +562,23 @@ defmodule AtlasTui.View do
   defp plan_help(%Plan{state: "running"}), do: "esc stop after this step"
   defp plan_help(%Plan{}), do: "↵ close   : ask again   q quit"
 
+  # The help's entries ("key what", three spaces apart) on as many lines as they need;
+  # an entry is never split.
+  defp help_lines(help, width) do
+    help
+    |> String.split("   ", trim: true)
+    |> Enum.reduce([], fn
+      entry, [] ->
+        [entry]
+
+      entry, [line | done] ->
+        if String.length(line <> "   " <> entry) < width,
+          do: [line <> "   " <> entry | done],
+          else: [entry, line | done]
+    end)
+    |> Enum.reverse()
+  end
+
   defp multiline_focused?(model) do
     items = Model.focusable(Model.step_form(model) || Model.form(model))
     match?(%Input{kind: "multiline"}, Enum.at(items, min(model.focus, length(items) - 1)))
@@ -566,7 +591,7 @@ defmodule AtlasTui.View do
     move = if Model.list(model), do: "   ↑↓ move   ↵ open", else: ""
     move = if long, do: move <> "   pgup/pgdn scroll", else: move
     back = if model.back, do: "   esc back", else: ""
-    move <> back <> "   : ask   r refresh   q quit"
+    move <> "   r refresh   : ask" <> back <> "   q quit"
   end
 
   defp notice(%Model{notice: nil}), do: []

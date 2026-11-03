@@ -151,6 +151,30 @@ defmodule AtlasE2E.Scenario do
     end
   end
 
+  @doc """
+  The stand-in browser got `url` as the run's `count`th opened address, within 1 second
+  of `at`.
+  """
+  def opened(instance, url, at, count) do
+    opened = AtlasE2E.Instance.opened(instance)
+
+    cond do
+      length(opened) >= count ->
+        Enum.at(opened, count - 1) == url ||
+          raise Failure, "the browser got #{inspect(opened)}, not #{url}"
+
+        Process.put(:e2e_notes, ["opened in #{now() - at.ms} ms" | Process.get(:e2e_notes)])
+        opened
+
+      now() > at.ms + @quick ->
+        raise Failure, "the browser got nothing within #{@quick} ms (#{inspect(opened)})"
+
+      true ->
+        Process.sleep(@poll)
+        opened(instance, url, at, count)
+    end
+  end
+
   # Moving around
 
   @doc "Back to the start page: escape until there is nothing to go back to."
