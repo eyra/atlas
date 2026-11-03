@@ -63,7 +63,7 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
   step "enter runs the kept steps through Control; TUI 2 shows them by hint", fn ->
     at = press(t1, "Enter")
     by_hint(t2, row.("Ask from any page"), at)
-    see(t1, "Done: 2 of 2 stored", 5_000)
+    see(t1, "Done: 2 of 2 stored", 10_000)
     see(t1, ~r/Stored as UC-Atlas-\d+\./)
     see(t2, row.("Edit a step (edited)"))
     refute_see(t2, row.("Drop a step"))

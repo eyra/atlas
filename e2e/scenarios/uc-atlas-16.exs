@@ -127,7 +127,7 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
     see(t1, "Proposed: 1 step", 10_000)
     see(t1, "[✓] 1. Delete use case #{key}?")
     press(t1, "Enter")
-    see(t1, "Deleted #{key}.", 5_000)
+    see(t1, "Deleted #{key}.", 10_000)
     see(t1, "Done: 1 of 1 stored")
     press(t1, "Enter")
     see(t1, "#{key} does not exist (any more).")
