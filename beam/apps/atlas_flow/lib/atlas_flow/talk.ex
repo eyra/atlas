@@ -1,0 +1,49 @@
+defmodule AtlasFlow.Talk do
+  @moduledoc """
+  Reads and facts over the Bus, from the calling process (which must be attached), and
+  the answer to each. A read is asked again a few times; a fact is sent again with the
+  same id while State does not answer, so it is stored once.
+  """
+
+  alias AtlasBus.Envelope
+
+  @wait 2_000
+  @tries 3
+
+  @doc "Read: State's answer, or `%{\"error\" => …}`."
+  def read(kind, content), do: read(kind, content, @tries)
+
+  defp read(_kind, _content, 0), do: %{"error" => "State did not answer"}
+
+  defp read(kind, content, tries) do
+    envelope = Envelope.new("read", kind)
+    id = envelope.id
+    :ok = AtlasBus.send(envelope, content)
+
+    receive do
+      {:atlas_bus, %Envelope{id: ^id, class: "answer"}, answer} -> answer
+    after
+      @wait -> read(kind, content, tries - 1)
+    end
+  end
+
+  @doc "Put a fact: `{:stored, position}`, `{:refused, reasons}` or `{:error, :no_answer}`."
+  def put(kind, content), do: put(Envelope.new("fact", kind), content, @tries)
+
+  defp put(_envelope, _content, 0), do: {:error, :no_answer}
+
+  defp put(envelope, content, tries) do
+    id = envelope.id
+    :ok = AtlasBus.send(envelope, content)
+
+    receive do
+      {:atlas_bus, %Envelope{id: ^id, class: "stored"} = stored, _} ->
+        {:stored, stored.position}
+
+      {:atlas_bus, %Envelope{id: ^id, class: "refused"}, refusal} ->
+        {:refused, refusal["reasons"]}
+    after
+      @wait -> put(envelope, content, tries - 1)
+    end
+  end
+end

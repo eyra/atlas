@@ -29,7 +29,7 @@ defmodule AtlasState.Server do
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Copies, Description, Ledger, Links, Progress, Rela}
+  alias AtlasState.{Copies, Description, Flows, Ledger, Links, Progress, Rela}
 
   @description "_description"
 
@@ -140,7 +140,12 @@ defmodule AtlasState.Server do
   # The file is read every time, so a change to it needs no restart.
   defp describe(state) do
     with {:ok, description} <- Rela.description(state.rela) do
-      {:ok, Description.merge(description, extra(state.extra))}
+      description = Description.merge(description, extra(state.extra))
+
+      # Flow definitions are checked before anyone runs them (rule 4).
+      if is_map(description["flows"]),
+        do: {:ok, Map.put(description, "flow_problems", Flows.check(description))},
+        else: {:ok, description}
     end
   end
 

@@ -14,7 +14,12 @@ defmodule AtlasBus.BoundaryTest do
 
   @root Path.expand("../../../..", __DIR__)
 
-  @layers %{atlas_bus: "AtlasBus", atlas_state: "AtlasState", atlas_control: "AtlasControl"}
+  @layers %{
+    atlas_bus: "AtlasBus",
+    atlas_state: "AtlasState",
+    atlas_flow: "AtlasFlow",
+    atlas_control: "AtlasControl"
+  }
   # Clients of Control: the TUI, and the command line agents drive Atlas with.
   @clients [{"clients/tui", "AtlasTui"}, {"clients/agent", "AtlasAgent"}]
 

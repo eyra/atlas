@@ -1,90 +1,103 @@
-# UC-Atlas-27: every fact has an owner. IS-Atlas-52: the owner is the association
-# assigned_to, from every assignable kind to a person or an agent, at most one; the link
-# shows with the fact that set it (since, by, cause), and the owner's page lists what is
-# assigned to it. `atlas migrate-owner` gives every fact without one the coordinator.
+# UC-Atlas-27, IS-Atlas-53: Flow, first slice. One process per open fact works out its
+# state from the flow definition in rela/atlas.json and writes what its owner is
+# expected to do, as a change with its cause: Build it while not all under it is
+# completed; Test it once all is; nothing once it is accepted; Rework, with the note,
+# once it is reopened. Flow never completes anything itself. GitHub is the stand-in.
 import AtlasE2E.Scenario
 
-scenario "UC-Atlas-27: Every fact has an owner", fn %{t1: t1, t2: t2, instance: i} ->
-  step "Who can own: a person and an agent, each made from its name", fn ->
-    # A person of this scenario's own; UC-Atlas-32 makes melle.
-    {person, _} = atlas_json(i, ["put", "person", "--name", "Ann"])
-    person["key"] == "ann" || raise inspect(person)
-    {agent, _} = atlas_json(i, ["put", "agent", "--name", "Coordinator"])
-    agent["key"] == "coordinator" || raise inspect(agent)
-    {got, _} = atlas_json(i, ["get", "ann"])
-    got["title"] == "Person ann: Ann" || raise inspect(got)
+alias AtlasE2E.GitHub
+
+url = "https://github.com/eyra/atlas-e2e/pull/2701"
+# A connector's change shows by its hint, at most one round (2 s) after GitHub changed.
+connector_wait = 5_000
+# Control learns that the TUI's user is a person on its next reconcile (every 5 s).
+reconcile_wait = 7_000
+
+expected = fn i, key ->
+  {got, _} = atlas_json(i, ["get", key])
+  Enum.find_value(got["fields"], fn [label, value] -> label == "Expected" && value end)
+end
+
+scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", fn ctx ->
+  %{t1: t1, instance: i} = ctx
+
+  step "A use case with an open issue: Flow says Build it", fn ->
+    # The same person again is the same fact: stored once.
+    atlas_json(i, ["put", "person", "--name", "Melle"])
+    {scene, _} = atlas_json(i, ["put", "scene", "--title", "A scene Flow moves"])
+
+    {use_case, _} =
+      atlas_json(i, ["put", "use_case", "--in", scene["key"], "--title", "A use case Flow moves"])
+
+    {issue, _} =
+      atlas_json(i, ["put", "issue", "--in", use_case["key"], "--title", "Its one issue"])
+
+    home(t1)
+    open_row(t1, "A scene Flow moves")
+    open_row(t1, "A use case Flow moves")
+    see(t1, ~r/Expected\s+Build it/)
+    expected.(i, scene["key"]) == "Build it" || raise "the scene is not Build it"
+
+    Process.put(:uc27, %{scene: scene["key"], use_case: use_case["key"], issue: issue["key"]})
   end
 
-  step "An owner set from the command line, with its cause; both TUIs show it by hint", fn ->
-    {scene, _} = atlas_json(i, ["put", "scene", "--title", "A scene with an owner"])
-    key = scene["key"]
-    Process.put(:uc27, key)
+  step "Its pull request merges: Test it, within a second of the merge being read", fn ->
+    %{use_case: use_case, issue: issue} = Process.get(:uc27)
+    pull = %{"title" => "Its one issue", "state" => "open", "merged" => false, "html_url" => url}
+    GitHub.put(url, pull)
+    atlas_json(i, ["put", "pull_request", "--url", url, "--in", issue])
+    GitHub.put(url, %{pull | "state" => "closed", "merged" => true})
 
-    for t <- [t1, t2] do
-      home(t)
-      open_row(t, "A scene with an owner")
-      see(t, "Scene #{key}: A scene with an owner")
-    end
-
-    {got, at} =
-      atlas_json(i, ["set", key, "assigned_to=coordinator", "--cause", "owner introduced"])
-
-    origin = got["origins"]["Assigned to"]
-    origin["cause"] == "owner introduced" || raise inspect(got)
-    origin["by"] == "agent" || raise inspect(origin)
-    origin["since"] =~ ~r/^\d{4}-\d\d-\d\dT/ || raise inspect(origin)
-
-    for t <- [t1, t2], do: by_hint(t, ~r/Assigned to ─+(.|\n)*coordinator  Agent/, at)
+    see(t1, ~r/Expected\s+Test it/, connector_wait)
+    expected.(i, use_case) == "Test it" || raise "the use case is not Test it"
+    # Flow never completes anything by itself: it waits for Melle.
+    {got, _} = atlas_json(i, ["get", use_case])
+    progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
+    progress == "To test · 1/1" || raise inspect(got["fields"])
   end
 
-  step "The owner moves: one owner, the new one, with its own cause", fn ->
-    key = Process.get(:uc27)
-
-    {got, at} =
-      atlas_json(i, ["set", key, "assigned_to=ann", "--cause", "all its issues are done"])
-
-    ["Assigned to", "ann"] in got["fields"] || raise inspect(got["fields"])
-    got["origins"]["Assigned to"]["cause"] == "all its issues are done" || raise inspect(got)
-    by_hint(t1, ~r/Assigned to ─+(.|\n)*ann  Person/, at)
-    refute_see(t1, "coordinator  Agent")
-
-    {text, 0, _} = atlas(i, ["get", key])
-
-    text =~ ~r/Assigned to: ann \(since \d+ \w+ \d\d:\d\d, by agent: all its issues are done\)/ ||
-      raise text
+  step "Accepted: done; nothing is expected of anyone", fn ->
+    %{use_case: use_case} = Process.get(:uc27)
+    see(t1, "a Accept", reconcile_wait)
+    press(t1, "a")
+    see(t1, "will be accepted by melle")
+    at = press(t1, "y")
+    stored(t1, ~r/Accepted by ─+(.|\n)*melle  Person/, at)
+    gone(t1, "Expected")
+    expected.(i, use_case) == nil || raise "something is still expected"
   end
 
-  step "Only a person or an agent can own", fn ->
-    key = Process.get(:uc27)
-    {%{"refused" => [why]}, _} = atlas_json(i, ["set", key, "assigned_to=nobody"], 1)
-    why == "nobody is not a person or agent" || raise why
+  step "Reopened with a note: Rework, with the note", fn ->
+    %{use_case: use_case} = Process.get(:uc27)
+    see(t1, "a Reopen")
+    press(t1, "a")
+    see(t1, "Reopen #{use_case}")
+    type(t1, "The footer is wrong")
+    at = press(t1, "C-s")
+    stored(t1, "Use case #{use_case}: A use case Flow moves", at)
+    see(t1, ~r/Expected\s+Rework: The footer is wrong/)
+    expected.(i, use_case) == "Rework: The footer is wrong" || raise "not Rework"
   end
 
-  step "enter on the owner opens it, with what is assigned to it", fn ->
-    key = Process.get(:uc27)
-    open_row(t1, "ann  Person")
-    see(t1, "Person ann: Ann")
-    see(t1, "Assignments: Scenes")
-    see(t1, ~r/#{key}\s+A scene with an owner/)
+  step "A new issue under it: Build it again", fn ->
+    %{use_case: use_case} = Process.get(:uc27)
+
+    {fix, at} =
+      atlas_json(i, ["put", "issue", "--in", use_case, "--title", "Fix the footer"])
+
+    by_hint(t1, ~r/Expected\s+Build it/, at)
+    Process.put(:uc27_fix, fix["key"])
   end
 
-  step "atlas migrate-owner: every fact without an owner gets the coordinator, once", fn ->
-    {lone, _} = atlas_json(i, ["put", "scene", "--title", "A scene without an owner"])
-    {out, 0, _} = atlas(i, ["migrate-owner", "--dry-run"])
-    out =~ "assign   #{lone["key"]}  assigned_to coordinator" || raise out
-    out =~ ~r/IS-Atlas-52 migration: \d+ steps; cause: owner introduced/ || raise out
-    out =~ "Dry run: nothing was written." || raise out
-    String.contains?(out, "assign   #{Process.get(:uc27)}") && raise "it would move an owner"
+  # The scenes list stays short enough for the scenarios after this one.
+  step "Clean up: delete what this scenario made", fn ->
+    %{scene: scene, use_case: use_case, issue: issue} = Process.get(:uc27)
+    home(t1)
+    {_, 0, _} = atlas(i, ["delete", "PR-eyra-atlas-e2e-2701"])
 
-    {out, 0, _} = atlas(i, ["migrate-owner"])
-    out =~ ~r/Done: (\d+) of \1 steps written\./ || raise out
+    for key <- [Process.get(:uc27_fix), issue, use_case, scene],
+        do: {_, 0, _} = atlas(i, ["delete", key])
 
-    {out, 0, _} = atlas(i, ["migrate-owner", "--dry-run"])
-    out =~ "IS-Atlas-52 migration: 0 steps" || raise out
-
-    {got, _} = atlas_json(i, ["get", lone["key"]])
-    ["Assigned to", "coordinator"] in got["fields"] || raise inspect(got["fields"])
-    got["origins"]["Assigned to"]["by"] == "migration" || raise inspect(got["origins"])
-    got["origins"]["Assigned to"]["cause"] == "owner introduced" || raise inspect(got["origins"])
+    gone(t1, "A scene Flow moves")
   end
 end

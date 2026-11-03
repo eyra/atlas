@@ -105,6 +105,7 @@ entities:
         description: { type: string, description: "The text (Flux: description)" }
         flux_id: { type: string, unique: true, description: "Flux (Basecamp) id, set by a later Flux sync" }
       status: { type: plan_status, description: "Flux group; empty = no group" }
+      expected: { type: string, description: "What its owner is expected to do next; Flow writes it (IS-Atlas-53)" }
 
   use_case:
     label: Use case

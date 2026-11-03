@@ -62,7 +62,11 @@ defmodule AtlasE2E.Instance do
         "name" => "the e2e stand-in",
         # Long enough to see each step go, and to stop a run between two (UC-Atlas-18).
         "step_pause_ms" => 500
-      }
+      },
+      # A lone escape waits this long for the rest of its key (30 ms for a person): on a
+      # loaded machine a key's bytes can reach the TUI further apart, and `\e[B` must not
+      # turn into Escape and the text "[B".
+      "escape_ms" => 250
     }
 
     file = Path.join(dir, "test.json")

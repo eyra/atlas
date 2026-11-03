@@ -49,7 +49,7 @@ scenario "UC-Atlas-02: Manage the use cases of a scene", fn %{t1: t1, t2: t2} ->
 
   step "Update it; TUI 2 follows by hint", fn ->
     press(t1, "u")
-    see(t1, ~r/Id\s+UC-Atlas-\d+/)
+    see(t1, ~r/Update UC-Atlas-\d+/)
     type(t1, " (changed)")
     at = press(t1, "C-s")
     stored(t1, ~r/Use case UC-Atlas-\d+: Add the first use case \(changed\)/, at)
