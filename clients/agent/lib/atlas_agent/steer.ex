@@ -232,7 +232,8 @@ defmodule AtlasAgent.Steer do
     case write(run.client, step) do
       {:ok, key} ->
         Process.send_after(self(), :step, pause(state))
-        state = put_step(state, n, %{"state" => "stored", "detail" => "Stored as #{key}."})
+        done = if step["tool"] == "delete", do: "Deleted #{key}.", else: "Stored as #{key}."
+        state = put_step(state, n, %{"state" => "stored", "detail" => done})
         show(%{state | run: %{run | order: rest}})
 
       {:refused, reasons} ->
@@ -285,6 +286,8 @@ defmodule AtlasAgent.Steer do
 
   defp write(client, %{"tool" => "set"} = step),
     do: AtlasAgent.set(client, step["key"], step["values"])
+
+  defp write(client, %{"tool" => "delete"} = step), do: AtlasAgent.delete(client, step["key"])
 
   defp finish(%{run: run, plan: plan} = state, outcome) do
     Client.close(run.client)

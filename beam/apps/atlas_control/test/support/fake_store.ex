@@ -89,7 +89,14 @@ defmodule AtlasControl.FakeStore do
           "to" => ["part"],
           "max_outgoing" => 1,
           "parent" => true,
-          "inverse" => %{"id" => "tags", "label" => "tags"}
+          "inverse" => %{"id" => "tags", "label" => "tags"},
+          # As `rela/atlas.json` adds it: one live tag per part; a dropped one does not count.
+          "limit" => %{
+            "max" => 1,
+            "field" => "note",
+            "values" => ["live", "kept"],
+            "error" => "{parent} already has {child} ({value}); one tag per part"
+          }
         },
         # Associations: at most one, but not a parent.
         "checked_by" => %{
@@ -132,6 +139,9 @@ defmodule AtlasControl.FakeStore do
   @doc "Make a key taken without listing it, as rela does for a key deleted a moment ago."
   def reserve(key), do: GenServer.call(__MODULE__, {:reserve, key})
 
+  @doc "Refuse every fact about `key` with `reason`, as a rule in rela would."
+  def refuse(key, reason), do: GenServer.call(__MODULE__, {:refuse, key, reason})
+
   @impl true
   def init(:ok) do
     :ok = AtlasBus.attach(AtlasBus.store())
@@ -143,6 +153,7 @@ defmodule AtlasControl.FakeStore do
        silent: false,
        reserved: MapSet.new(),
        last: nil,
+       refusing: %{},
        origins: %{},
        sent: []
      }}
@@ -159,6 +170,9 @@ defmodule AtlasControl.FakeStore do
     do: {:reply, :ok, put_in(s.origins[{kind, key, relation}], origin)}
 
   def handle_call(:sent, _from, s), do: {:reply, Enum.reverse(s.sent), s}
+
+  def handle_call({:refuse, key, reason}, _from, s),
+    do: {:reply, :ok, put_in(s.refusing[key], reason)}
 
   def handle_call({:reserve, key}, _from, s),
     do: {:reply, :ok, %{s | reserved: MapSet.put(s.reserved, key)}}
@@ -221,6 +235,11 @@ defmodule AtlasControl.FakeStore do
     id = {e.kind, key}
 
     cond do
+      Map.has_key?(s.refusing, key) ->
+        reasons = [s.refusing[key]]
+        :ok = AtlasBus.send(Envelope.reply(e, "refused"), Map.put(about, "reasons", reasons))
+        {:noreply, s}
+
       op == "create" and missing(e.kind, c["values"]) != [] ->
         reasons = for name <- missing(e.kind, c["values"]), do: "#{name} is required"
         :ok = AtlasBus.send(Envelope.reply(e, "refused"), Map.put(about, "reasons", reasons))

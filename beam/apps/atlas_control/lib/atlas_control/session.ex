@@ -114,7 +114,9 @@ defmodule AtlasControl.Session do
           state = notice(state, "error", "State refused it; the form says why.")
           {:noreply, show(%{state | form: form}, state.route, "refused", nil)}
         else
-          {:noreply, notice(state, "error", "State refused: " <> Enum.join(reasons, "; "))}
+          # No form to say why: the page says it (`refused`), for a client without a screen.
+          state = notice(state, "error", "State refused: " <> Enum.join(reasons, "; "))
+          {:noreply, show(state, state.route, "refused", nil, reasons)}
         end
     end
   end
@@ -225,25 +227,24 @@ defmodule AtlasControl.Session do
     state = %{state | route: route, form: Map.put(state.form, :values, raw)}
     was = state.form[:parents] || %{}
 
-    case moves(parents, was) do
-      {:ok, links} ->
-        content = %{
-          "op" => "change",
-          "key" => key,
-          "values" => values,
-          "version" => state.form[:version]
-        }
+    with {:ok, links} <- moves(parents, was),
+         [] <- over_limits(state, kind, key, links) do
+      content = %{
+        "op" => "change",
+        "key" => key,
+        "values" => values,
+        "version" => state.form[:version]
+      }
 
-        content =
-          if links == %{},
-            do: content,
-            else: Map.merge(content, %{"links" => links, "cause" => moved(links, was)})
+      content =
+        if links == %{},
+          do: content,
+          else: Map.merge(content, %{"links" => links, "cause" => moved(links, was)})
 
-        put_fact(state, kind, content, {:item, kind, key})
-
-      {:error, reasons} ->
-        state = notice(state, "error", "Not sent: the form says why.")
-        show(put_in(state.form[:errors], reasons), route, "refused", nil)
+      put_fact(state, kind, content, {:item, kind, key})
+    else
+      {:error, reasons} -> not_sent(state, route, reasons)
+      reasons when is_list(reasons) -> not_sent(state, route, reasons)
     end
   end
 
@@ -335,18 +336,24 @@ defmodule AtlasControl.Session do
   defp create_made(route, kind, spec, raw, links, state) do
     state = %{state | route: route, form: %{values: raw}}
 
-    case Pages.key_for(spec, raw) do
-      {:ok, key} ->
-        content = new_fact(spec, key, raw, links)
-        put_fact(state, kind, content, {:item, kind, key})
-
-      {:error, reason} ->
-        state = notice(state, "error", "Not sent: the form says why.")
-        show(put_in(state.form[:errors], [reason]), route, "refused", nil)
+    with {:ok, key} <- Pages.key_for(spec, raw),
+         [] <- over_limits(state, kind, key, links) do
+      content = new_fact(spec, key, raw, links)
+      put_fact(state, kind, content, {:item, kind, key})
+    else
+      {:error, reason} -> not_sent(state, route, [reason])
+      reasons when is_list(reasons) -> not_sent(state, route, reasons)
     end
   end
 
   defp create_numbered(route, kind, spec, raw, links, state) do
+    case over_limits(state, kind, nil, links) do
+      [] -> create_numbered_free(route, kind, spec, raw, links, state)
+      reasons -> not_sent(%{state | route: route, form: %{values: raw}}, route, reasons)
+    end
+  end
+
+  defp create_numbered_free(route, kind, spec, raw, links, state) do
     keys =
       case ask(kind, %{}) do
         %{"facts" => facts} -> Enum.map(facts, & &1["key"])
@@ -357,6 +364,31 @@ defmodule AtlasControl.Session do
     content = new_fact(spec, key, raw, links)
     state = %{state | route: route, form: %{values: raw}}
     put_fact(state, kind, content, {:item, kind, key}, %{number: number, tries: 1, skipped: []})
+  end
+
+  # A link the description limits (`relations.<name>.limit`) is refused before State sees
+  # it while its parent already has as many counted facts as allowed. Links that are
+  # there already stay; only a new one (a create, or a move) is checked.
+  defp over_limits(state, kind, key, links) do
+    for {relation, parent} <- Pages.limited(state.description, links),
+        problem = limit_problem(state, relation, kind, key, parent),
+        problem != nil,
+        do: problem
+  end
+
+  defp limit_problem(state, relation, kind, key, parent) do
+    case ask(kind, %{"linked" => %{relation => parent}}) do
+      %{"facts" => children} ->
+        Pages.over_limit(state.description, relation, kind, key, parent, children)
+
+      %{"error" => error} ->
+        "#{error}; could not check how many #{parent} has"
+    end
+  end
+
+  defp not_sent(state, route, reasons) do
+    state = notice(state, "error", "Not sent: the form says why.")
+    show(put_in(state.form[:errors], reasons), route, "refused", nil)
   end
 
   defp new_fact(spec, key, raw, links) do
@@ -434,7 +466,7 @@ defmodule AtlasControl.Session do
     end
   end
 
-  defp show(state, route, reason, position) do
+  defp show(state, route, reason, position, refused \\ nil) do
     answers =
       Enum.map(Pages.reads(route, state.description), fn {kind, content} -> ask(kind, content) end)
 
@@ -454,17 +486,21 @@ defmodule AtlasControl.Session do
 
     as_of = position || Enum.find_value(answers, & &1["position"])
 
-    send_client(state, %{
-      "op" => "page",
-      "path" => current_path(route),
-      "title" => page.title,
-      "back" => page.back,
-      "blocks" => page.blocks,
-      "markup" => page.markup,
-      "reason" => reason,
-      "position" => as_of,
-      "at" => now()
-    })
+    send_client(
+      state,
+      %{
+        "op" => "page",
+        "path" => current_path(route),
+        "title" => page.title,
+        "back" => page.back,
+        "blocks" => page.blocks,
+        "markup" => page.markup,
+        "reason" => reason,
+        "position" => as_of,
+        "at" => now()
+      }
+      |> then(&if(refused, do: Map.put(&1, "refused", refused), else: &1))
+    )
 
     %{state | route: route, form: form}
   end
