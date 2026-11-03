@@ -177,6 +177,7 @@ entities:
       outcome: { type: agent_outcome, description: "What became of it" }
       summary: { type: string, description: "What the agent said about its plan" }
       before: { type: string, description: "What became of the previous plan, after a refusal" }
+      overrules: { type: string, description: "The request this one overrules (d-0016)" }
 
   agent_step:
     label: Agent step
