@@ -1,5 +1,5 @@
 {
-  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made (prefix plus the next free number, zero-padded to digits); nobody ever types or changes an id; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value); properties.<name>.multiline = true for text of several lines and sections (a form edits it in a multi-line editor; the line breaks are kept).",
+  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made: prefix plus the next free number, zero-padded to digits; or from a property (from), whose value must match pattern, with template filled from its groups ({1}, {2}, ...) after replace, and error when it does not match; the same value always makes the same id; nobody ever types or changes an id, nor the property it is made from; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value); properties.<name>.multiline = true for text of several lines and sections (a form edits it in a multi-line editor; the line breaks are kept).",
   "entities": {
     "scene": {
       "create": {
@@ -37,7 +37,19 @@
     },
     "pull_request": {
       "create": {
-        "ask": ["url"]
+        "ask": ["url"],
+        "id": {
+          "from": "url",
+          "pattern": "^https://github\\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([0-9]+)$",
+          "template": "PR-{1}-{2}-{3}",
+          "replace": { ".": "_" },
+          "error": "url must be a GitHub pull request URL, e.g. https://github.com/eyra/atlas/pull/12"
+        }
+      },
+      "properties": {
+        "title": { "set_by": "connector" },
+        "state": { "set_by": "connector" },
+        "draft": { "set_by": "connector" }
       }
     }
   }

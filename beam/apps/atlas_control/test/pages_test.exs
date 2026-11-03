@@ -226,6 +226,32 @@ defmodule AtlasControl.PagesTest do
     assert refusal["text"] =~ "never deletes it along with its parent"
   end
 
+  test "a kind whose id is made from a property: the key is made, never typed or changed" do
+    tag = @d["entities"]["tag"]
+    assert Pages.key_for(tag, %{"name" => " #a.b/12 "}) == {:ok, "T-a_b-12"}
+    assert Pages.key_for(tag, %{"name" => "a.b"}) == {:error, "name must look like #word/1"}
+    assert Pages.id_property(tag) == "name"
+    assert Pages.id_property(@d["entities"]["widget"]) == nil
+
+    %{blocks: [%{"props" => form}]} = Pages.render({:new, "tag", {"on_part", "P-1"}}, @d, [])
+    assert Enum.map(form["inputs"], &{&1["name"], &1["kind"]}) == [{"name", "text"}]
+
+    stored = %{"fact" => %{"key" => "T-a-1", "values" => %{"name" => "#a/1"}, "version" => "v1"}}
+
+    # Shown, never changed: the id and the property it is made from.
+    %{blocks: [%{"props" => edit}]} = Pages.render({:edit, "tag", "T-a-1"}, @d, [stored])
+
+    assert Enum.map(edit["inputs"], &{&1["name"], &1["kind"], &1["value"]}) == [
+             {"_key", "readonly", "T-a-1"},
+             {"name", "readonly", "#a/1"}
+           ]
+
+    # Labelled by that property; nothing a person may change, so no Change action.
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [stored])
+    assert item["title"] == "Tag T-a-1: #a/1"
+    assert Enum.map(item["actions"], & &1["key"]) == ["d"]
+  end
+
   test "form text becomes the described types" do
     spec = @d["entities"]["widget"]
 

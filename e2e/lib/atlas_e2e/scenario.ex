@@ -15,6 +15,7 @@ defmodule AtlasE2E.Scenario do
   alias AtlasE2E.Tui
 
   @page_wait 3_000
+  @first_page ~r/● connected · /
   @quick 1_000
   @poll 20
 
@@ -128,8 +129,14 @@ defmodule AtlasE2E.Scenario do
       end
     end)
 
-    see(tui, "● connected")
+    see(tui, @first_page)
   end
+
+  @doc """
+  Connected, and the first page is on screen. "● connected" alone shows as soon as
+  Control welcomes the TUI, before its first page; a key pressed then has nothing to act on.
+  """
+  def ready(tui, within \\ @page_wait), do: see(tui, @first_page, within)
 
   @doc "Select the row of a list that shows `text`, and open it."
   def open_row(tui, text) do
