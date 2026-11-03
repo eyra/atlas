@@ -39,7 +39,8 @@ defmodule AtlasControl.Spec.Blocks do
     field(:label, :string, required: true)
   end
 
-  # One input of a form. `kind` is text, choice or boolean; values travel as text.
+  # One input of a form. `kind` is text, choice, boolean or readonly (shown, never
+  # changed, such as an id); values travel as text.
   defmodel :input do
     field(:name, :string, required: true)
     field(:label, :string, required: true)

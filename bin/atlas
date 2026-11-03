@@ -25,11 +25,17 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$env" = prod ]; then echo "atlas: prod is not built yet; use --env test" >&2; exit 1; fi
-settings="$root/env/$env.json"
-[ -f "$settings" ] || { echo "atlas: no environment '$env' (no env/$env.json)" >&2; exit 1; }
+# ATLAS_ENV_FILE: a private instance of the environment (other ports and data), so a
+# test run by an agent never meets the one Melle uses. The default is env/<env>.json.
+settings="${ATLAS_ENV_FILE:-$root/env/$env.json}"
+[ -f "$settings" ] || { echo "atlas: no environment '$env' (no $settings)" >&2; exit 1; }
 export ATLAS_ROOT="$root" ATLAS_ENV="$env"
 
-rela_url="$(sed -n 's/.*"url": *"\([^"]*\)".*/\1/p' "$settings" | head -n1)"
+setting() { v="$(plutil -extract "$1" raw -o - "$settings")"; echo "${v/#\~/$HOME}"; }
+rela_url="$(setting rela.url)"
+# The rela scripts take their port, data and binaries from these.
+export ATLAS_RELA_PORT="$(setting rela.port)" ATLAS_RELA_DATA="$(setting rela.data)" ATLAS_RELA_BIN="$(setting rela.bin)"
+export ATLAS_TEST_ROOT="$(dirname "$ATLAS_RELA_DATA")"
 
 case "$cmd" in
   up)

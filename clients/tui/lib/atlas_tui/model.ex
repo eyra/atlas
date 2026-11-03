@@ -97,8 +97,9 @@ defmodule AtlasTui.Model do
     end)
   end
 
-  @doc "What can take focus in a form: its inputs, then the submit and cancel buttons."
-  def focusable(%Form{inputs: inputs}), do: inputs ++ [:submit, :cancel]
+  @doc "What can take focus in a form: its inputs (not the read-only ones), then the buttons."
+  def focusable(%Form{inputs: inputs}),
+    do: Enum.reject(inputs, &(&1.kind == "readonly")) ++ [:submit, :cancel]
 
   # Keys
 

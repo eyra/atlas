@@ -120,10 +120,8 @@ defmodule AtlasTui.View do
       end)
 
     inputs =
-      form.inputs
-      |> Enum.with_index()
-      |> Enum.map(fn {input, i} ->
-        input_line(input, model.values[input.name] || "", i == focus)
+      Enum.map(form.inputs, fn input ->
+        input_line(input, model.values[input.name] || "", Enum.at(items, focus) == input)
       end)
 
     buttons = [
@@ -173,6 +171,10 @@ defmodule AtlasTui.View do
 
     field =
       case input.kind do
+        # Shown, never changed (an id).
+        "readonly" ->
+          value
+
         kind when kind in ["choice", "boolean"] ->
           shown = Enum.find_value(input.choices || [], value, &(&1.value == value && &1.label))
           "‹ #{shown} ›"

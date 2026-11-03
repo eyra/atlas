@@ -202,8 +202,13 @@ defmodule AtlasControl.Pages do
 
         fields =
           [Blocks.pair(label: "Id", value: key)] ++
-            Enum.map(ordered(spec), fn {name, prop} ->
-              Blocks.pair(label: humanize(name), value: show(prop, fact["values"][name]))
+            Enum.flat_map(ordered(spec), fn {name, prop} ->
+              value = fact["values"][name]
+
+              # A field only a connector or the system fills shows only once it has a value.
+              if settable?(prop) or value not in [nil, ""],
+                do: [Blocks.pair(label: humanize(name), value: show(prop, value))],
+                else: []
             end) ++
             Enum.map(parents(description, kind, fact), fn {label, keys} ->
               Blocks.pair(label: label, value: Enum.join(keys, ", "))
@@ -249,29 +254,15 @@ defmodule AtlasControl.Pages do
     page(title, path(parent_route), [form_block])
   end
 
+  # A create asks only what the kind's create rule asks; the id is made, never typed.
   defp page({:new, kind}, kind, spec, _description, [], form) do
-    defaults =
-      for {name, %{"default" => d}} <- spec["properties"] || %{},
-          into: %{},
-          do: {name, to_string(d)}
-
-    values = Map.merge(defaults, form[:values] || %{})
-    prefix = spec["id_prefixes"] || List.wrap(spec["id_prefix"])
-
-    id_input =
-      Blocks.input(
-        name: "_key",
-        label: "Id",
-        kind: "text",
-        required: true,
-        value: values["_key"],
-        hint: if(prefix != [], do: "starts with #{Enum.join(prefix, " or ")}")
-      )
+    values = form[:values] || %{}
+    asked = create_rule(spec).ask
 
     form_block =
       Blocks.form(
         title: "New #{singular(spec, kind) |> String.downcase()}",
-        inputs: [id_input | inputs(spec, values)],
+        inputs: inputs(spec, values, only: asked),
         submit_label: "Create",
         submit_to: path({:new, kind}),
         cancel_to: path({:list, kind}),
@@ -295,7 +286,11 @@ defmodule AtlasControl.Pages do
         form_block =
           Blocks.form(
             title: "Change #{singular(spec, kind) |> String.downcase()} #{key}",
-            inputs: inputs(spec, values),
+            # The id is shown, never changed.
+            inputs: [
+              Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key)
+              | inputs(spec, values)
+            ],
             submit_label: "Save",
             submit_to: path({:edit, kind, key}),
             cancel_to: back,
@@ -451,8 +446,15 @@ defmodule AtlasControl.Pages do
 
   # Form inputs from the description
 
-  defp inputs(spec, values) do
-    for {name, prop} <- ordered(spec) do
+  # `only`: these properties, in this order. Otherwise every property a person may set.
+  defp inputs(spec, values, opts \\ []) do
+    properties =
+      case opts[:only] do
+        nil -> ordered(spec)
+        names -> for name <- names, prop = spec["properties"][name], do: {name, prop}
+      end
+
+    for {name, prop} <- properties, settable?(prop) do
       Blocks.input(
         name: name,
         label: humanize(name),
@@ -478,6 +480,55 @@ defmodule AtlasControl.Pages do
     do: [Blocks.choice(value: "false", label: "no"), Blocks.choice(value: "true", label: "yes")]
 
   defp choices(_), do: nil
+
+  @doc """
+  How a fact of a kind is created, from the description (`create` in `rela/atlas.json`):
+  `ask` (the fields a create form asks for), `id` (`prefix` plus the next free number,
+  zero-padded to `digits`) and `defaults` (values for what it does not ask). Without a
+  rule: every field a person may set, rela's id prefix, no defaults.
+  """
+  def create_rule(spec) do
+    rule = spec["create"] || %{}
+    prefix = List.first(spec["id_prefixes"] || List.wrap(spec["id_prefix"])) || ""
+
+    %{
+      ask: rule["ask"] || for({name, prop} <- ordered(spec), settable?(prop), do: name),
+      prefix: get_in(rule, ["id", "prefix"]) || prefix,
+      digits: get_in(rule, ["id", "digits"]) || 2,
+      defaults: rule["defaults"] || %{}
+    }
+  end
+
+  @doc """
+  The next free key of a kind: the rule's prefix plus one more than the highest number
+  among `keys` (and above `after`, when an earlier try was taken).
+  """
+  def next_key(spec, keys, after_number \\ 0) do
+    %{prefix: prefix, digits: digits} = create_rule(spec)
+    {:ok, pattern} = Regex.compile("^" <> Regex.escape(prefix) <> "(\\d+)$")
+
+    highest =
+      keys
+      |> Enum.flat_map(fn key ->
+        case Regex.run(pattern, key) do
+          [_, n] -> [String.to_integer(n)]
+          nil -> []
+        end
+      end)
+      |> Enum.max(fn -> 0 end)
+
+    number = max(highest, after_number) + 1
+    {prefix <> String.pad_leading(Integer.to_string(number), digits, "0"), number}
+  end
+
+  @doc "The values of a new fact: what was asked, then the rule's defaults for the rest."
+  def create_values(spec, raw) do
+    asked = Map.take(raw, create_rule(spec).ask)
+    Map.merge(create_rule(spec).defaults, values_for(spec, asked))
+  end
+
+  # A field a person may set; not one only a connector or the system fills.
+  defp settable?(prop), do: not Map.has_key?(prop, "set_by")
 
   @doc """
   Turn a form's text values into the described types, for a fact. Unknown names are

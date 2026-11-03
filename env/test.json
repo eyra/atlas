@@ -5,7 +5,8 @@
     "url": "http://127.0.0.1:7690/api/v1",
     "port": 7690,
     "data": "~/.local/share/atlas/test/rela",
-    "bin": "~/.local/share/atlas/test/bin"
+    "bin": "~/.local/share/atlas/test/bin",
+    "extra": "rela/atlas.json"
   },
   "state": { "data": "~/.local/share/atlas/test/beam" },
   "reconcile_seconds": 5
