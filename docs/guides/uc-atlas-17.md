@@ -14,14 +14,14 @@ Run it again in a second terminal for TUI 2. The agent is a local headless Claud
 
 ## Try
 
-In TUI 1, on a scene whose description says which use cases it needs (make one with `n`, or use one of yours):
+In TUI 1, on a scene whose description says which use cases it needs (make one with `c`, or use one of yours):
 
 | Step | Keys | What you should see |
 |---|---|---|
 | Ask | `:` | A request line at the bottom: `: ▏   ↵ ask the agent   esc close`. |
-| | type `propose use cases from this scene's description`, `enter` | `Planning…`, then `Proposed: N steps`: what you asked, who planned (`claude -p`), what it says, and per step `[✓] 1. New use case in SC-Atlas-NN` with its title, description and why. TUI 2 shows no change. |
+| | type `propose use cases from this scene's description`, `enter` | `Planning…`, then `Proposed: N steps`: what you asked, who planned (`claude -p`), what it says, and per step `[✓] 1. Create use case in SC-Atlas-NN` with its title, description and why. TUI 2 shows no change. |
 | Drop | ↑/↓ to a step, `space` | `[ ]`: the step is dropped. `space` again keeps it. |
-| Edit | ↑/↓ to a step, `e` | `Step N: New use case in SC-Atlas-NN`: the step's title and description in the form you know. Change them, `ctrl-s` keeps the edit (`esc` does not). The plan shows the new values. |
+| Edit | ↑/↓ to a step, `e` | `Step N: Create use case in SC-Atlas-NN`: the step's title and description in the form you know. Change them, `ctrl-s` keeps the edit (`esc` does not). The plan shows the new values. |
 | Run | `enter` | Each kept step turns `[✓] … Stored as UC-Atlas-NN.`, then `Done: N of N stored`. TUI 2 shows the new use cases by hint, and the dropped one is not made. |
 | Close | `enter` | The scene, with its new use cases. |
 
