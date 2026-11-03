@@ -14,6 +14,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-01.md`: start the test environment and two TUIs, and manage scenes (UC-Atlas-01).
 - `docs/guides/uc-atlas-02.md`: manage the use cases of a scene (UC-Atlas-02).
 - `docs/guides/uc-atlas-03.md`: manage the issues of a use case (UC-Atlas-03).
+- `docs/guides/uc-atlas-04.md`: link the pull requests of an issue (UC-Atlas-04).
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
 
 ```sh

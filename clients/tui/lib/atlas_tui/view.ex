@@ -4,7 +4,7 @@ defmodule AtlasTui.View do
   the screen. Each line is a list of `{style, text}` segments; `to_ansi/1` adds colour.
   """
 
-  alias AtlasTui.Blocks.{Confirm, Fallback, Form, Input, Item}
+  alias AtlasTui.Blocks.{Border, Confirm, Fallback, Form, Input, Item, Section}
   alias AtlasTui.Blocks.List, as: ListBlock
   alias AtlasTui.{Model, Text}
 
@@ -80,12 +80,59 @@ defmodule AtlasTui.View do
 
   defp body(%Model{blocks: []}, _width, _room), do: [[], [{:dim, " Waiting for Control…"}]]
 
-  defp body(model, width, room) do
-    model.blocks
-    |> Enum.map(&block(&1, model, width, room))
+  defp body(model, width, room), do: nodes(content(model), model, width, room)
+
+  # The view model as a tree, top down: blocks, and markup around them.
+  defp content(%Model{markup: []} = model), do: Enum.map(model.blocks, &{:block, &1})
+
+  defp content(model) do
+    by_id = Map.new(Enum.zip(model.ids, model.blocks))
+
+    model.ids
+    |> AtlasSpec.Markup.tree(model.markup)
+    |> blocks_in(by_id)
+  end
+
+  defp blocks_in(tree, by_id) do
+    Enum.map(tree, fn
+      {:block, id} -> {:block, Map.fetch!(by_id, id)}
+      {:markup, entry, children} -> {:markup, entry, blocks_in(children, by_id)}
+    end)
+  end
+
+  defp nodes(tree, model, width, room) do
+    tree
+    |> Enum.map(fn
+      {:block, block} -> block(block, model, width, room)
+      {:markup, %{"value" => value}, children} -> markup(value, children, model, width, room)
+    end)
     |> Enum.intersperse([[]])
     |> Enum.concat()
   end
+
+  # Markup this TUI draws: sections and borders. Columns and highlights it does not draw
+  # yet; their blocks show as they are.
+  defp markup(%Section{title: title}, children, model, width, room) do
+    rule = String.duplicate("─", max(width - String.length(title) - 3, 0))
+    [[{:bold, " " <> title}, {:dim, " " <> rule}], []] ++ nodes(children, model, width, room)
+  end
+
+  defp markup(%Border{title: title}, children, model, width, room) do
+    inner = width - 4
+    label = if title, do: "─ " <> title <> " ", else: ""
+    top = " ┌" <> label <> String.duplicate("─", max(inner - String.length(label), 0)) <> "┐"
+
+    lines =
+      for line <- nodes(children, model, inner, room) do
+        line = fit(line, inner)
+        used = line |> Enum.map(&String.length(elem(&1, 1))) |> Enum.sum()
+        [{:dim, " │"} | line] ++ [{:plain, String.duplicate(" ", inner - used)}, {:dim, "│"}]
+      end
+
+    [[{:dim, top}]] ++ lines ++ [[{:dim, " └" <> String.duplicate("─", inner) <> "┘"}]]
+  end
+
+  defp markup(_other, children, model, width, room), do: nodes(children, model, width, room)
 
   defp block(%ListBlock{} = list, model, _width, _room) do
     rows =
@@ -107,7 +154,8 @@ defmodule AtlasTui.View do
           end)
       end
 
-    [[{:bold, " " <> list.title}], []] ++ rows
+    # A list in a section leaves its title to the section.
+    if list.title, do: [[{:bold, " " <> list.title}], []] ++ rows, else: rows
   end
 
   # Values keep their line breaks and blank lines; a heading line (`#`) is bold.

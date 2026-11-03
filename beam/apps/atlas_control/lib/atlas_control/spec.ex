@@ -16,24 +16,32 @@ defmodule AtlasControl.Spec do
           field :title, :string, required: true
           field :actions, {:list, :action}
         end
+
+        defmarkup :section do
+          field :title, :string, required: true
+        end
       end
 
   - `defblock`: a block Control sends and clients render. A page is a flat, ordered list
     of blocks; a block never holds another block.
   - `defmodel`: a value a block field holds (an action, a row, an input).
+  - `defmarkup`: a kind of markup. A view model sends content (its blocks, each with an
+    id) and markup: entries of a kind that cover the blocks from one id to another, with
+    the kind's fields as props. All markup nests (`AtlasSpec.Markup` has the rules).
   - `field`: a snake_case name, a type and `required: true | false` (default `false`).
     Types: `:string`, `:integer`, `:boolean`, a model, or `{:list, type}`.
 
   A mistake fails at compile time and points at its line. Generators read `__spec__/0`,
-  never the source. The catalogue is `spec/control/blocks.ex`. A new kind of entry (such
-  as markup) is one more `def…` macro that calls `entry/4` with its own type.
+  never the source. The catalogue is `spec/control/blocks.ex`.
   """
 
   @primitives [:string, :integer, :boolean]
 
   defmacro __using__(_opts) do
     quote do
-      import AtlasControl.Spec, only: [version: 1, defblock: 2, defmodel: 2, field: 2, field: 3]
+      import AtlasControl.Spec,
+        only: [version: 1, defblock: 2, defmodel: 2, defmarkup: 2, field: 2, field: 3]
+
       Module.register_attribute(__MODULE__, :spec_entries, accumulate: true)
       @before_compile AtlasControl.Spec
     end
@@ -45,6 +53,7 @@ defmodule AtlasControl.Spec do
 
   defmacro defblock(name, do: body), do: entry(:block, name, body, __CALLER__.line)
   defmacro defmodel(name, do: body), do: entry(:model, name, body, __CALLER__.line)
+  defmacro defmarkup(name, do: body), do: entry(:markup, name, body, __CALLER__.line)
 
   defp entry(type, name, body, line) do
     quote do
@@ -89,7 +98,7 @@ defmodule AtlasControl.Spec do
         AtlasControl.Spec.__fail__(
           __ENV__.file,
           unquote(line),
-          "field #{inspect(unquote(name))} outside a block or model"
+          "field #{inspect(unquote(name))} outside a block, model or markup"
         )
       end
 
@@ -122,7 +131,8 @@ defmodule AtlasControl.Spec do
     spec = %{
       version: version,
       models: for(%{type: :model} = e <- entries, do: strip.(e)),
-      blocks: for(%{type: :block} = e <- entries, do: strip.(e))
+      blocks: for(%{type: :block} = e <- entries, do: strip.(e)),
+      markup: for(%{type: :markup} = e <- entries, do: strip.(e))
     }
 
     quote do
@@ -132,8 +142,8 @@ defmodule AtlasControl.Spec do
   end
 
   defp validate!(entries, file) do
-    models = for %{type: :model, name: name} <- entries, do: name
-    blocks = for %{type: :block, name: name} <- entries, do: name
+    names = fn type -> for %{type: ^type, name: name} <- entries, do: name end
+    kinds = {names.(:model), names.(:block), names.(:markup)}
 
     Enum.reduce(entries, MapSet.new(), fn entry, seen ->
       fail = &__fail__(file, entry.line, &1)
@@ -152,7 +162,7 @@ defmodule AtlasControl.Spec do
         if field.name in names,
           do: fail.("#{inspect(entry.name)} has field #{inspect(field.name)} twice")
 
-        check_type!(field.type, models, blocks, "#{entry.name}.#{field.name}", fail)
+        check_type!(field.type, kinds, "#{entry.name}.#{field.name}", fail)
         MapSet.put(names, field.name)
       end)
 
@@ -160,15 +170,14 @@ defmodule AtlasControl.Spec do
     end)
   end
 
-  defp check_type!({:list, inner}, models, blocks, at, fail),
-    do: check_type!(inner, models, blocks, at, fail)
+  defp check_type!({:list, inner}, kinds, at, fail), do: check_type!(inner, kinds, at, fail)
+  defp check_type!(type, _kinds, _at, _fail) when type in @primitives, do: :ok
 
-  defp check_type!(type, _models, _blocks, _at, _fail) when type in @primitives, do: :ok
-
-  defp check_type!(type, models, blocks, at, fail) do
+  defp check_type!(type, {models, blocks, markup}, at, fail) do
     cond do
       type in models -> :ok
       type in blocks -> fail.("#{at} holds block #{inspect(type)}; blocks have no children")
+      type in markup -> fail.("#{at} holds markup #{inspect(type)}; markup covers blocks")
       true -> fail.("#{at} has unknown type #{inspect(type)}")
     end
   end

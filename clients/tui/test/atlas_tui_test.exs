@@ -384,4 +384,97 @@ defmodule AtlasTuiTest do
     assert screen(gone) =~ "Not connected to Control. Retrying…"
     refute screen(gone) =~ "First"
   end
+
+  describe "markup" do
+    # A thing in a border, then its parts in a section, as Control sends a fact's page.
+    @marked %{
+      "op" => "page",
+      "path" => "/k/thing/T-1",
+      "title" => "Thing T-1",
+      "back" => "/k/thing",
+      "reason" => "open",
+      "blocks" => [
+        %{
+          "id" => "item",
+          "type" => "item",
+          "props" => %{
+            "title" => "Thing T-1: First",
+            "fields" => [%{"label" => "Id", "value" => "T-1"}]
+          }
+        },
+        %{
+          "id" => "parts",
+          "type" => "list",
+          "props" => %{
+            "rows" => [%{"label" => "Wheel", "detail" => "P-1", "to" => "/k/part/P-1"}]
+          }
+        }
+      ],
+      "markup" => [
+        %{"kind" => "border", "start" => "item", "end" => "item", "props" => %{}},
+        %{
+          "kind" => "section",
+          "start" => "parts",
+          "end" => "parts",
+          "props" => %{"title" => "Parts"}
+        }
+      ]
+    }
+
+    test "a border is drawn around its blocks, a section heads its own" do
+      lines = model(@marked) |> View.render(40, 20, 5) |> View.plain() |> String.split("\n")
+
+      assert Enum.slice(lines, 2, 9) == [
+               " ┌────────────────────────────────────┐",
+               " │ Thing T-1: First                   │",
+               " │                                    │",
+               " │   Id              T-1              │",
+               " └────────────────────────────────────┘",
+               "",
+               " Parts ────────────────────────────────",
+               "",
+               " › Wheel"
+             ]
+    end
+
+    test "markup of an unknown kind is left out; the blocks still show" do
+      page =
+        update_in(
+          @marked["markup"],
+          &[%{"kind" => "sparkle", "start" => "item", "end" => "item"} | &1]
+        )
+
+      assert %Model{markup: [%{"kind" => "border"}, %{"kind" => "section"}]} = model(page)
+      assert screen(model(page)) =~ "┌"
+    end
+
+    test "markup that does not nest is left out whole, and the page renders flat" do
+      crossing = [
+        %{"kind" => "border", "start" => "item", "end" => "parts", "props" => %{}},
+        %{
+          "kind" => "section",
+          "start" => "parts",
+          "end" => "parts",
+          "props" => %{"title" => "Parts"}
+        },
+        %{
+          "kind" => "highlight",
+          "start" => "item",
+          "end" => "nowhere",
+          "props" => %{"tone" => "ok"}
+        }
+      ]
+
+      m = model(%{@marked | "markup" => crossing})
+      assert m.markup == []
+      refute screen(m) =~ "┌"
+      assert screen(m) =~ "Thing T-1: First"
+      assert screen(m) =~ "Wheel"
+    end
+
+    test "a page without ids or markup renders as before" do
+      assert %Model{ids: ["#0"], markup: []} = model(@list)
+      assert screen(model(@list)) =~ "Things"
+    end
+  end
 end

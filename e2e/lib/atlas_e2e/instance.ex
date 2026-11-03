@@ -52,19 +52,19 @@ defmodule AtlasE2E.Instance do
     }
 
     # `atlas restart` starts rela when it does not answer, then the core, and waits for it.
-    :ok = atlas!(instance, ["restart"])
+    :ok = atlas!(instance, ["restart", "--env", "test"])
     instance
   end
 
   @doc "Stop the core, as `atlas stop` does."
-  def stop_core(instance), do: atlas!(instance, ["stop"])
+  def stop_core(instance), do: atlas!(instance, ["stop", "--env", "test"])
 
   @doc "Start the core again, as `atlas restart` does."
-  def start_core(instance), do: atlas!(instance, ["restart"])
+  def start_core(instance), do: atlas!(instance, ["restart", "--env", "test"])
 
   def stop(instance) do
-    atlas(instance, ["stop"])
-    atlas(instance, ["rela-stop"])
+    atlas(instance, ["stop", "--env", "test"])
+    atlas(instance, ["rela-stop", "--env", "test"])
     :ok
   end
 
@@ -90,7 +90,7 @@ defmodule AtlasE2E.Instance do
   end
 
   defp atlas(instance, args) do
-    System.cmd(Path.join(@root, "bin/atlas"), args ++ ["--env", "test"],
+    System.cmd(Path.join(@root, "bin/atlas"), args,
       env: instance.env,
       stderr_to_stdout: true
     )

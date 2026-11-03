@@ -60,9 +60,24 @@ defmodule AtlasControl.PagesTest do
 
     %{
       back: "/k/widget",
-      blocks: [%{"type" => "item", "props" => item}, %{"type" => "list", "props" => list}]
+      blocks: [
+        %{"id" => "item", "type" => "item", "props" => item},
+        %{"id" => "list:of_widget", "type" => "list", "props" => list}
+      ],
+      markup: markup
     } =
       Pages.render({:item, "widget", "W-1"}, @d, [answer, parts])
+
+    # The fact in a border, the related list in a section that carries its title.
+    assert [
+             %{"kind" => "border", "start" => "item", "end" => "item", "props" => %{}},
+             %{
+               "kind" => "section",
+               "start" => "list:of_widget",
+               "end" => "list:of_widget",
+               "props" => %{"title" => "Parts"}
+             }
+           ] = markup
 
     assert item["title"] == "Widget W-1: One"
 
@@ -74,7 +89,7 @@ defmodule AtlasControl.PagesTest do
              {"Notes", "—"}
            ]
 
-    assert list["title"] == "Parts"
+    refute Map.has_key?(list, "title")
     assert [%{"label" => "Wheel", "to" => "/k/part/P-1"}] = list["rows"]
 
     assert [%{"label" => "Add part", "key" => "a", "to" => "/k/part/new/of_widget/W-1"}] =
@@ -209,6 +224,32 @@ defmodule AtlasControl.PagesTest do
     %{blocks: [%{"props" => refusal}]} = Pages.render({:delete, "widget", "W-1"}, @d, [one])
     assert refusal["text"] =~ "still has 1 part. Remove it first"
     assert refusal["text"] =~ "never deletes it along with its parent"
+  end
+
+  test "a kind whose id is made from a property: the key is made, never typed or changed" do
+    tag = @d["entities"]["tag"]
+    assert Pages.key_for(tag, %{"name" => " #a.b/12 "}) == {:ok, "T-a_b-12"}
+    assert Pages.key_for(tag, %{"name" => "a.b"}) == {:error, "name must look like #word/1"}
+    assert Pages.id_property(tag) == "name"
+    assert Pages.id_property(@d["entities"]["widget"]) == nil
+
+    %{blocks: [%{"props" => form}]} = Pages.render({:new, "tag", {"on_part", "P-1"}}, @d, [])
+    assert Enum.map(form["inputs"], &{&1["name"], &1["kind"]}) == [{"name", "text"}]
+
+    stored = %{"fact" => %{"key" => "T-a-1", "values" => %{"name" => "#a/1"}, "version" => "v1"}}
+
+    # Shown, never changed: the id and the property it is made from.
+    %{blocks: [%{"props" => edit}]} = Pages.render({:edit, "tag", "T-a-1"}, @d, [stored])
+
+    assert Enum.map(edit["inputs"], &{&1["name"], &1["kind"], &1["value"]}) == [
+             {"_key", "readonly", "T-a-1"},
+             {"name", "readonly", "#a/1"}
+           ]
+
+    # Labelled by that property; nothing a person may change, so no Change action.
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [stored])
+    assert item["title"] == "Tag T-a-1: #a/1"
+    assert Enum.map(item["actions"], & &1["key"]) == ["d"]
   end
 
   test "form text becomes the described types" do

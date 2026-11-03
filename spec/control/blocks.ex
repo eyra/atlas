@@ -12,7 +12,7 @@ defmodule AtlasControl.Spec.Blocks do
   """
   use AtlasControl.Spec
 
-  version "0.1.0"
+  version "0.2.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -55,8 +55,9 @@ defmodule AtlasControl.Spec.Blocks do
     field :choices, {:list, :choice}
   end
 
+  # A list inside a section may leave its title to the section.
   defblock :list do
-    field :title, :string, required: true
+    field :title, :string
     field :rows, {:list, :row}, required: true
     field :empty, :string
     field :actions, {:list, :action}
@@ -86,5 +87,29 @@ defmodule AtlasControl.Spec.Blocks do
     field :confirm_label, :string
     field :confirm_to, :string
     field :cancel_to, :string, required: true
+  end
+
+  # Markup: kinds that cover a stretch of a view model's blocks. All markup nests, of
+  # every kind; see AtlasSpec.Markup (spec/control/rules/markup.ex).
+
+  # A titled part of the view; a client may let the user fold a collapsible one.
+  defmarkup :section do
+    field :title, :string, required: true
+    field :collapsible, :boolean
+  end
+
+  # A line drawn around the blocks, with an optional title in it.
+  defmarkup :border do
+    field :title, :string
+  end
+
+  # The blocks side by side, `count` to a row; a client too narrow stacks them.
+  defmarkup :columns do
+    field :count, :integer, required: true
+  end
+
+  # The blocks marked, in a tone: info, ok, error or pending.
+  defmarkup :highlight do
+    field :tone, :string, required: true
   end
 end
