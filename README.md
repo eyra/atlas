@@ -8,7 +8,7 @@ This repository holds everything during development: the BEAM application, the r
 
 ## Try it
 
-`atlas` opens **prod**, where the plan lives (real data; the header shows `Atlas · prod` in white on red). Try use cases in **test**: `atlas tui --env test`. Scripts, tests and agents always pass `--env test` or a private `ATLAS_ENV_FILE`.
+`atlas` opens **prod**, where the plan lives (real data; the header shows `Atlas · prod` in white on red). Prod and test run on Fly; `atlas` reaches them through a tunnel it opens itself. Try use cases in **test**: `atlas tui --env test`. Scripts, tests and agents always pass `--env test` or a private `ATLAS_ENV_FILE`.
 
 - `docs/guides/prod.md`: the prod environment: start, stop, where its data is; prod on Fly, its secrets, and the move and switch (IS-Atlas-79).
 - `docs/guides/test-on-fly.md`: test runs on Fly (`eyra-atlas-test`, `eyra-atlas-test-rela`), deployed on every merge to develop; the tunnel, the CI secrets, and `atlas move-to-fly` (IS-Atlas-26).
@@ -30,7 +30,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-32.md`: completed means accepted or merged; completable is an association, shown with the fact that set it (UC-Atlas-32).
 
 ```sh
-atlas                     # prod: starts what is needed in the background, then opens a TUI
+atlas                     # prod: opens the tunnel to prod on Fly in the background, then a TUI
 atlas tui --env test      # the same for test; again for a second one
 atlas status --env test   # what runs, and which build (also: logs, stop, restart, env)
 ```
@@ -60,7 +60,7 @@ An agent that plans gets the same actions as tools: `atlas tools` lists them, ma
 | `tools/plan/` | `atlas load-plan` (UC-Atlas-05): SCENES.md into Atlas through `clients/agent`, with `links.json` for pull requests and stages. |
 | `bff/` | Control's BFF (backend for frontend), in three parts (ADR 0001): `generator/` (the DSL, the rules of markup, the targets, `mix atlas.gen`; none of Atlas's values), `contract/` (the blocks, models and markup Control sends; only that), `targets/` (generated files: `json/blocks.json` for clients in other languages). Control and the TUI read the contract at compile time. `bff/README.md` has the view model, the wire format and the protocol. |
 | `rela/` | rela's description (`schema.yaml`): every entity Atlas knows. `atlas.json` adds what this rela cannot hold, as data per kind: which fields a create asks for, how ids are made, defaults, fields only a connector fills. Plus the scripts that run the rela test instance. |
-| `env/` | One settings file per environment (`test.json`, `prod.json`), read by the core and the clients. Test and prod share no port and no data. A `fly` section (test) says the environment runs on Fly: the clients reach its Control through a tunnel on `control.port`. |
+| `env/` | One settings file per environment (`test.json`, `prod.json`), read by the core and the clients. Test and prod share no port and no data. A `fly` section says the environment runs on Fly (both do): the clients reach its Control through a tunnel on `control.port`. |
 | `fly/` | Test and prod on Fly (ADR 0003): the images (`core.Dockerfile`, a release of `beam/`; `rela.Dockerfile`, the pinned rela), their start scripts, the apps' settings per environment (`fly/test/`, `fly/prod/`), `deploy.sh` (what CI runs on a merge: the description check, rela, the core, `smoke.sh`), and `atlas move-to-fly` and `atlas fetch-from-fly`. |
 | `bin/atlas` | The `atlas` command: starts the environment in the background and opens the TUI. `bin/atlas install` links it into `~/.local/bin` from the main clone. Before anything compiles it runs `bin/clean-build`, which removes the build output of apps no `mix.exs` declares any more, and, after an update of the main clone, folders that hold only build output; so a renamed or moved app never stops the core from starting (IS-Atlas-67). |
 | `docs/guides/` | How to try each use case. |

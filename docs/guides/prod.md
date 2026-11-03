@@ -2,7 +2,7 @@
 
 Prod holds the plan: real scenes, use cases and issues. Its data is real from the first write: never wipe it, and never run the end-to-end test or an experiment against it. Try things in test (`atlas tui --env test`) or on a private instance (`ATLAS_ENV_FILE`).
 
-For now prod runs on this MacBook. Its Fly apps are ready (IS-Atlas-79, below); prod's clients switch to them once its data has moved and been checked. Test runs on Fly since IS-Atlas-26: `docs/guides/test-on-fly.md`.
+Prod runs on Fly (IS-Atlas-79, below), like test since IS-Atlas-26 (`docs/guides/test-on-fly.md`). This Mac runs only its clients: the TUI, the agents' command line and the agent behind `:`.
 
 ## Start
 
@@ -10,21 +10,27 @@ For now prod runs on this MacBook. Its Fly apps are ready (IS-Atlas-79, below); 
 atlas
 ```
 
-The same as `atlas tui --env prod`: it starts rela prod and the prod core in the background when they are not answering, and opens a TUI. The header says `Atlas · prod` in white on red; test's header says `Atlas · test`, plain.
+The same as `atlas tui --env prod`. It opens the tunnel to prod's Control on Fly in the background (`fly proxy 7593:7591 -a eyra-atlas`, flyctl's WireGuard; flyctl must be logged in to organisation eyra), then a TUI. The header says `Atlas · prod` in white on red; test's header says `Atlas · test`, plain.
 
-More: `atlas status`, `atlas logs`, `atlas stop`, `atlas restart`; `atlas env` shows which environment a command works on.
+More:
+- `atlas status`: the tunnel, and both apps' machines, checks and deployed build (the image label `master-<commit>`).
+- `atlas logs`: the core's log on Fly; rela's is `fly logs -a eyra-atlas-rela`.
+- `atlas stop`, `atlas restart`: close or reopen this Mac's tunnel; prod keeps running on Fly.
+- `atlas env`: which environment a command works on.
 
-rela keeps the description it started with. When a merge changes `rela/schema.yaml`, `atlas restart` (and `atlas`, when it starts the core) restarts rela on the new description first, its data kept, and says so: `rela prod ran an older description; restarted it`. `atlas status` says whether rela runs this build's description. When the new description no longer describes data rela holds (a removed kind or field that still has data), nothing starts: `atlas` names that data and the migration to run first (IS-Atlas-73).
+**Prod runs master's build.** A merge to master deploys it (d-0014). A merge to develop changes this Mac's clients (the main clone follows develop) but not prod's core, so a new feature reaches prod only with the next merge to master. Control lets a client newer than itself in, and sends an older one away.
+
+A deploy first checks that the build's description describes all of prod's data on Fly, as `atlas restart` did on this Mac (IS-Atlas-73). When it does not, nothing is deployed, prod keeps its build, and the job names the data: migrate it first (`docs/guides/test-on-fly.md`, "A migration").
 
 ## Where it runs
 
 | | Test | Prod |
 |---|---|---|
-| rela | `eyra-atlas-test-rela` on Fly, private network only | 127.0.0.1:7590 (`eyra-atlas-rela` on Fly after the switch) |
-| Control | `eyra-atlas-test` on Fly; this Mac's tunnel end 127.0.0.1:7693 | 127.0.0.1:7591 (`eyra-atlas` on Fly after the switch; tunnel end 127.0.0.1:7593) |
-| Data | the apps' volumes on Fly | `~/.local/share/atlas/prod/` |
+| rela | `eyra-atlas-test-rela` on Fly, private network only | `eyra-atlas-rela` on Fly, private network only |
+| Control | `eyra-atlas-test` on Fly; this Mac's tunnel end 127.0.0.1:7693 | `eyra-atlas` on Fly; this Mac's tunnel end 127.0.0.1:7593 |
+| Data | the apps' volumes on Fly | the apps' volumes on Fly (the Mac's copy from before the move: `~/.local/share/atlas/prod/`) |
 
-Both run the same pinned rela (26.10.14); test runs develop's newest build, prod the build on this Mac. Test and prod never connect: each has its own Bus, and a prod Bus or Control refuses a test message or client (and the other way round). Facts never move from test to prod.
+Both run the same pinned rela (26.10.14); test runs develop's newest build, prod master's. Test and prod never connect: each has its own Bus, and a prod Bus or Control refuses a test message or client (and the other way round). Facts never move from test to prod.
 
 ## Prod on Fly (IS-Atlas-79)
 
@@ -40,7 +46,7 @@ A merge to master deploys prod (CI job `deploy-prod`, `fly/deploy.sh prod`). It 
 2. rela, then the core.
 3. The smoke check, which reads only.
 
-`env/prod.json` names the apps in its `"fly"` section with `"in_use": false`: until the switch below, `atlas` keeps using this Mac's prod core and rela, and only `atlas move-to-fly --env prod` and `atlas fetch-from-fly --env prod` go to Fly.
+`env/prod.json` names the apps in its `"fly"` section. Until the switch below it said `"in_use": false`: `atlas` kept using this Mac's prod core and rela, and only `atlas move-to-fly --env prod` and `atlas fetch-from-fly --env prod` went to Fly.
 
 ### Secrets
 
@@ -56,8 +62,9 @@ There is no Flux connector yet: `flux_id` and `flux_ref` are described as set by
 
 ### Move prod's data, and switch
 
-Prod's data is real. Its move is checked item by item, and the Mac's prod keeps its data until the check passes.
+Prod's data is real. Its move is checked item by item, and the Mac's prod keeps its data until the check passes. These steps run before the switch pull request is merged, while `env/prod.json` still says `"in_use": false`.
 
+0. **Prod on Fly runs the build the Mac's prod runs.** The move checks the data against this build's description, and Fly's rela checks it again at boot against its own. Merge develop into master first; `deploy-prod` then deploys that build, and `atlas status` (`fly status -a eyra-atlas`) shows `master-<commit>`.
 1. **Stop writes on the Mac and back up.** Stop the Mac's prod core and rela, so nothing changes after the copy (`atlas stop`, then `atlas rela-stop`). Then copy the folder: `cp -Rp ~/.local/share/atlas/prod ~/.local/share/atlas/prod-backup-$(date -u +%Y%m%dT%H%M%SZ)`.
 2. **Dry run:**
    ```sh
@@ -66,7 +73,7 @@ Prod's data is real. Its move is checked item by item, and the Mac's prod keeps 
    It checks that this build's description describes all of that data. It counts the items per kind (`assignments` among them) and the links per relation (`links assignment` and `links accepted_by` among them).
 3. **The move:** the same without `--dry-run`. It checks every file of `rela/` and `beam/` on Fly against what it sent, by SHA-256: every item, every Assignment, every link (accepted_by too), and State's own record of who set each link. Then it compares the counts. What Fly held before stays in `/data/before-move/`.
 4. **Check through Control on Fly:** `fly/smoke.sh prod` counts every kind as Control on Fly reads it.
-5. **Switch prod's clients**, in one small pull request to develop: in `env/prod.json` set `"fly": {"in_use": true}` and `"control": {"port": 7593}` (`fly.tunnel_port`). From then on `atlas` opens the tunnel to `eyra-atlas` like `atlas tui --env test` does. `atlas status` shows Fly's machines.
-6. **If anything is wrong before the switch:** `atlas restart` starts the Mac's prod again on its own data, which nothing changed.
+5. **Switch prod's clients** with the switch pull request (IS-Atlas-79): `env/prod.json` gets `"fly": {"in_use": true}` and `"control": {"port": 7593}`, the tunnel's end on this Mac, and loses the Mac-only settings (`rela`, `state`, `connectors`). From then on `atlas` opens the tunnel to `eyra-atlas` like `atlas tui --env test` does.
+6. **If anything is wrong before the switch:** `atlas restart` starts the Mac's prod again on its own data, which nothing changed. After the switch, going back is reverting that pull request, then `atlas restart`: the Mac's prod data is still the one from before the move.
 
 After the switch, keep `~/.local/share/atlas/prod` and the backup as they are. `atlas fetch-from-fly --env prod --to <folder>` makes a fresh backup from Fly at any time (about a minute in which prod serves nothing). A migration on prod runs as on test: `docs/guides/test-on-fly.md`, "A migration".
