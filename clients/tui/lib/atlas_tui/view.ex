@@ -13,6 +13,7 @@ defmodule AtlasTui.View do
     Highlight,
     Input,
     Item,
+    Plan,
     Section
   }
 
@@ -30,7 +31,10 @@ defmodule AtlasTui.View do
   draws or, for now, passes through. A test fails when the contract has one it does not.
   """
   def known,
-    do: %{blocks: ~w(list item form confirm), markup: ~w(section border columns highlight)}
+    do: %{
+      blocks: ~w(list item form confirm plan),
+      markup: ~w(section border columns highlight)
+    }
 
   @doc "The screen: exactly `height` lines of plain segments."
   def render(%Model{} = model, width, height, reconcile_seconds) do
@@ -54,7 +58,7 @@ defmodule AtlasTui.View do
     body = body ++ Elixir.List.duplicate([], room - length(body))
 
     footer =
-      Enum.map(help, &[{:dim, " " <> &1}]) ++
+      footer_help(model, help) ++
         [
           [{:dim, String.duplicate("─", width)}],
           notice(model),
@@ -100,6 +104,12 @@ defmodule AtlasTui.View do
       [{:error, " Not connected to Control. Retrying…"}],
       [{:dim, " Nothing old is shown as if it were current."}]
     ]
+  end
+
+  # The agent's plan shows over the page; the page stays underneath and follows hints.
+  defp body(%Model{plan: %Plan{}} = model, width, room) do
+    block = Model.step_form(model) || %{model.plan | steps: Model.plan_steps(model)}
+    block(block, model, width, room)
   end
 
   defp body(%Model{blocks: []}, _width, _room), do: [[], [{:dim, " Waiting for Control…"}]]
@@ -229,8 +239,107 @@ defmodule AtlasTui.View do
       Enum.map(Text.wrap(confirm.text, width - 4), &[{:plain, "   " <> &1}]) ++ [[]] ++ choices
   end
 
+  # An agent's plan: what was asked, what it says, and each step with the values of the
+  # form it fills. The selected step is the one space, e and the arrows act on.
+  defp block(%Plan{} = plan, model, width, _room) do
+    about =
+      [
+        {"You asked", plan.request},
+        {"By", plan.by},
+        {"It says", plan.summary}
+      ]
+      |> Enum.reject(fn {_, value} -> value in [nil, ""] end)
+      |> Enum.flat_map(fn {label, value} ->
+        [first | rest] = Text.wrap(value, width - @label_width - 4)
+
+        [
+          [{:dim, "   " <> pad(label, @label_width)}, {:plain, first}]
+          | Enum.map(rest, &[{:plain, String.duplicate(" ", @label_width + 3) <> &1}])
+        ]
+      end)
+
+    steps =
+      plan.steps
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {step, i} ->
+        selected = plan.state == "proposed" and i == model.steps.selected
+        step_lines(step, selected, width)
+      end)
+
+    title(plan.title, width) ++ [[]] ++ about ++ [[]] ++ steps
+  end
+
   defp block(%Fallback{type: type}, _model, _width, _room),
     do: [[{:dim, "   (a #{type || "?"} block this TUI cannot show)"}]]
+
+  @step_marks %{
+    "proposed" => {:ok, "[✓]"},
+    "dropped" => {:dim, "[ ]"},
+    "blocked" => {:error, "[!]"},
+    "running" => {:pending, "[…]"},
+    "stored" => {:ok, "[✓]"},
+    "refused" => {:error, "[✗]"},
+    "not_run" => {:dim, "[-]"}
+  }
+
+  # A step: its mark and the form's title, its values, why, and what became of it.
+  defp step_lines(step, selected, width) do
+    {tone, mark} = @step_marks[step.state] || {:dim, "[?]"}
+    dim = step.state in ["dropped", "not_run"]
+    head_style = if selected, do: :selected, else: if(dim, do: :dim, else: :bold)
+    marker = if selected, do: " › ", else: "   "
+
+    head = [
+      {head_style, marker},
+      {if(selected, do: :selected, else: tone), mark},
+      {head_style, " #{step.n}. #{step.label}"}
+    ]
+
+    values =
+      for input <- step.inputs || [],
+          row <- value_rows(input, width) do
+        row
+      end
+
+    why =
+      if step.why,
+        do: Enum.map(Text.wrap("why: " <> step.why, width - 9), &[{:dim, "       " <> &1}]),
+        else: []
+
+    detail =
+      case step.detail do
+        nil ->
+          []
+
+        text ->
+          style =
+            %{"blocked" => :error, "refused" => :error, "not_run" => :dim}[step.state] || :ok
+
+          Enum.map(Text.wrap(text, width - 9), &[{style, "       " <> &1}])
+      end
+
+    [head] ++ values ++ why ++ detail ++ [[]]
+  end
+
+  # A value of a step, at most a few rows; the rest is one edit (e) away.
+  @value_rows 3
+  defp value_rows(input, width) do
+    label = "       " <> pad(input.label, @label_width - 3) <> " "
+    rows = Text.wrap(input.value || "—", width - String.length(label) - 2)
+    shown = Enum.take(rows, @value_rows)
+
+    shown =
+      if length(rows) > @value_rows, do: List.update_at(shown, -1, &(&1 <> " …")), else: shown
+
+    indent = String.duplicate(" ", String.length(label))
+
+    shown
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {row, 0} -> [{:dim, label}, {:plain, row}]
+      {row, _} -> [{:plain, indent <> row}]
+    end)
+  end
 
   defp title(text, width), do: Enum.map(Text.wrap(text, width - 2), &[{:bold, " " <> &1}])
 
@@ -407,10 +516,27 @@ defmodule AtlasTui.View do
 
   # Footer
 
+  # The help, or the request line while `:` is open.
+  defp footer_help(%Model{ask: text}, _help) when is_binary(text),
+    do: [
+      [{:bold, " : "}, {:plain, text}, {:cursor, " "}, {:dim, "   ↵ ask the agent   esc close"}]
+    ]
+
+  defp footer_help(_model, help), do: Enum.map(help, &[{:dim, " " <> &1}])
+
   defp help(model, long) do
     cond do
       not model.connected ->
         "q quit"
+
+      Model.step_form(model) && multiline_focused?(model) ->
+        "↵ new line   ↑↓←→ move   tab next field   ctrl-s keep   esc back to the plan"
+
+      Model.step_form(model) ->
+        "↑↓ move   type to edit   ctrl-s keep   esc back to the plan"
+
+      plan = model.plan ->
+        plan_help(plan)
 
       Model.form(model) && multiline_focused?(model) ->
         "↵ new line   ↑↓←→ move   tab next field   ctrl-s save   esc cancel"
@@ -426,6 +552,17 @@ defmodule AtlasTui.View do
           nav(model, long)
     end
   end
+
+  defp plan_help(%Plan{state: "planning"}), do: "esc cancel"
+
+  defp plan_help(%Plan{state: "proposed", steps: []}), do: ": ask again   esc close"
+
+  defp plan_help(%Plan{state: "proposed"}),
+    do:
+      "↑↓ move   space keep/drop   e edit   ↵ run the kept steps   : change the request   esc cancel"
+
+  defp plan_help(%Plan{state: "running"}), do: "esc stop after this step"
+  defp plan_help(%Plan{}), do: "↵ close   : ask again   q quit"
 
   # The help's entries ("key what", three spaces apart) on as many lines as they need;
   # an entry is never split.
@@ -445,7 +582,7 @@ defmodule AtlasTui.View do
   end
 
   defp multiline_focused?(model) do
-    items = Model.focusable(Model.form(model))
+    items = Model.focusable(Model.step_form(model) || Model.form(model))
     match?(%Input{kind: "multiline"}, Enum.at(items, min(model.focus, length(items) - 1)))
   end
 
@@ -456,7 +593,7 @@ defmodule AtlasTui.View do
     move = if Model.list(model), do: "   ↑↓ move   ↵ open", else: ""
     move = if long, do: move <> "   pgup/pgdn scroll", else: move
     back = if model.back, do: "   esc back", else: ""
-    move <> "   r refresh" <> back <> "   q quit"
+    move <> "   r refresh   : ask" <> back <> "   q quit"
   end
 
   defp notice(%Model{notice: nil}), do: []

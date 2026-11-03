@@ -115,6 +115,41 @@
         }
       ],
       "name": "confirm"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "request",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "summary",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "by",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "steps",
+          "required": true,
+          "type": "list of step"
+        }
+      ],
+      "name": "plan"
     }
   ],
   "markup": [
@@ -299,9 +334,44 @@
         }
       ],
       "name": "input"
+    },
+    {
+      "fields": [
+        {
+          "name": "n",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "why",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "detail",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "inputs",
+          "required": false,
+          "type": "list of input"
+        }
+      ],
+      "name": "step"
     }
   ],
-  "version": "0.3.0",
+  "version": "0.4.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

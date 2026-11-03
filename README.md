@@ -16,7 +16,11 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-03.md`: manage the issues of a use case (UC-Atlas-03).
 - `docs/guides/uc-atlas-04.md`: link the pull requests of an issue (UC-Atlas-04).
 - `docs/guides/uc-atlas-16.md`: the agent's tools, and a plan for a request that writes nothing (UC-Atlas-16).
+- `docs/guides/uc-atlas-17.md`: press `:` on any page, say what you want, and decide on the agent's plan (UC-Atlas-17).
+- `docs/guides/uc-atlas-18.md`: watch the agent's steps go one by one, and stop it with `esc` (UC-Atlas-18).
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
+- `docs/guides/uc-atlas-25.md`: how far a scene and its use cases are, from the issues under them (UC-Atlas-25).
+- `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
 
 ```sh
 atlas                     # prod: starts what is needed in the background, then opens a TUI
@@ -34,7 +38,7 @@ atlas set IS-Atlas-33 stage=testing --json
 atlas put pull_request --url https://github.com/eyra/atlas/pull/14 --in IS-Atlas-33 --json
 ```
 
-An agent that plans gets the same actions as tools: `atlas tools` lists them, made from rela's description through Control. `atlas plan --on <code> "<request>"` asks the environment's planner (`agent.planner` in `env/<env>.json`: a local `claude -p` that may only read, or any command) what it would do on that page. It answers steps, each checked against the form it would fill, and writes nothing (UC-Atlas-16).
+An agent that plans gets the same actions as tools: `atlas tools` lists them, made from rela's description through Control. `atlas plan --on <code> "<request>"` asks the environment's planner (`agent.planner` in `env/<env>.json`: a local `claude -p` that may only read, or any command) what it would do on that page. It answers steps, each checked against the form it would fill, and writes nothing (UC-Atlas-16). In the TUI, `:` asks the same agent (`atlas steer`, which the TUI starts) about the page you are on; you keep, edit or drop each step, and `enter` runs the kept ones through Control (UC-Atlas-17).
 
 `--in <code>` names the parent, `--<field>-file <path>` or `--<field> -` (stdin) reads text of several lines, and `atlas get <code>` and `atlas list <kind> [--in <code>]` read. `atlas load-plan <SCENES.md> tools/plan/links.json [--dry-run]` loaded the plan from SCENES.md this way (UC-Atlas-05). It never changes an existing item, and when a code is taken it maps it to the next one.
 
@@ -42,7 +46,7 @@ An agent that plans gets the same actions as tools: `atlas tools` lists them, ma
 
 | Path | What |
 |---|---|
-| `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. |
+| `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. Connectors to outside systems sit at State's edge, in `atlas_state`; GitHub, read-only, is the first. |
 | `clients/tui/` | The TUI, a client of Control. Renders Control's blocks; knows no entity. Not part of the BEAM platform. |
 | `clients/agent/` | The agents' command line (`atlas help/put/set/get/list/tools/plan`), a client of Control like the TUI: it reads pages and fills forms, and knows no entity. The planner boundary (`AtlasAgent.Planner`) is here too. |
 | `tools/plan/` | `atlas load-plan` (UC-Atlas-05): SCENES.md into Atlas through `clients/agent`, with `links.json` for pull requests and stages. |

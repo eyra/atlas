@@ -181,6 +181,72 @@ defmodule AtlasControl.PagesTest do
     refute Pages.shows?({:item, "part", "P-1"}, @d, "gadget")
   end
 
+  # As `rela/atlas.json` adds them: widgets roll up their parts; shade is shown as "Look".
+  @rolled @d
+          |> put_in(["progress"], %{"done" => "done"})
+          |> put_in(["entities", "widget", "progress"], %{"over" => "of_widget", "own" => "shade"})
+          |> put_in(["entities", "part", "progress"], %{"over" => "on_part"})
+          |> put_in(["entities", "widget", "properties", "shade", "label"], "Look")
+
+  test "a list shows how far each fact is, as State works it out, in place of its own field" do
+    answer = %{
+      "facts" => [
+        Map.put(fact("W-1", %{"title" => "One", "shade" => "dark"}), "progress", %{
+          "value" => "fine",
+          "label" => "Fine",
+          "count" => 2,
+          "of" => 3
+        }),
+        Map.put(
+          fact("W-2", %{"title" => "Two", "shade" => "dark", "done" => true}),
+          "progress",
+          %{
+            "done" => true,
+            "label" => "Done",
+            "count" => 3,
+            "of" => 3
+          }
+        ),
+        Map.put(fact("W-3", %{"title" => "Three", "shade" => "dark"}), "progress", %{
+          "value" => "dark",
+          "label" => "Dark"
+        }),
+        fact("W-4", %{"title" => "Four", "shade" => "light"})
+      ]
+    }
+
+    %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @rolled, [answer])
+
+    assert Enum.map(list["rows"], & &1["detail"]) ==
+             ["W-1 · Fine · 2/3", "W-2 · Done · 3/3", "W-3 · Dark", "W-4"]
+
+    # A kind without a rule shows its fields as before.
+    %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @d, [answer])
+    assert hd(list["rows"])["detail"] == "W-1 · Dark"
+  end
+
+  test "a field shows under the description's label for it, on the page and in its form" do
+    answer = %{"fact" => fact("W-1", %{"title" => "One", "shade" => "dark"}), "incoming" => %{}}
+
+    %{blocks: [%{"props" => item} | _]} =
+      Pages.render({:item, "widget", "W-1"}, @rolled, [answer, %{"facts" => []}])
+
+    assert %{"label" => "Look", "value" => "Dark"} in item["fields"]
+
+    %{blocks: [%{"props" => form}]} = Pages.render({:edit, "widget", "W-1"}, @rolled, [answer])
+    assert "Look" in Enum.map(form["inputs"], & &1["label"])
+  end
+
+  test "a hint of a kind under the listed ones refreshes the list, when progress rolls it up" do
+    assert Pages.progress_from(@rolled, "widget") == ["part", "tag"]
+    assert Pages.shows?({:list, "widget"}, @rolled, "part")
+    assert Pages.shows?({:list, "widget"}, @rolled, "tag")
+    # A widget's page lists its parts, whose progress comes from their tags.
+    assert Pages.shows?({:item, "widget", "W-1"}, @rolled, "tag")
+    refute Pages.shows?({:item, "widget", "W-1"}, @d, "tag")
+    refute Pages.shows?({:list, "part"}, @d, "tag")
+  end
+
   test "a create form asks only what the kind's create rule asks; no id" do
     %{blocks: [%{"type" => "form", "props" => form}]} = Pages.render({:new, "widget"}, @d, [])
     assert Enum.map(form["inputs"], & &1["name"]) == ["title", "notes"]
@@ -240,6 +306,49 @@ defmodule AtlasControl.PagesTest do
 
     refute "Ext ref" in labels.(%{"title" => "One"})
     assert "Ext ref" in labels.(%{"title" => "One", "ext_ref" => "X-9"})
+  end
+
+  test "a primary a connector fills names the fact once filled; until then its id's source" do
+    d = put_in(@d, ["entities", "tag", "primary"], "note")
+
+    tags = %{
+      "facts" => [
+        fact("T-a-1", %{"name" => "#a/1"}),
+        fact("T-b-2", %{"name" => "#b/2", "note" => "Two"})
+      ]
+    }
+
+    %{blocks: [%{"props" => list}]} = Pages.render({:list, "tag"}, d, [tags])
+    assert [%{"label" => "#a/1"}, %{"label" => "Two"}] = list["rows"]
+  end
+
+  test "a copy of an outside fact says when it was last read, and why a read failed" do
+    last_read = fn copy ->
+      answer = %{"fact" => fact("T-a-1", %{"name" => "#a/1", "note" => "x"}), "copy" => copy}
+      %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [answer])
+      Enum.find_value(item["fields"], &(&1["label"] == "Last read" && &1["value"]))
+    end
+
+    refute last_read.(nil)
+
+    assert last_read.(%{"source" => "Outside", "read_at" => "2026-11-03T14:05:09Z"}) ==
+             "2026-11-03 14:05 UTC from Outside"
+
+    assert last_read.(%{
+             "source" => "Outside",
+             "read_at" => "2026-11-03T14:05:09Z",
+             "failed_at" => "2026-11-03T14:10:00Z",
+             "failure" => "it answered 503"
+           }) ==
+             "2026-11-03 14:05 UTC from Outside; the read at 2026-11-03 14:10 UTC failed: " <>
+               "it answered 503; it is tried again"
+
+    assert last_read.(%{
+             "source" => "Outside",
+             "read_at" => nil,
+             "failed_at" => "2026-11-03T14:10:00Z",
+             "failure" => "it answered 404"
+           }) =~ "never from Outside; the read at 2026-11-03 14:10 UTC failed"
   end
 
   test "the next free key, and the values of a new fact" do
