@@ -5,6 +5,7 @@ defmodule AtlasTui.App do
   - Every key goes through `AtlasTui.Model`; every message from Control too.
   - Every `reconcile_seconds` it asks Control to refresh the page from State, so a lost
     hint only delays what the screen shows.
+  - A link's key opens its web address in the browser (`AtlasTui.Browser`).
   - When the connection drops it says so, retries every 2 seconds, and on return opens
     the page it was on.
   """
@@ -99,7 +100,11 @@ defmodule AtlasTui.App do
       if state.socket, do: :gen_tcp.close(state.socket)
       :ok
     else
-      Enum.each(effects, fn {:send, message} -> send_line(state, message) end)
+      Enum.each(effects, fn
+        {:send, message} -> send_line(state, message)
+        {:open_url, url} -> AtlasTui.Browser.open(url, state.settings)
+      end)
+
       keys(state, rest)
     end
   end

@@ -290,7 +290,8 @@ defmodule AtlasControl.Pages do
             Blocks.row(
               label: label(spec, fact),
               detail: detail(description, spec, fact),
-              to: path({:item, kind, fact["key"]})
+              to: path({:item, kind, fact["key"]}),
+              links: links(description, spec, fact)
             )
           end)
 
@@ -353,7 +354,8 @@ defmodule AtlasControl.Pages do
                 do: [Blocks.action(label: "Change", key: "e", to: path({:edit, kind, key}))],
                 else: []
               ) ++
-                [Blocks.action(label: "Delete", key: "d", to: path({:delete, kind, key}))]
+                [Blocks.action(label: "Delete", key: "d", to: path({:delete, kind, key}))],
+            links: links(description, spec, fact)
           )
 
         lists =
@@ -513,7 +515,8 @@ defmodule AtlasControl.Pages do
             &Blocks.row(
               label: label(from_spec, &1),
               detail: detail(description, from_spec, &1),
-              to: path({:item, from, &1["key"]})
+              to: path({:item, from, &1["key"]}),
+              links: links(description, from_spec, &1)
             )
           )
 
@@ -571,6 +574,26 @@ defmodule AtlasControl.Pages do
         keys != [],
         do: {String.capitalize(spec["label"] || relation), keys}
   end
+
+  # The fact's web address, opened outside the client: its first field whose type the
+  # description marks as a URL (`"format": "url"`), when it has a value. A client opens
+  # only http and https, and Control offers nothing else. Nil when there is none.
+  defp links(description, spec, fact) do
+    urls =
+      for {name, prop} <- ordered(spec),
+          url?(description, prop),
+          value = fact["values"][name],
+          is_binary(value) and String.match?(value, ~r{^https?://\S+$}i),
+          do: value
+
+    case urls do
+      [url | _] -> [Blocks.link(label: "Open in browser", key: "o", url: url)]
+      [] -> nil
+    end
+  end
+
+  defp url?(description, prop),
+    do: prop["format"] == "url" or get_in(description, ["types", prop["type"], "format"]) == "url"
 
   defp parent_kind(description, {:new, _kind, {relation, _parent}}),
     do: description |> get_in(["relations", relation, "to"]) |> List.wrap() |> List.first()

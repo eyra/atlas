@@ -9,6 +9,8 @@ defmodule AtlasControl.FakeStore do
 
   def description do
     %{
+      # As `rela/atlas.json` adds it: values of this type are web addresses.
+      "types" => %{"web_address" => %{"format" => "url"}},
       "entities" => %{
         "widget" => %{
           "label" => "Widget",
@@ -49,7 +51,9 @@ defmodule AtlasControl.FakeStore do
           "id_prefixes" => ["T-"],
           "properties" => %{
             "name" => %{"type" => "string", "required" => true},
-            "note" => %{"type" => "string", "set_by" => "connector"}
+            "note" => %{"type" => "string", "set_by" => "connector"},
+            # Of a type `rela/atlas.json` marks as web addresses.
+            "site" => %{"type" => "web_address", "set_by" => "connector"}
           },
           "create" => %{
             "ask" => ["name"],
