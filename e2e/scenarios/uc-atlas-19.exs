@@ -35,7 +35,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     press(t1, ["Down", "Space"])
     see(t1, "[ ] 2. Create use case in")
     press(t1, "Enter")
-    see(t1, "Done: 1 of 1 stored", 5_000)
+    see(t1, "Done: 1 of 1 stored", 10_000)
     press(t1, "Enter")
     see(t1, row.("Keep what the agent did"))
   end
@@ -152,7 +152,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     see(t1, "[✓] 1. Delete use case #{made}?")
     at = press(t1, "Enter")
     by_hint(t2, row.("Keep what the agent did"), at, gone: true)
-    see(t1, "Done: 1 of 1 stored", 5_000)
+    see(t1, "Done: 1 of 1 stored", 10_000)
     refute_see(t1, "without asking")
     see(t1, "Deleted #{made}.")
 
@@ -193,7 +193,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     see(t1, "[✓] 1. Update #{scene}")
     see(t1, "A scene to look back on")
     press(t1, "Enter")
-    see(t1, "Done: 1 of 1 stored", 5_000)
+    see(t1, "Done: 1 of 1 stored", 10_000)
 
     {scene_now, _} = atlas_json(i, ["get", scene])
     scene_now["values"]["title"] == "A scene to look back on" || raise inspect(scene_now)

@@ -955,6 +955,75 @@ defmodule AtlasControl.PagesTest do
     assert [%{"id" => "L-02"}] = redone["props"]["rows"]
   end
 
+  # An association from two kinds to two kinds, as an owner is (made-up kinds).
+  @held @d
+        |> put_in(["entities", "keeper"], %{
+          "label" => "Keeper",
+          "plural" => "keepers",
+          "primary" => "title",
+          "properties" => %{"title" => %{"type" => "string"}}
+        })
+        |> put_in(["relations", "held_by"], %{
+          "label" => "held by",
+          "from" => ["widget", "part"],
+          "to" => ["tag", "keeper"],
+          "max_outgoing" => 1,
+          "inverse" => %{"id" => "holdings", "label" => "holdings"}
+        })
+
+  test "a relation from several kinds: one list per kind on the page it points at" do
+    reads = Pages.reads({:item, "keeper", "K-1"}, @held)
+    assert {"widget", %{"linked" => %{"held_by" => "K-1"}}} in reads
+    assert {"part", %{"linked" => %{"held_by" => "K-1"}}} in reads
+
+    answer = %{"fact" => fact("K-1", %{"title" => "Keeps"})}
+    widgets = %{"facts" => [fact("W-1", %{"title" => "One"})]}
+
+    answers =
+      for {kind, _} <- tl(reads), do: if(kind == "widget", do: widgets, else: %{"facts" => []})
+
+    page = Pages.render({:item, "keeper", "K-1"}, @held, [answer | answers])
+
+    held = Enum.find(page.blocks, &(&1["id"] == "list:held_by:widget"))
+    assert [%{"id" => "W-1"}] = held["props"]["rows"]
+    # An empty list of an association does not show.
+    refute Enum.find(page.blocks, &(&1["id"] == "list:held_by:part"))
+
+    assert %{"props" => %{"title" => "Holdings: Widgets"}} =
+             Enum.find(
+               page.markup,
+               &(&1["kind"] == "section" and &1["start"] == "list:held_by:widget")
+             )
+  end
+
+  test "a relation to several kinds: the row opens the kind State says the key is" do
+    answer = %{
+      "fact" =>
+        fact("W-1", %{"title" => "One"})
+        |> Map.put("links", %{"held_by" => ["K-1"]})
+        |> Map.put("link_kinds", %{"held_by" => %{"K-1" => "keeper"}})
+    }
+
+    reads = Pages.reads({:item, "widget", "W-1"}, @held)
+
+    page =
+      Pages.render({:item, "widget", "W-1"}, @held, [
+        answer | for(_ <- tl(reads), do: %{"facts" => []})
+      ])
+
+    held = Enum.find(page.blocks, &(&1["id"] == "parent:held_by"))
+
+    assert [%{"id" => "K-1", "label" => "Keeper", "to" => "/k/keeper/K-1"}] =
+             held["props"]["rows"]
+
+    # The links page offers the facts of every kind it may point at.
+    assert Pages.reads({:links, "widget", "W-1", "held_by"}, @held) == [
+             {"widget", %{"key" => "W-1"}},
+             {"tag", %{}},
+             {"keeper", %{}}
+           ]
+  end
+
   test "the kinds page names the kinds that hold a record" do
     %{blocks: blocks} =
       Pages.render(:kinds, put_in(@logged, ["entities", "log", "agent"], "request"), [])

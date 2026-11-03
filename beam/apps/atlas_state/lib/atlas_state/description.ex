@@ -24,7 +24,9 @@ defmodule AtlasState.Description do
 
   @doc """
   The links a new fact of `kind` asks for (`%{relation => [keys]}`), checked against the
-  description and resolved to `%{relation => {target kind, keys}}` for rela.
+  description and resolved to `%{relation => {target kind, keys}}` for rela. A relation
+  that points at several kinds gives the list of them (`{[kind], keys}`); which one each
+  key is, State finds out (`AtlasState.Server`).
   """
   def targets(description, kind, links) when is_map(links) do
     relations = description["relations"] || %{}
@@ -43,8 +45,8 @@ defmodule AtlasState.Description do
           not (is_list(keys) and Enum.all?(keys, &(is_binary(&1) and &1 != ""))) ->
             "#{relation} needs a list of keys"
 
-          length(spec["to"] || []) != 1 ->
-            "#{relation} has no single kind to point at"
+          (spec["to"] || []) == [] ->
+            "#{relation} points at no kind"
 
           is_integer(spec["max_outgoing"]) and length(keys) > spec["max_outgoing"] ->
             "#{relation} allows at most #{spec["max_outgoing"]}"
@@ -54,7 +56,7 @@ defmodule AtlasState.Description do
         end
 
       case {acc, problem} do
-        {{:ok, targets}, nil} -> {:ok, Map.put(targets, relation, {hd(spec["to"]), keys})}
+        {{:ok, targets}, nil} -> {:ok, Map.put(targets, relation, {to(spec["to"]), keys})}
         {{:ok, _}, problem} -> {:error, [problem]}
         {{:error, problems}, nil} -> {:error, problems}
         {{:error, problems}, problem} -> {:error, problems ++ [problem]}
@@ -63,6 +65,9 @@ defmodule AtlasState.Description do
   end
 
   def targets(_description, _kind, _links), do: {:error, ["links must be a map"]}
+
+  defp to([kind]), do: kind
+  defp to(kinds), do: kinds
 
   @doc """
   Check `values` against the description of `kind` before rela sees them, because the

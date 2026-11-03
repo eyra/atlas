@@ -222,8 +222,16 @@ defmodule AtlasState.Server do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
          {:ok, [fact]} <- with_progress(state, kind, [fact]),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
+      wired = wire(state, kind, fact)
+
+      wired =
+        case link_kinds(state, kind, wired["links"]) do
+          kinds when kinds == %{} -> wired
+          kinds -> Map.put(wired, "link_kinds", kinds)
+        end
+
       answer = %{
-        "fact" => wire(state, kind, fact),
+        "fact" => wired,
         "incoming" => incoming,
         "history" => Links.all(state.links, kind, key)
       }
@@ -280,7 +288,8 @@ defmodule AtlasState.Server do
         result =
           case Description.targets(state.description, kind, content["links"] || %{}) do
             {:ok, targets} ->
-              with :ok <- targets_exist(state, op, targets) do
+              with {:ok, targets} <- target_kinds(state, op, targets),
+                   :ok <- targets_exist(state, op, targets) do
                 store(state.rela, spec, op, key, values, content["version"], targets)
               end
 
@@ -400,6 +409,72 @@ defmodule AtlasState.Server do
     Enum.all?(targets, fn {relation, {_kind, keys}} ->
       Enum.sort(fact.links[relation] || []) == Enum.sort(keys)
     end)
+  end
+
+  # A relation that points at several kinds: which kind each
+  # key is, found by reading it in each. rela takes one kind per link, so all keys of the
+  # relation must be of one; a key of none, or of two, is refused.
+  defp target_kinds(state, op, targets) when op in ["create", "change"] do
+    Enum.reduce_while(targets, {:ok, %{}}, fn
+      {relation, {kinds, keys}}, {:ok, acc} when is_list(kinds) ->
+        case key_kinds(state, kinds, keys) do
+          {:ok, kind} -> {:cont, {:ok, Map.put(acc, relation, {kind, keys})}}
+          {:refused, _} = refused -> {:halt, refused}
+        end
+
+      {relation, target}, {:ok, acc} ->
+        {:cont, {:ok, Map.put(acc, relation, target)}}
+    end)
+  end
+
+  defp target_kinds(_state, _op, targets), do: {:ok, targets}
+
+  # Removing the links: any of the kinds will do.
+  defp key_kinds(_state, [kind | _], []), do: {:ok, kind}
+
+  defp key_kinds(state, kinds, keys) do
+    found =
+      for key <- keys,
+          into: %{},
+          do: {key, Enum.filter(kinds, &kind_has?(state, &1, key))}
+
+    case found |> Map.values() |> List.flatten() |> Enum.uniq() do
+      [kind] ->
+        if Enum.all?(found, fn {_, of} -> of == [kind] end),
+          do: {:ok, kind},
+          else: {:refused, missing_keys(found, kinds)}
+
+      [] ->
+        {:refused, missing_keys(found, kinds)}
+
+      several ->
+        {:refused,
+         [
+           "#{Enum.join(keys, ", ")} must all be one kind; they are #{Enum.join(several, " and ")}"
+         ]}
+    end
+  end
+
+  defp missing_keys(found, kinds) do
+    for {key, []} <- found, do: "#{key} is not a #{Enum.join(kinds, " or ")}"
+  end
+
+  defp kind_has?(state, kind, key) do
+    plural = get_in(state.description, ["entities", kind, "plural"])
+    match?({:ok, _}, Rela.get(state.rela, plural, key))
+  end
+
+  # The kind of each key a fact links to through a relation that points at several kinds,
+  # so a client can open it: `%{relation => %{key => kind}}`. Only for one fact.
+  defp link_kinds(state, kind, links) do
+    for {relation, %{"to" => [_, _ | _] = kinds, "from" => from}} <-
+          state.description["relations"] || %{},
+        kind in from,
+        keys = links[relation] || [],
+        keys != [],
+        into: %{} do
+      {relation, Map.new(keys, fn key -> {key, Enum.find(kinds, &kind_has?(state, &1, key))} end)}
+    end
   end
 
   # The current rela answers 422 to a create that links to a missing fact, but stores the
