@@ -69,26 +69,20 @@ defmodule AtlasControl.PagesTest do
     } =
       Pages.render({:item, "widget", "W-1"}, @d, [answer, parts])
 
-    # Two parts side by side: the content (the fact) and its references (the related
-    # list, in a section that carries its title).
+    # Two parts, by what they hold: the main part (the fact) and the related part (the
+    # related list, in a section that carries its title). Nothing about how they look.
     assert [
              %{
-               "kind" => "columns",
-               "start" => "item",
-               "end" => "list:of_widget",
-               "props" => %{"count" => 2}
-             },
-             %{
-               "kind" => "border",
+               "kind" => "part",
                "start" => "item",
                "end" => "item",
-               "props" => %{"title" => "Content"}
+               "props" => %{"title" => "Content", "role" => "main"}
              },
              %{
-               "kind" => "border",
+               "kind" => "part",
                "start" => "list:of_widget",
                "end" => "list:of_widget",
-               "props" => %{"title" => "References"}
+               "props" => %{"title" => "References", "role" => "related"}
              },
              %{
                "kind" => "section",
