@@ -233,6 +233,27 @@ defmodule AtlasFlowTest do
       eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
     end
 
+    test "State does not answer whether the owner exists: nothing is written, not half" do
+      FakeState.put("box", %{"key" => "B-1", "progress" => %{"value" => "check"}})
+      GenServer.call(FakeState, {:busy, "clerk", "ada"})
+      engine()
+      eventually(fn -> elem(FakeState.reads(), 1) >= 1 and alive("B-1") end)
+      Process.sleep(200)
+      assert FakeState.sent() == []
+
+      # State answers again: the next look writes both, in one change.
+      GenServer.call(FakeState, {:free, "clerk", "ada"})
+      :ok = AtlasBus.attach("tester-#{System.unique_integer([:positive])}")
+
+      {:stored, _} =
+        AtlasFlow.Talk.put("box", %{"op" => "change", "key" => "B-1", "values" => %{}})
+
+      eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
+
+      assert [%{"values" => %{"todo" => "Check it"}, "links" => %{"owned_by" => ["ada"]}}] =
+               Enum.filter(FakeState.sent(), &(&1["by"] == "flow"))
+    end
+
     test "a fact made later gets its process from its hint" do
       engine()
       FakeState.put("box", %{"key" => "B-7"})

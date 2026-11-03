@@ -120,6 +120,14 @@ defmodule AtlasState.Description do
   defp check_value(%{"type" => "integer"}, name, value),
     do: if(is_integer(value), do: [], else: ["#{name} must be a whole number"])
 
+  # rela stores a datetime that is none with a warning only; empty clears it.
+  defp check_value(%{"type" => "datetime"}, name, value) do
+    case is_binary(value) and (value == "" or match?({:ok, _, _}, DateTime.from_iso8601(value))) do
+      true -> []
+      false -> ["#{name} must be a date and time, e.g. 2026-11-04T17:00:00Z"]
+    end
+  end
+
   defp check_value(_spec, name, value),
     do: if(is_binary(value), do: [], else: ["#{name} must be text"])
 

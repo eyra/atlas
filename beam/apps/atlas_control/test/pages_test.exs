@@ -940,6 +940,66 @@ defmodule AtlasControl.PagesTest do
     refute Pages.shows?({:list, "log"}, @counted, "helper")
   end
 
+  # Tasks are made and deleted with something else, changed by hand only; each has an
+  # optional time it is due, and is late (State says) once that has passed.
+  @due @d
+       |> put_in(["entities", "task"], %{
+         "label" => "Task",
+         "plural" => "tasks",
+         "primary" => "title",
+         "id_prefixes" => ["T-"],
+         "top" => false,
+         "by_hand" => "update",
+         "late" => %{"after" => "due", "while" => "todo", "label" => "overdue"},
+         "properties" => %{
+           "title" => %{"type" => "string", "required" => true},
+           "todo" => %{"type" => "string", "set_by" => "flow"},
+           "due" => %{"type" => "datetime"}
+         }
+       })
+
+  test "a kind changed by hand only, with a time it is due: shown, marked late, typed" do
+    spec = @due["entities"]["task"]
+
+    task =
+      fact("T-1", %{"title" => "Wrap", "todo" => "Wrap it", "due" => "2026-11-04T11:00:00Z"})
+      |> Map.put("late", true)
+
+    answers =
+      [
+        %{"fact" => task}
+        | for(_ <- tl(Pages.reads({:item, "task", "T-1"}, @due)), do: %{"facts" => []})
+      ]
+
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "task", "T-1"}, @due, answers)
+    assert Enum.map(item["actions"], & &1["key"]) == ["u"]
+    assert %{"label" => "Due", "value" => "2026-11-04 11:00 UTC · overdue"} in item["fields"]
+
+    # Not late (State left it out): the time alone.
+    answers = [%{"fact" => Map.delete(task, "late")} | tl(answers)]
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "task", "T-1"}, @due, answers)
+    assert %{"label" => "Due", "value" => "2026-11-04 11:00 UTC"} in item["fields"]
+
+    # A list says that it is late, first, and when it was due; nothing to make one with.
+    %{blocks: [%{"props" => list}]} =
+      Pages.render({:list, "task"}, @due, [%{"facts" => [task]}])
+
+    assert [%{"detail" => "Overdue · due 2026-11-04 11:00"}] = list["rows"]
+    assert list["actions"] == []
+
+    # A form's time is UTC, with or without the T and seconds; an offset is turned to UTC.
+    assert Pages.values_for(spec, %{"due" => "2026-11-04 17:00"}) == %{
+             "due" => "2026-11-04T17:00:00Z"
+           }
+
+    assert Pages.values_for(spec, %{"due" => "2026-11-04T18:00:00+01:00"}) == %{
+             "due" => "2026-11-04T17:00:00Z"
+           }
+
+    assert Pages.values_for(spec, %{"due" => "tomorrow"}) == %{"due" => "tomorrow"}
+    assert Pages.values_for(spec, %{"due" => ""}) == %{"due" => ""}
+  end
+
   test "a kind made by no key: its page has no actions, its entries no add" do
     answer = %{"fact" => fact("L-01", %{"title" => "First"})}
     entries = %{"facts" => [fact("E-01", %{"title" => "Made W-1", "about" => "W-1"})]}

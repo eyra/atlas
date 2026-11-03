@@ -47,4 +47,42 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
     see(t1, "Agent ada: Ada")
     see(t1, ~r/AS-#{key}\s+#{key}/)
   end
+
+  # IS-Atlas-14: an optional deadline on the Assignment; late is worked out on read.
+  step "A deadline that has passed: the Assignment is late, on its page and in Ada's list", fn ->
+    key = Process.get(:uc06)
+
+    {got, at} =
+      atlas_json(i, ["set", "AS-#{key}", "deadline=2020-01-02 12:00", "--cause", "due then"])
+
+    got["values"]["deadline"] == "2020-01-02T12:00:00Z" || raise inspect(got["values"])
+    by_hint(t1, ~r/AS-#{key}\s+#{key}\s+Late · deadline 2020-01-02 12:00/, at)
+
+    {text, 0, _} = atlas(i, ["get", key])
+    text =~ "Deadline: 2020-01-02 12:00 UTC · late" || raise text
+  end
+
+  step "A deadline still to come is not late; one that is no time is refused", fn ->
+    key = Process.get(:uc06)
+    {_, at} = atlas_json(i, ["set", "AS-#{key}", "deadline=2099-01-02T12:00:00Z"])
+    by_hint(t1, ~r/AS-#{key}\s+#{key}\s+Deadline 2099-01-02 12:00/, at)
+    refute_see(t1, "Late ·")
+
+    {%{"refused" => [why | _]}, _} =
+      atlas_json(i, ["set", "AS-#{key}", "deadline=tomorrow"], 1)
+
+    why =~ "deadline" || raise why
+  end
+
+  step "u on the Assignment changes its deadline by hand; nothing else is offered", fn ->
+    key = Process.get(:uc06)
+    open_row(t1, "AS-#{key}")
+    see(t1, "Assignment AS-#{key}: #{key}")
+    screen = see(t1, "u Update")
+    screen =~ "d Delete" && raise "an Assignment goes with its fact: #{screen}"
+    press(t1, "u")
+    see(t1, "Update AS-#{key}")
+    see(t1, "Deadline")
+    press(t1, "Escape")
+  end
 end
