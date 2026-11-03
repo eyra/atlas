@@ -17,6 +17,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-04.md`: link the pull requests of an issue (UC-Atlas-04).
 - `docs/guides/uc-atlas-16.md`: the agent's tools, and a plan for a request that writes nothing (UC-Atlas-16).
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
+- `docs/guides/uc-atlas-25.md`: how far a scene and its use cases are, from the issues under them (UC-Atlas-25).
 - `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
 
 ```sh

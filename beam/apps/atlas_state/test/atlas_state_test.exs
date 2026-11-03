@@ -176,6 +176,47 @@ defmodule AtlasStateTest do
     refute Map.has_key?(description, "_about")
   end
 
+  test "reads carry how far a fact is, from the facts under it, as the description's rule says",
+       %{rela: rela, dir: dir} do
+    extra = Path.join(dir, "atlas.json")
+
+    File.write!(
+      extra,
+      ~s({"progress": {"order": ["rough", "fine"]},
+      "entities": {"widget": {"progress": {"over": "of_widget", "field": "phase", "own": "shade"}}}})
+    )
+
+    stop_supervised!(AtlasState.Server)
+
+    start_supervised!(
+      {AtlasState.Server, rela: {FakeRela, rela}, data_dir: dir, description_extra: extra}
+    )
+
+    fact("create", "W-1", %{"title" => "One"})
+    fact("create", "W-2", %{"title" => "Two", "shade" => "dark"})
+
+    for {key, phase} <- [{"P-1", "fine"}, {"P-2", "rough"}, {"P-3", "fine"}] do
+      {:ok, _} =
+        FakeRela.create(rela, "parts", key, %{"title" => key, "phase" => phase}, %{
+          "of_widget" => {"widget", ["W-1"]}
+        })
+    end
+
+    assert %{"fact" => %{"progress" => %{"value" => "rough", "count" => 1, "of" => 3}}} =
+             read("widget", %{"key" => "W-1"})
+
+    assert %{"fact" => %{"progress" => %{"value" => "dark", "label" => "dark"}}} =
+             read("widget", %{"key" => "W-2"})
+
+    # Nothing is stored: a change under it shows on the next read.
+    FakeRela.poke(rela, "P-2", %{"phase" => "fine"})
+
+    assert %{"fact" => %{"progress" => %{"value" => "fine", "count" => 3, "of" => 3}}} =
+             read("widget", %{"key" => "W-1"})
+
+    refute Map.has_key?(elem(FakeRela.facts(rela)["W-1"], 0), "progress")
+  end
+
   test "a create can link to the fact it belongs to; reads show the link and filter by it", _ do
     fact("create", "W-1", %{"title" => "One"})
     fact("create", "W-2", %{"title" => "Two"})

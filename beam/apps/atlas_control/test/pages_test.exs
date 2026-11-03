@@ -181,6 +181,72 @@ defmodule AtlasControl.PagesTest do
     refute Pages.shows?({:item, "part", "P-1"}, @d, "gadget")
   end
 
+  # As `rela/atlas.json` adds them: widgets roll up their parts; shade is shown as "Look".
+  @rolled @d
+          |> put_in(["progress"], %{"done" => "done"})
+          |> put_in(["entities", "widget", "progress"], %{"over" => "of_widget", "own" => "shade"})
+          |> put_in(["entities", "part", "progress"], %{"over" => "on_part"})
+          |> put_in(["entities", "widget", "properties", "shade", "label"], "Look")
+
+  test "a list shows how far each fact is, as State works it out, in place of its own field" do
+    answer = %{
+      "facts" => [
+        Map.put(fact("W-1", %{"title" => "One", "shade" => "dark"}), "progress", %{
+          "value" => "fine",
+          "label" => "Fine",
+          "count" => 2,
+          "of" => 3
+        }),
+        Map.put(
+          fact("W-2", %{"title" => "Two", "shade" => "dark", "done" => true}),
+          "progress",
+          %{
+            "done" => true,
+            "label" => "Done",
+            "count" => 3,
+            "of" => 3
+          }
+        ),
+        Map.put(fact("W-3", %{"title" => "Three", "shade" => "dark"}), "progress", %{
+          "value" => "dark",
+          "label" => "Dark"
+        }),
+        fact("W-4", %{"title" => "Four", "shade" => "light"})
+      ]
+    }
+
+    %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @rolled, [answer])
+
+    assert Enum.map(list["rows"], & &1["detail"]) ==
+             ["W-1 · Fine · 2/3", "W-2 · Done · 3/3", "W-3 · Dark", "W-4"]
+
+    # A kind without a rule shows its fields as before.
+    %{blocks: [%{"props" => list}]} = Pages.render({:list, "widget"}, @d, [answer])
+    assert hd(list["rows"])["detail"] == "W-1 · Dark"
+  end
+
+  test "a field shows under the description's label for it, on the page and in its form" do
+    answer = %{"fact" => fact("W-1", %{"title" => "One", "shade" => "dark"}), "incoming" => %{}}
+
+    %{blocks: [%{"props" => item} | _]} =
+      Pages.render({:item, "widget", "W-1"}, @rolled, [answer, %{"facts" => []}])
+
+    assert %{"label" => "Look", "value" => "Dark"} in item["fields"]
+
+    %{blocks: [%{"props" => form}]} = Pages.render({:edit, "widget", "W-1"}, @rolled, [answer])
+    assert "Look" in Enum.map(form["inputs"], & &1["label"])
+  end
+
+  test "a hint of a kind under the listed ones refreshes the list, when progress rolls it up" do
+    assert Pages.progress_from(@rolled, "widget") == ["part", "tag"]
+    assert Pages.shows?({:list, "widget"}, @rolled, "part")
+    assert Pages.shows?({:list, "widget"}, @rolled, "tag")
+    # A widget's page lists its parts, whose progress comes from their tags.
+    assert Pages.shows?({:item, "widget", "W-1"}, @rolled, "tag")
+    refute Pages.shows?({:item, "widget", "W-1"}, @d, "tag")
+    refute Pages.shows?({:list, "part"}, @d, "tag")
+  end
+
   test "a create form asks only what the kind's create rule asks; no id" do
     %{blocks: [%{"type" => "form", "props" => form}]} = Pages.render({:new, "widget"}, @d, [])
     assert Enum.map(form["inputs"], & &1["name"]) == ["title", "notes"]

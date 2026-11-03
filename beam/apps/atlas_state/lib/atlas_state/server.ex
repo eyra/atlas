@@ -9,7 +9,8 @@ defmodule AtlasState.Server do
     for those that point at `key`), one fact (`"key" => key`) with the keys of the facts
     that point at it and, for a copy of an outside fact, when a connector last read it
     (`"copy"`, see `AtlasState.Copies`), or (kind `_description`) rela's description.
-    Facts carry their outgoing `links`.
+    Facts carry their outgoing `links`, and their `progress` when the description has a
+    rule for their kind (`AtlasState.Progress`): worked out on every read, never stored.
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
@@ -21,7 +22,7 @@ defmodule AtlasState.Server do
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Copies, Description, Ledger, Rela}
+  alias AtlasState.{Copies, Description, Ledger, Progress, Rela}
 
   @description "_description"
 
@@ -141,31 +142,30 @@ defmodule AtlasState.Server do
     with {:ok, spec, state} <- kind_spec(state, kind) do
       case content do
         %{"key" => key} -> {read_one(state, kind, spec, key), state}
-        %{"linked" => linked} when is_map(linked) -> {read_all(state, spec, linked), state}
-        _ -> {read_all(state, spec, %{}), state}
+        %{"linked" => linked} when is_map(linked) -> {read_all(state, kind, spec, linked), state}
+        _ -> {read_all(state, kind, spec, %{}), state}
       end
     else
       {:error, reason, state} -> {%{"error" => reason}, state}
     end
   end
 
-  defp read_all(state, spec, linked) do
-    case Rela.list(state.rela, spec["plural"]) do
-      {:ok, facts} ->
-        facts =
-          Enum.filter(facts, fn fact ->
-            Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
-          end)
-
-        %{"facts" => Enum.map(facts, &wire/1)}
-
-      {:error, _} ->
-        %{"error" => "rela is not reachable"}
+  defp read_all(state, kind, spec, linked) do
+    with {:ok, facts} <- Rela.list(state.rela, spec["plural"]),
+         facts =
+           Enum.filter(facts, fn fact ->
+             Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
+           end),
+         {:ok, facts} <- with_progress(state, kind, facts) do
+      %{"facts" => Enum.map(facts, &wire/1)}
+    else
+      {:error, _} -> %{"error" => "rela is not reachable"}
     end
   end
 
   defp read_one(state, kind, spec, key) do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
+         {:ok, [fact]} <- with_progress(state, kind, [fact]),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
       answer = %{"fact" => wire(fact), "incoming" => incoming}
 
@@ -189,13 +189,23 @@ defmodule AtlasState.Server do
     end)
   end
 
-  defp wire(fact),
-    do: %{
+  # How far each fact is, from the facts under it, as the description's rule says.
+  defp with_progress(state, kind, facts) do
+    Progress.annotate(state.description, kind, facts, fn of ->
+      Rela.list(state.rela, get_in(state.description, ["entities", of, "plural"]))
+    end)
+  end
+
+  defp wire(fact) do
+    wired = %{
       "key" => fact.key,
       "values" => fact.properties,
       "links" => fact[:links] || %{},
       "version" => fact.version
     }
+
+    if fact[:progress], do: Map.put(wired, "progress", fact.progress), else: wired
+  end
 
   # Facts
 

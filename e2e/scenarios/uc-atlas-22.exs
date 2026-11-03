@@ -40,7 +40,7 @@ scenario "UC-Atlas-22: Create and change items from the command line", fn %{
 
     changed["values"]["status"] == "ready_to_pick_up" || raise inspect(changed)
     by_hint(t1, "#{title} (changed)", at)
-    see(t1, ~r/Status\s+Ready to pick up/)
+    see(t1, ~r/Flux group\s+Ready to pick up/)
     by_hint(t2, "#{title} (changed)", at)
   end
 
