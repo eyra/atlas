@@ -10,6 +10,18 @@ defmodule AtlasE2E.Scenario do
     and TUI 2 shows it by hint, within 1 second of the key that saved it. Every TUI also
     reconciles every 5 seconds, but that is a fallback: a change that shows only by a
     reconcile, or later than 1 second, fails the step.
+
+  What makes a check trustworthy on a busy machine (IS-Atlas-68), here for every
+  scenario rather than in each:
+
+  - A screen counts only once it has settled: the TUI writes a frame in pieces, and a
+    capture between two pieces shows half a page. A match is checked again on the
+    settled screen (`settled/1`), and that screen is what a step reads on.
+  - A key goes to a settled screen, so it acts on the page it was meant for, and the
+    1 second of `stored/3` and `by_hint/3` starts when it is sent.
+  - A check that is about to fail reads the screen once more.
+  - The TUIs wait longer for the rest of a key's escape sequence (`escape_ms` in the
+    run's settings), so `\\e[B` never turns into Escape and "[B".
   """
 
   alias AtlasE2E.Tui
@@ -18,6 +30,10 @@ defmodule AtlasE2E.Scenario do
   @first_page ~r/● connected · /
   @quick 1_000
   @poll 20
+  # A screen has settled when two captures this far apart are the same.
+  @settle 40
+  # How long a key waits for a screen that keeps changing (a running plan) before it goes.
+  @settle_wait 1_000
 
   defmodule Failure do
     defexception [:message]
@@ -48,14 +64,50 @@ defmodule AtlasE2E.Scenario do
 
   # Keys
 
-  @doc "Press keys (tmux names); returns when they were sent, for `stored/3` and `by_hint/3`."
+  @doc """
+  Press keys (tmux names) on the settled screen; returns when they were sent, for
+  `stored/3` and `by_hint/3`.
+  """
   def press(tui, keys) do
+    settled(tui)
     at = %{ms: now(), clock: clock()}
     Tui.keys(tui, List.wrap(keys))
     at
   end
 
-  def type(tui, text), do: Tui.type(tui, text)
+  def type(tui, text) do
+    settled(tui)
+    Tui.type(tui, text)
+  end
+
+  @doc """
+  The screen once it has settled: two captures #{40} ms apart that are the same. A screen
+  that keeps changing (a plan that runs) is taken as it is after #{1_000} ms.
+  """
+  def settled(tui) do
+    screen = Tui.screen(tui)
+
+    # The same as the last settled screen of this TUI is a whole frame already: no wait.
+    if screen == Process.get({:settled, tui.name}),
+      do: screen,
+      else: settled(tui, screen, now() + @settle_wait)
+  end
+
+  defp settled(tui, screen, deadline) do
+    Process.sleep(@settle)
+    again = Tui.screen(tui)
+
+    cond do
+      again == screen -> remember(tui, screen)
+      now() >= deadline -> again
+      true -> settled(tui, again, deadline)
+    end
+  end
+
+  defp remember(tui, screen) do
+    Process.put({:settled, tui.name}, screen)
+    screen
+  end
 
   @doc "Resize the TUI's terminal; the TUI redraws for its new size by itself."
   def resize(tui, width, height), do: Tui.resize(tui, width, height)
@@ -111,7 +163,7 @@ defmodule AtlasE2E.Scenario do
   end
 
   def refute_see(tui, pattern) do
-    screen = Tui.screen(tui)
+    screen = settled(tui)
 
     if matches?(screen, pattern),
       do: fail(tui, "shows #{inspect(pattern)}, which it should not", screen)
@@ -146,7 +198,7 @@ defmodule AtlasE2E.Scenario do
 
   @doc "The first group of `regex` on the screen."
   def capture(tui, regex) do
-    screen = Tui.screen(tui)
+    screen = settled(tui)
 
     case Regex.run(regex, screen) do
       [_, value | _] -> value
@@ -187,7 +239,7 @@ defmodule AtlasE2E.Scenario do
   """
   def home(tui) do
     Enum.reduce_while(1..8, nil, fn _, _ ->
-      screen = Tui.screen(tui)
+      screen = settled(tui)
 
       if screen =~ ~r/esc (back|cancel|stop)|y confirm|↵ (back|close)/ do
         Tui.keys(tui, [if(screen =~ "y confirm", do: "n", else: "Escape")])
@@ -214,7 +266,7 @@ defmodule AtlasE2E.Scenario do
     see(tui, text)
 
     Enum.reduce_while(1..40, nil, fn _, _ ->
-      screen = Tui.screen(tui)
+      screen = settled(tui)
 
       cond do
         screen =~ ~r/› .*#{Regex.escape(text)}/ ->
@@ -229,33 +281,55 @@ defmodule AtlasE2E.Scenario do
     end)
     |> case do
       :ok -> :ok
-      _ -> fail(tui, "has no row #{inspect(text)}", Tui.screen(tui))
+      _ -> fail(tui, "has no row #{inspect(text)}", settled(tui))
     end
   end
 
   # Waiting
 
+  # The time is the first capture that matched; confirming it takes a moment more.
   defp quick(tui, at, ok?, what, note) do
     left = max(at.ms + @quick - now(), 0)
-    screen = wait(tui, left, ok?, "#{what} within #{@quick} ms of the key")
-    Process.put(:e2e_notes, ["#{note} in #{now() - at.ms} ms" | Process.get(:e2e_notes)])
+    {screen, seen} = wait_at(tui, left, ok?, "#{what} within #{@quick} ms of the key")
+    Process.put(:e2e_notes, ["#{note} in #{seen - at.ms} ms" | Process.get(:e2e_notes)])
     screen
   end
 
-  defp wait(tui, within, ok?, what, quiet \\ false) do
+  defp wait(tui, within, ok?, what, quiet \\ false),
+    do: tui |> wait_at(within, ok?, what, quiet) |> elem(0)
+
+  defp wait_at(tui, within, ok?, what, quiet \\ false) do
     deadline = now() + within
     poll(tui, deadline, ok?, what, quiet)
   end
 
+  # A match counts only on a settled screen, so never on half a frame.
   defp poll(tui, deadline, ok?, what, quiet) do
+    seen = now()
     screen = Tui.screen(tui)
 
     cond do
       ok?.(screen) ->
-        screen
+        last = settled(tui)
 
-      now() >= deadline ->
-        if quiet, do: screen, else: fail(tui, "did not #{what}", screen)
+        cond do
+          ok?.(last) -> {last, seen}
+          # A screen that keeps flipping in and out of the match: take the match.
+          now() >= deadline + @settle_wait -> {screen, seen}
+          true -> poll(tui, deadline, ok?, what, quiet)
+        end
+
+      # At the deadline one more capture, at once: the last one may be from just before a
+      # redraw. It does not stretch the time limit by more than that one read.
+      seen >= deadline ->
+        read_at = now()
+        last = Tui.screen(tui)
+
+        cond do
+          ok?.(last) -> {settled(tui), read_at}
+          quiet -> {last, seen}
+          true -> fail(tui, "did not #{what}", settled(tui))
+        end
 
       true ->
         Process.sleep(@poll)
