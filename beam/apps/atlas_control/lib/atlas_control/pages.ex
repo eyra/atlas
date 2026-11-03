@@ -315,7 +315,7 @@ defmodule AtlasControl.Pages do
             end) ++
             Enum.map(parents(description, kind, fact), fn {label, keys} ->
               Blocks.pair(label: label, value: Enum.join(keys, ", "))
-            end)
+            end) ++ copy(answer["copy"])
 
         item =
           Blocks.item(
@@ -804,7 +804,41 @@ defmodule AtlasControl.Pages do
   # A kind without a primary property is labelled by the one its id is made from.
   defp primary(spec), do: spec["primary"] || id_property(spec)
 
-  defp label(spec, fact), do: to_text(fact["values"][primary(spec)]) |> blank(fact["key"])
+  # The primary value; while it is empty (a connector has not filled it yet), the value
+  # the id is made from; else the key.
+  defp label(spec, fact) do
+    [primary(spec), id_property(spec)]
+    |> Enum.map(&to_text(fact["values"][&1]))
+    |> Enum.find(fact["key"], &(&1 != ""))
+  end
+
+  # When a connector last read a copy of an outside fact, and why its last read failed.
+  defp copy(%{"source" => source} = copy) do
+    read = copy["read_at"] && "#{moment(copy["read_at"])} from #{source}"
+
+    failed =
+      copy["failure"] &&
+        "the read at #{moment(copy["failed_at"])} failed: #{copy["failure"]}; it is tried again"
+
+    value =
+      case {read, failed} do
+        {nil, nil} -> nil
+        {read, nil} -> read
+        {nil, failed} -> "never from #{source}; #{failed}"
+        {read, failed} -> "#{read}; #{failed}"
+      end
+
+    if value, do: [Blocks.pair(label: "Last read", value: value)], else: []
+  end
+
+  defp copy(_none), do: []
+
+  defp moment(iso) do
+    case DateTime.from_iso8601(iso || "") do
+      {:ok, at, _} -> Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
+      _ -> to_text(iso)
+    end
+  end
 
   defp detail(spec, fact) do
     shown =
@@ -830,9 +864,6 @@ defmodule AtlasControl.Pages do
   defp to_text(nil), do: ""
   defp to_text(value) when is_binary(value), do: value
   defp to_text(value), do: to_string(value)
-
-  defp blank("", fallback), do: fallback
-  defp blank(value, _), do: value
 
   defp count(keys), do: Integer.to_string(length(keys))
 

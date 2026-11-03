@@ -17,6 +17,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-04.md`: link the pull requests of an issue (UC-Atlas-04).
 - `docs/guides/uc-atlas-16.md`: the agent's tools, and a plan for a request that writes nothing (UC-Atlas-16).
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
+- `docs/guides/uc-atlas-26.md`: each pull request's title and state from GitHub, read by State's GitHub connector (UC-Atlas-26).
 
 ```sh
 atlas                     # prod: starts what is needed in the background, then opens a TUI
@@ -42,7 +43,7 @@ An agent that plans gets the same actions as tools: `atlas tools` lists them, ma
 
 | Path | What |
 |---|---|
-| `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. |
+| `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. Connectors to outside systems sit at State's edge, in `atlas_state`; GitHub, read-only, is the first. |
 | `clients/tui/` | The TUI, a client of Control. Renders Control's blocks; knows no entity. Not part of the BEAM platform. |
 | `clients/agent/` | The agents' command line (`atlas help/put/set/get/list/tools/plan`), a client of Control like the TUI: it reads pages and fills forms, and knows no entity. The planner boundary (`AtlasAgent.Planner`) is here too. |
 | `tools/plan/` | `atlas load-plan` (UC-Atlas-05): SCENES.md into Atlas through `clients/agent`, with `links.json` for pull requests and stages. |

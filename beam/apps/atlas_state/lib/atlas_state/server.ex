@@ -7,19 +7,21 @@ defmodule AtlasState.Server do
     A resent id gets its first answer again and is not stored twice.
   - A `read` is answered with the facts of a kind (all, or `"linked" => %{relation => key}`
     for those that point at `key`), one fact (`"key" => key`) with the keys of the facts
-    that point at it, or (kind `_description`) rela's description. Facts carry their
-    outgoing `links`.
+    that point at it and, for a copy of an outside fact, when a connector last read it
+    (`"copy"`, see `AtlasState.Copies`), or (kind `_description`) rela's description.
+    Facts carry their outgoing `links`.
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
-  "links" => %{relation => [keys]} on a create}`.
+  "links" => %{relation => [keys]} on a create, "cause" => why, optional}`. The cause is
+  kept with State's answer and goes along with the hint.
   """
   use GenServer
 
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Description, Ledger, Rela}
+  alias AtlasState.{Copies, Description, Ledger, Rela}
 
   @description "_description"
 
@@ -66,6 +68,12 @@ defmodule AtlasState.Server do
 
   defp answer(state, envelope, content, result) do
     about = %{"op" => content_op(content), "key" => content_key(content)}
+    # Who or what made the change and why ("GitHub connector, read at …"), when said.
+    about =
+      case content do
+        %{"cause" => cause} when is_binary(cause) -> Map.put(about, "cause", cause)
+        _ -> about
+      end
 
     case result do
       :stored ->
@@ -159,7 +167,12 @@ defmodule AtlasState.Server do
   defp read_one(state, kind, spec, key) do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
-      %{"fact" => wire(fact), "incoming" => incoming}
+      answer = %{"fact" => wire(fact), "incoming" => incoming}
+
+      case Copies.get(kind, key) do
+        nil -> answer
+        copy -> Map.put(answer, "copy", copy)
+      end
     else
       {:error, :not_found} -> %{"fact" => nil}
       {:error, _} -> %{"error" => "rela is not reachable"}

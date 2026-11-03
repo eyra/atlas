@@ -242,6 +242,49 @@ defmodule AtlasControl.PagesTest do
     assert "Ext ref" in labels.(%{"title" => "One", "ext_ref" => "X-9"})
   end
 
+  test "a primary a connector fills names the fact once filled; until then its id's source" do
+    d = put_in(@d, ["entities", "tag", "primary"], "note")
+
+    tags = %{
+      "facts" => [
+        fact("T-a-1", %{"name" => "#a/1"}),
+        fact("T-b-2", %{"name" => "#b/2", "note" => "Two"})
+      ]
+    }
+
+    %{blocks: [%{"props" => list}]} = Pages.render({:list, "tag"}, d, [tags])
+    assert [%{"label" => "#a/1"}, %{"label" => "Two"}] = list["rows"]
+  end
+
+  test "a copy of an outside fact says when it was last read, and why a read failed" do
+    last_read = fn copy ->
+      answer = %{"fact" => fact("T-a-1", %{"name" => "#a/1", "note" => "x"}), "copy" => copy}
+      %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [answer])
+      Enum.find_value(item["fields"], &(&1["label"] == "Last read" && &1["value"]))
+    end
+
+    refute last_read.(nil)
+
+    assert last_read.(%{"source" => "Outside", "read_at" => "2026-11-03T14:05:09Z"}) ==
+             "2026-11-03 14:05 UTC from Outside"
+
+    assert last_read.(%{
+             "source" => "Outside",
+             "read_at" => "2026-11-03T14:05:09Z",
+             "failed_at" => "2026-11-03T14:10:00Z",
+             "failure" => "it answered 503"
+           }) ==
+             "2026-11-03 14:05 UTC from Outside; the read at 2026-11-03 14:10 UTC failed: " <>
+               "it answered 503; it is tried again"
+
+    assert last_read.(%{
+             "source" => "Outside",
+             "read_at" => nil,
+             "failed_at" => "2026-11-03T14:10:00Z",
+             "failure" => "it answered 404"
+           }) =~ "never from Outside; the read at 2026-11-03 14:10 UTC failed"
+  end
+
   test "the next free key, and the values of a new fact" do
     spec = @d["entities"]["widget"]
     assert Pages.next_key(spec, []) == {"W-01", 1}

@@ -2,7 +2,7 @@ defmodule AtlasE2E.Instance do
   @moduledoc """
   A private Atlas test instance for one run: a fresh, empty rela dataset on free ports,
   and the core, both started with the `atlas` command through `ATLAS_ENV_FILE`, always
-  with `--env test`. It never uses the ports or data of `env/test.json` or
+  with `--env test`, with a stand-in GitHub (`AtlasE2E.GitHub`). It never uses the ports or data of `env/test.json` or
   `env/prod.json` (Melle's instances) or the live store.
 
   rela's binaries are shared between runs (`ATLAS_E2E_RELA_BIN`, by default the test
@@ -37,6 +37,14 @@ defmodule AtlasE2E.Instance do
       },
       "state" => %{"data" => Path.join(dir, "beam")},
       "reconcile_seconds" => 5,
+      # GitHub is a stand-in (UC-Atlas-26), read every 2 seconds rather than 5 minutes.
+      "connectors" => %{
+        "github" => %{
+          "api" => AtlasE2E.GitHub.start(),
+          "token_command" => ["echo", AtlasE2E.GitHub.token()],
+          "every_seconds" => 2
+        }
+      },
       # The planning agent is a scripted stand-in, so no model is needed (UC-Atlas-16).
       "agent" => %{
         "planner" => ["elixir", Path.join(@root, "e2e/fixtures/planner.exs")],
