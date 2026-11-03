@@ -10,14 +10,14 @@ defmodule AtlasAgent.Planner do
     JSON on stdin and prints the plan as JSON on stdout. The end-to-end test uses a
     scripted stand-in this way, so CI needs no model.
 
-  `"name"` names the planner for people (a plan says who made it); `"timeout_seconds"`
+  `"name"` names the planner for its users (a plan says who made it); `"timeout_seconds"`
   is how long it may take, 300 by default.
 
   The input: `%{"request", "env", "page", "tools"}`; `page` is the view model of the page
   the request was made on, `tools` are `AtlasAgent.Tools.list/1`. The answer:
   `%{"summary" => text, "steps" => [step]}`, the steps as `AtlasAgent.Plan` takes them.
 
-  A planner only proposes. Nothing it answers is run before a person accepts it; the
+  A planner only proposes. Nothing it answers is run before a user accepts it; the
   Runtime of SC-Atlas-02 will take this place later.
   """
 
@@ -39,7 +39,7 @@ defmodule AtlasAgent.Planner do
     end
   end
 
-  @doc "What the settings' planner is called, for people: `\"name\"`, or its command."
+  @doc "What the settings' planner is called, for its users: `\"name\"`, or its command."
   def name(%{"name" => name}) when is_binary(name), do: name
 
   def name(agent) do

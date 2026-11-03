@@ -9,20 +9,24 @@ defmodule AtlasState.Server do
     for those that point at `key`), one fact (`"key" => key`) with the keys of the facts
     that point at it and, for a copy of an outside fact, when a connector last read it
     (`"copy"`, see `AtlasState.Copies`), or (kind `_description`) rela's description.
-    Facts carry their outgoing `links`, and their `progress` when the description has a
-    rule for their kind (`AtlasState.Progress`): worked out on every read, never stored.
+    Facts carry their outgoing `links`, with the `origins` of those links (the fact that
+    set each: since, by, cause; `AtlasState.Links`), and their `progress` when the
+    description has a rule for their kind (`AtlasState.Progress`): worked out on every
+    read, never stored. One fact also carries the `history` of its links.
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
   "values" => %{property => value}, "version" => version read before, or nil,
-  "links" => %{relation => [keys]} on a create, "cause" => why, optional}`. The cause is
-  kept with State's answer and goes along with the hint.
+  "links" => %{relation => [keys]}, "cause" => why, optional, "by" => who, optional}`.
+  On a create, `links` are the fact's links; on a change, each relation named is set to
+  exactly those keys (`[]` removes its links) and the others stay. The cause and who sent
+  it are kept with State's answer and go along with the hint.
   """
   use GenServer
 
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasState.{Copies, Description, Ledger, Progress, Rela}
+  alias AtlasState.{Copies, Description, Ledger, Links, Progress, Rela}
 
   @description "_description"
 
@@ -31,19 +35,23 @@ defmodule AtlasState.Server do
   @impl true
   def init(opts) do
     :ok = AtlasBus.attach(AtlasBus.store())
-    ledger = Ledger.open(Keyword.fetch!(opts, :data_dir))
+    dir = Keyword.fetch!(opts, :data_dir)
 
     {:ok,
      %{
        rela: Keyword.fetch!(opts, :rela),
-       ledger: ledger,
+       ledger: Ledger.open(dir),
+       links: Links.open(dir),
        description: nil,
        extra: Keyword.get(opts, :description_extra)
      }}
   end
 
   @impl true
-  def terminate(_reason, state), do: Ledger.close(state.ledger)
+  def terminate(_reason, state) do
+    Ledger.close(state.ledger)
+    Links.close(state.links)
+  end
 
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = envelope, content}, state) do
@@ -71,14 +79,15 @@ defmodule AtlasState.Server do
     about = %{"op" => content_op(content), "key" => content_key(content)}
     # Who or what made the change and why ("GitHub connector, read at …"), when said.
     about =
-      case content do
-        %{"cause" => cause} when is_binary(cause) -> Map.put(about, "cause", cause)
-        _ -> about
-      end
+      for name <- ["cause", "by"],
+          is_binary(content[name]),
+          into: about,
+          do: {name, content[name]}
 
     case result do
       :stored ->
         position = Ledger.stored(state.ledger, envelope.id, about)
+        remember_links(state, envelope.kind, content, about, position)
         reply(envelope, "stored", about, position)
 
       {:refused, reasons} ->
@@ -97,6 +106,25 @@ defmodule AtlasState.Server do
         reply(envelope, "refused", Map.put(about, "reasons", ["rela is not reachable"]), nil)
     end
   end
+
+  # The fact that set each link it names: when, by whom, why (`AtlasState.Links`).
+  defp remember_links(state, kind, %{"op" => "delete", "key" => key}, _about, _position),
+    do: Links.forget(state.links, kind, key)
+
+  defp remember_links(state, kind, %{"key" => key, "links" => links}, about, position)
+       when is_map(links) do
+    entry =
+      about
+      |> Map.take(["by", "cause"])
+      |> Map.merge(%{"since" => now(), "position" => position})
+
+    for {relation, keys} <- links, do: Links.record(state.links, kind, key, relation, keys, entry)
+    :ok
+  end
+
+  defp remember_links(_state, _kind, _content, _about, _position), do: :ok
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
   defp reply(envelope, class, content, position) do
     case AtlasBus.send(Envelope.reply(envelope, class, position: position), content) do
@@ -157,7 +185,7 @@ defmodule AtlasState.Server do
              Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
            end),
          {:ok, facts} <- with_progress(state, kind, facts) do
-      %{"facts" => Enum.map(facts, &wire/1)}
+      %{"facts" => Enum.map(facts, &wire(state, kind, &1))}
     else
       {:error, _} -> %{"error" => "rela is not reachable"}
     end
@@ -167,7 +195,11 @@ defmodule AtlasState.Server do
     with {:ok, fact} <- Rela.get(state.rela, spec["plural"], key),
          {:ok, [fact]} <- with_progress(state, kind, [fact]),
          {:ok, incoming} <- incoming(state, kind, spec, key) do
-      answer = %{"fact" => wire(fact), "incoming" => incoming}
+      answer = %{
+        "fact" => wire(state, kind, fact),
+        "incoming" => incoming,
+        "history" => Links.all(state.links, kind, key)
+      }
 
       case Copies.get(kind, key) do
         nil -> answer
@@ -196,11 +228,14 @@ defmodule AtlasState.Server do
     end)
   end
 
-  defp wire(fact) do
+  defp wire(state, kind, fact) do
+    links = fact[:links] || %{}
+
     wired = %{
       "key" => fact.key,
       "values" => fact.properties,
-      "links" => fact[:links] || %{},
+      "links" => links,
+      "origins" => Links.origins(state.links, kind, fact.key, links),
       "version" => fact.version
     }
 
@@ -217,7 +252,7 @@ defmodule AtlasState.Server do
         result =
           case Description.targets(state.description, kind, content["links"] || %{}) do
             {:ok, targets} ->
-              with :ok <- targets_exist(state, op, targets) do
+              with :ok <- targets_exist(state, targets) do
                 store(state.rela, spec, op, key, values, content["version"], targets)
               end
 
@@ -252,18 +287,18 @@ defmodule AtlasState.Server do
     end
   end
 
-  # Links are set on create only; moving a fact to another parent comes later.
-  defp store(rela, spec, "change", key, values, version, _targets) do
+  # A change sets the values it names, and the links of each relation it names.
+  defp store(rela, spec, "change", key, values, version, targets) do
     values = Map.new(values, fn {k, v} -> {k, if(v == "", do: nil, else: v)} end)
     plural = spec["plural"]
 
     with :ok <- Description.check(spec, values, :change),
-         {:ok, []} <- Rela.change(rela, plural, key, values, version) do
+         {:ok, []} <- Rela.change(rela, plural, key, values, targets, version) do
       :stored
     else
       # The current rela has already stored the change; say so instead of hiding it.
       {:ok, warnings} -> {:refused, ["rela stored it with warnings: " | warnings]}
-      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values)
+      {:error, :version_mismatch} -> changed_meanwhile(rela, plural, key, values, targets)
       {:error, :not_found} -> {:refused, ["#{key} does not exist (any more)"]}
       error -> failure(error)
     end
@@ -321,10 +356,10 @@ defmodule AtlasState.Server do
   end
 
   # A change on an old version: already applied (a resend) or a real conflict.
-  defp changed_meanwhile(rela, plural, key, values) do
+  defp changed_meanwhile(rela, plural, key, values, targets) do
     case Rela.get(rela, plural, key) do
       {:ok, fact} ->
-        if same?(fact, values),
+        if same?(fact, values) and same_links?(fact, targets),
           do: :stored,
           else: {:refused, ["#{key} changed meanwhile; open it again"]}
 
@@ -340,8 +375,8 @@ defmodule AtlasState.Server do
   end
 
   # The current rela answers 422 to a create that links to a missing fact, but stores the
-  # fact anyway, without the link. So State checks the targets exist before it creates.
-  defp targets_exist(state, "create", targets) do
+  # fact anyway, without the link. So State checks the targets exist before it writes.
+  defp targets_exist(state, targets) do
     missing =
       for {_relation, {kind, keys}} <- targets,
           key <- keys,
@@ -351,8 +386,6 @@ defmodule AtlasState.Server do
 
     if missing == [], do: :ok, else: {:refused, missing}
   end
-
-  defp targets_exist(_state, _op, _targets), do: :ok
 
   defp same?(fact, values) do
     Enum.all?(values, fn {name, value} -> loose(fact.properties[name]) == loose(value) end)

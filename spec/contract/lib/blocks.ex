@@ -12,7 +12,7 @@ defmodule AtlasContract.Blocks do
   """
   use AtlasSpec.Schema
 
-  version "0.4.0"
+  version "0.5.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -39,10 +39,18 @@ defmodule AtlasContract.Blocks do
     field :links, {:list, :link}
   end
 
-  # A labelled value.
+  # The fact that set a value: since when (ISO 8601, UTC), by whom (a key), and why.
+  defmodel :origin do
+    field :since, :string
+    field :by, :string
+    field :cause, :string
+  end
+
+  # A labelled value, with the fact that set it when that is known.
   defmodel :pair do
     field :label, :string, required: true
     field :value, :string
+    field :origin, :origin
   end
 
   # A value an input may take, and how to show it.
@@ -114,7 +122,7 @@ defmodule AtlasContract.Blocks do
   end
 
   # What an agent proposes for a request, and then does: its steps, in order. `state` is
-  # planning, proposed, running, done, stopped, failed or cancelled. A person keeps,
+  # planning, proposed, running, done, stopped, failed or cancelled. The user keeps,
   # edits or drops each proposed step before any of it runs.
   defblock :plan do
     field :title, :string, required: true

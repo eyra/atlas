@@ -36,6 +36,7 @@ defmodule AtlasE2E.Instance do
 
     settings = %{
       "env" => "test",
+      "tui_user" => "melle",
       "browser" => browser,
       "control" => %{"host" => "127.0.0.1", "port" => control_port},
       "rela" => %{

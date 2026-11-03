@@ -13,7 +13,7 @@ In TUI 1:
 | A scene | `n`, a title, `ctrl-s` | The scene (say `SC-Atlas-01`), and under it **Use cases**: `No use cases yet. Press a to add one.` |
 | Add | `a`, a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `✓ Stored as UC-Atlas-01 …`: the code is made for you. The use case opens and shows `In scene SC-Atlas-01`. |
 | Back | `esc` | The scene, with the use case in its list. Add a second one with `a`. |
-| Open | ↑/↓ in the list, `enter` | The use case with its fields (status Refine and completed no, by default). |
+| Open | ↑/↓ in the list, `enter` | The use case with its fields (status Refine, by default). |
 | Change | `e`, edit, `ctrl-s` | The code is shown read-only. `✓ Stored …` and the changed use case. |
 | Remove | `d`, then `y` | `✓ Stored …`. You are back in the scene, without it. |
 

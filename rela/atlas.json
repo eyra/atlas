@@ -1,10 +1,16 @@
 {
-  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made: prefix plus the next free number, zero-padded to digits; or from a property (from), whose value must match pattern, with template filled from its groups ({1}, {2}, ...) after replace, and error when it does not match; the same value always makes the same id; nobody ever types or changes an id, nor the property it is made from; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value); properties.<name>.multiline = true for text of several lines and sections (a form edits it in a multi-line editor; the line breaks are kept); properties.<name>.label = the name a page shows for the field instead of its own. progress = how far an item is, worked out from the items under it on every read, never stored, and shown in lists instead of its own field: over = the relation whose items point at it, field = the property that says how far such an item is (for a kind without a rule of its own), own = its own property, shown while nothing is under it. The top-level progress gives the order of the values (least far first; the least far child wins), done = the property that marks an item finished, done_label = what a list shows when every child is. primary = the property that names a fact in a list and on its page (when it is empty, the property the id is made from names it); connector = an outside system's connector fills this kind, read-only: system (which connector), address (the property that says where the outside thing is), fields (property: the outside system's field it is copied from), until (property: values; a fact with one of these values is read no more). Per type: types.<name>.format = \"url\" for values that are web addresses (rela has no such type); Control offers to open a fact's first such field in a browser.",
+  "_about": "Atlas's additions to rela's description: rules the current rela cannot hold, because it refuses unknown keys in schema.yaml. State merges this file into the description it answers, key by key; Control applies the rules for any kind. Data, not code: no BEAM module names a kind. Per kind: create.ask = the only fields a create form asks for; create.id = how the id is made: prefix plus the next free number, zero-padded to digits; or from a property (from), whose value must match pattern, with template filled from its groups ({1}, {2}, ...) after replace, in lower case when lower is true, and error when it does not match; the same value always makes the same id; nobody ever types or changes an id, nor the property it is made from; create.defaults = values for the fields create does not ask; properties.<name>.set_by = a field only a connector or the system fills (never in a form, shown only when it has a value); properties.<name>.multiline = true for text of several lines and sections (a form edits it in a multi-line editor; the line breaks are kept); properties.<name>.label = the name a page shows for the field instead of its own. progress = how far an item is, worked out from the items under it on every read, never stored, and shown in lists instead of its own field: over = the relation whose items point at it, field = the property that says how far such an item is (for a kind without a rule of its own), own = its own property, shown while nothing is under it. The top-level progress gives the order of the values (least far first; the least far child wins), done = the property that marks an item finished, done_label = what a list shows when every child is. primary = the property that names a fact in a list and on its page (when it is empty, the property the id is made from names it); connector = an outside system's connector fills this kind, read-only: system (which connector), address (the property that says where the outside thing is), fields (property: the outside system's field it is copied from), until (property: values; a fact with one of these values is read no more). Per relation: relations.<name>.parent = true for a relation by which a fact belongs under another (at most one; its page goes back there, a create adds under it); every other relation is an association, a concept a kind has by being in its from (accepted_by: completable), shown with the fact that set it and set through its own form; relations.<name>.set_by = an association only a migration or connector sets: shown, never in a form, refused by Control. Per kind: top = false for a kind that is not on the start page, reached only through the facts that point at it. Per type: types.<name>.format = \"url\" for values that are web addresses (rela has no such type); Control offers to open a fact's first such field in a browser.",
   "types": {
     "github_pull_url": { "format": "url" }
   },
+  "relations": {
+    "in_scene": { "parent": true },
+    "in_use_case": { "parent": true },
+    "in_issue": { "parent": true },
+    "done_in": { "set_by": "migration" }
+  },
   "progress": {
-    "order": ["refine", "ready_to_pick_up", "specification", "design", "development", "testing"],
+    "order": ["refine", "ready_to_pick_up", "specification", "design", "development"],
     "done": "completed",
     "done_label": "Done"
   },
@@ -13,7 +19,7 @@
       "create": {
         "ask": ["title", "description"],
         "id": { "prefix": "SC-Atlas-", "digits": 2 },
-        "defaults": { "status": "refine", "completed": false }
+        "defaults": { "status": "refine" }
       },
       "progress": { "over": "in_scene", "own": "status" },
       "properties": {
@@ -26,7 +32,7 @@
       "create": {
         "ask": ["title", "description"],
         "id": { "prefix": "UC-Atlas-", "digits": 2 },
-        "defaults": { "status": "refine", "completed": false }
+        "defaults": { "status": "refine" }
       },
       "progress": { "over": "in_use_case", "field": "stage", "own": "status" },
       "properties": {
@@ -39,12 +45,26 @@
       "create": {
         "ask": ["title", "description"],
         "id": { "prefix": "IS-Atlas-", "digits": 2 },
-        "defaults": { "stage": "specification", "completed": false }
+        "defaults": { "stage": "specification" }
       },
       "properties": {
         "description": { "multiline": true },
         "flux_id": { "set_by": "connector" },
         "flux_ref": { "set_by": "connector" }
+      }
+    },
+    "person": {
+      "top": false,
+      "primary": "name",
+      "create": {
+        "ask": ["name"],
+        "id": {
+          "from": "name",
+          "pattern": "^\\s*([A-Za-z][A-Za-z0-9]*)",
+          "template": "{1}",
+          "lower": true,
+          "error": "name must start with a letter, e.g. Melle"
+        }
       }
     },
     "pull_request": {

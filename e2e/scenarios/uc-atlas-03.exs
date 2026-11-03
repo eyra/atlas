@@ -35,27 +35,23 @@ scenario "UC-Atlas-03: Manage the issues of a use case", fn %{t1: t1, t2: t2} ->
     stored(t1, ~r/✓ Stored as IS-Atlas-\d+/, at)
     page = stored(t1, ~r/Issue IS-Atlas-\d+: Write the first issue/, at)
     page =~ ~r/Stage\s+Specification/ || raise "the stage is not Specification"
-    page =~ ~r/Completed\s+no/ || raise "completed is not no"
     page =~ ~r/In use case\s+UC-Atlas-\d+/ || raise "it is not in the use case"
     for field <- ["Flux ref", "Flux id", "Status"], do: refute_see(t1, field)
     see(t1, "No pull requests yet.")
     by_hint(t2, "Write the first issue", at)
   end
 
-  step "Change: the code read-only, no Flux fields; stage and completed", fn ->
+  step "Change: the code read-only, no Flux fields; the stage", fn ->
     press(t1, "e")
     see(t1, ~r/Change issue IS-Atlas-\d+/)
     see(t1, ~r/Id\s+IS-Atlas-\d+/)
     for field <- ["Flux ref", "Flux id"], do: refute_see(t1, field)
-    # Title, then the stage (one to the right: Design), then completed (yes).
+    # Title, then the stage (one to the right: Design).
     press(t1, ["Down", "Right"])
     see(t1, "‹ Design ›")
-    press(t1, ["Down", "Right"])
-    see(t1, "‹ yes ›")
     at = press(t1, "C-s")
-    page = stored(t1, ~r/Stage\s+Design/, at)
-    page =~ ~r/Completed\s+yes/ || raise "completed is not yes"
-    by_hint(t2, ~r/IS-Atlas-\d+ · Design · completed/, at)
+    stored(t1, ~r/Stage\s+Design/, at)
+    by_hint(t2, ~r/IS-Atlas-\d+ · Design/, at)
   end
 
   step "Remove it; back in the use case; TUI 2 by hint", fn ->

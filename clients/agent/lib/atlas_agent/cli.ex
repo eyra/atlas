@@ -4,6 +4,8 @@ defmodule AtlasAgent.CLI do
 
       atlas put  <kind> [--in <key>] --<field> <text> ...  create; prints the new item
       atlas set  <key> <field>=<text> ...                  change; prints the item
+                 <association>=<key>                       link (empty: remove the link)
+                 --cause <text>                            why (put and set), kept with it
       atlas get  <key>                                     one item, with what hangs under it
       atlas list <kind> [--in <key>]                       the items of a kind (under <key>)
       atlas tools                                          the agent's tools: Control's actions
@@ -76,11 +78,15 @@ defmodule AtlasAgent.CLI do
 
   defp parse_command(["put", kind | rest]) do
     {parent, rest} = take_flag(rest, "--in", nil)
-    with {:ok, values} <- options(rest, %{}), do: {:ok, {:put, kind, values, parent}}
+    {cause, rest} = take_flag(rest, "--cause", nil)
+    with {:ok, values} <- options(rest, %{}), do: {:ok, {:put, kind, values, parent, cause}}
   end
 
   defp parse_command(["set", key | assignments]) when assignments != [] do
-    with {:ok, values} <- assignments(assignments, %{}), do: {:ok, {:set, key, values}}
+    {cause, assignments} = take_flag(assignments, "--cause", nil)
+
+    with {:ok, values} <- assignments(assignments, %{}),
+         do: {:ok, {:set, key, values, cause}}
   end
 
   defp parse_command(["get", key]), do: {:ok, {:get, key}}
@@ -95,11 +101,11 @@ defmodule AtlasAgent.CLI do
   defp parse_command(_), do: {:error, usage()}
 
   # A write answers with the item as it is now stored.
-  defp run({:put, kind, values, parent}, client),
-    do: client |> AtlasAgent.put(kind, values, parent) |> then_get(client)
+  defp run({:put, kind, values, parent, cause}, client),
+    do: client |> AtlasAgent.put(kind, values, parent, cause) |> then_get(client)
 
-  defp run({:set, key, values}, client),
-    do: client |> AtlasAgent.set(key, values) |> then_get(client)
+  defp run({:set, key, values, cause}, client),
+    do: client |> AtlasAgent.set(key, values, cause) |> then_get(client)
 
   defp run({:get, key}, client), do: client |> AtlasAgent.get(key) |> as(:item)
 
@@ -167,7 +173,12 @@ defmodule AtlasAgent.CLI do
   defp text(item) do
     fields =
       Enum.map(item["fields"], fn [label, value] ->
+        origin = origin_text(item["origins"][label])
+
         case String.split(value || "", "\n") do
+          [line] when origin != "" ->
+            "  #{label}: #{line} (#{origin})"
+
           [line] ->
             "  #{label}: #{line}"
 
@@ -184,6 +195,35 @@ defmodule AtlasAgent.CLI do
       end)
 
     Enum.join([item["title"] | fields] ++ lists, "\n")
+  end
+
+  # The fact that set a link: "since 3 Nov 15:10, by melle: why", in local time.
+  defp origin_text(nil), do: ""
+
+  defp origin_text(origin) do
+    since =
+      case DateTime.from_iso8601(origin["since"] || "") do
+        {:ok, at, _} ->
+          {{y, mo, d}, {h, mi, _}} =
+            at
+            |> DateTime.to_naive()
+            |> NaiveDateTime.to_erl()
+            |> :calendar.universal_time_to_local_time()
+
+          "since " <>
+            Calendar.strftime(NaiveDateTime.from_erl!({{y, mo, d}, {h, mi, 0}}), "%-d %b %H:%M")
+
+        _ ->
+          nil
+      end
+
+    by = origin["by"] && "by " <> origin["by"]
+    head = [since, by] |> Enum.reject(&is_nil/1) |> Enum.join(", ")
+
+    case origin["cause"] do
+      cause when cause in [nil, ""] -> head
+      cause -> head <> ": " <> cause
+    end
   end
 
   defp tools_text(tools) do

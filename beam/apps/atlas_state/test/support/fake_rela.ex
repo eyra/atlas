@@ -20,10 +20,12 @@ defmodule AtlasState.FakeRela do
             "done" => %{"type" => "boolean"}
           }
         },
-        "part" => %{"plural" => "parts", "properties" => %{"title" => %{"type" => "string"}}}
+        "part" => %{"plural" => "parts", "properties" => %{"title" => %{"type" => "string"}}},
+        "maker" => %{"plural" => "makers", "properties" => %{"title" => %{"type" => "string"}}}
       },
       "relations" => %{
-        "of_widget" => %{"from" => ["part"], "to" => ["widget"], "max_outgoing" => 1}
+        "of_widget" => %{"from" => ["part"], "to" => ["widget"], "max_outgoing" => 1},
+        "made_by" => %{"from" => ["widget", "part"], "to" => ["maker"], "max_outgoing" => 1}
       }
     }
   end
@@ -40,7 +42,15 @@ defmodule AtlasState.FakeRela do
   def down(pid), do: Agent.update(pid, &%{&1 | up: false})
   def up(pid), do: Agent.update(pid, &%{&1 | up: true})
   def facts(pid), do: Agent.get(pid, & &1.facts)
-  def link(pid, part, widget), do: Agent.update(pid, &put_in(&1, [:links, part], widget))
+
+  def link(pid, part, widget, relation \\ "of_widget"),
+    do: Agent.update(pid, &%{&1 | links: put_links(&1.links, part, relation, [widget])})
+
+  defp put_links(links, key, relation, keys) do
+    own = Map.get(links, key, %{})
+    own = if keys == [], do: Map.delete(own, relation), else: Map.put(own, relation, keys)
+    Map.put(links, key, own)
+  end
 
   @doc "Change a fact behind State's back, as another writer would."
   def poke(pid, key, values) do
@@ -84,8 +94,10 @@ defmodule AtlasState.FakeRela do
   end
 
   @impl true
-  def incoming(pid, _plural, key, "of_widget") do
-    call(pid, fn s -> {{:ok, for({part, ^key} <- s.links, do: part)}, s} end)
+  def incoming(pid, _plural, key, relation) do
+    call(pid, fn s ->
+      {{:ok, for({from, own} <- s.links, key in Map.get(own, relation, []), do: from)}, s}
+    end)
   end
 
   @impl true
@@ -106,7 +118,9 @@ defmodule AtlasState.FakeRela do
 
         true ->
           links =
-            for {"of_widget", {_, [widget]}} <- targets, into: s.links, do: {key, widget}
+            Enum.reduce(targets, s.links, fn {relation, {_, keys}}, acc ->
+              put_links(acc, key, relation, keys)
+            end)
 
           {{:ok, warnings(props)},
            %{s | facts: Map.put(s.facts, key, {props, s.n}), n: s.n + 1, links: links}}
@@ -114,19 +128,35 @@ defmodule AtlasState.FakeRela do
     end)
   end
 
-  defp links_of(s, key), do: if(w = s.links[key], do: %{"of_widget" => [w]}, else: %{})
+  defp links_of(s, key), do: Map.get(s.links, key, %{})
 
   @impl true
-  def change(pid, _plural, key, props, version) do
+  def change(pid, _plural, key, props, targets, version) do
     call(pid, fn s ->
       case s.facts[key] do
         nil ->
           {{:error, :not_found}, s}
 
         {old, n} ->
-          if stale?(version, n),
-            do: {{:error, :version_mismatch}, s},
-            else: changed(s, key, old, props)
+          cond do
+            stale?(version, n) ->
+              {{:error, :version_mismatch}, s}
+
+            Enum.any?(targets, fn {_, {_, keys}} ->
+              Enum.any?(keys, &(not Map.has_key?(s.facts, &1)))
+            end) ->
+              {{:error, {:invalid, ["the fact it points at does not exist"]}}, s}
+
+            true ->
+              {answer, s} = changed(s, key, old, props)
+
+              links =
+                Enum.reduce(targets, s.links, fn {relation, {_, keys}}, acc ->
+                  put_links(acc, key, relation, keys)
+                end)
+
+              {answer, %{s | links: links}}
+          end
       end
     end)
   end

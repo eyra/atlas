@@ -10,6 +10,11 @@ defmodule AtlasControl.Session do
   - A hint (a `stored` of a kind on screen) re-reads and sends the page again. A form is
     never redrawn under the user's hands; they get a notice instead.
   - The client asks for a refresh on an interval (it reconciles); a lost hint only delays.
+  - Each fact says who sent it (`by`): the user at a TUI (`tui_user` in the environment's
+    settings; one for now), `migration` for a migration (which may set what the
+    description marks `set_by: migration`), or `agent` for any other client, as its hello
+    says.
+    A submit may carry a `cause`; it goes with the fact, as does a links form's note.
   """
   use GenServer, restart: :temporary
 
@@ -42,7 +47,9 @@ defmodule AtlasControl.Session do
        listening: MapSet.new(),
        route: :home,
        form: %{},
-       pending: %{}
+       pending: %{},
+       by: "agent",
+       cause: nil
      }}
   end
 
@@ -158,7 +165,7 @@ defmodule AtlasControl.Session do
         "spec" => AtlasControl.Blocks.version()
       })
 
-      state = describe(%{state | hello: true})
+      state = describe(%{state | hello: true, by: actor(message["client"])})
       {:noreply, show(state, :home, "open", nil)}
     else
       send_client(state, %{
@@ -187,13 +194,21 @@ defmodule AtlasControl.Session do
 
   defp handle_op("submit", %{"to" => to} = message, state) do
     raw = Map.new(message["values"] || %{}, fn {k, v} -> {k, to_string(v)} end)
-    {:noreply, submit(route(to, state), raw, state)}
+    cause = if is_binary(message["cause"]) and message["cause"] != "", do: message["cause"]
+    state = submit(route(to, state), raw, %{state | cause: cause})
+    {:noreply, %{state | cause: nil}}
   end
 
   defp handle_op(op, _message, state),
     do: {:noreply, notice(state, "error", "Unknown op #{inspect(op)}")}
 
   defp route(to, state), do: to |> Pages.route() |> Pages.resolve(state.description)
+
+  # Who is on this session. A TUI is the environment's TUI user for now; anything else is
+  # an agent. No sign-in yet: a client is what its hello says.
+  defp actor("tui"), do: Application.get_env(:atlas_control, :tui_user) || "agent"
+  defp actor("migration"), do: "migration"
+  defp actor(_client), do: "agent"
 
   # Writes
 
@@ -242,6 +257,28 @@ defmodule AtlasControl.Session do
 
       _ ->
         show(state, route, "open", nil)
+    end
+  end
+
+  # The links of one association: exactly the keys named, none removes them.
+  defp submit({:links, kind, key, relation} = route, raw, state) do
+    state = %{state | route: route, form: Map.put(state.form, :values, raw)}
+
+    if Pages.settable_relation?(state.description, relation, state.by) do
+      note = String.trim(raw["note"] || "")
+
+      content = %{
+        "op" => "change",
+        "key" => key,
+        "values" => %{},
+        "links" => %{relation => Pages.link_keys(raw["to"])},
+        "version" => nil
+      }
+
+      state = if note != "", do: %{state | cause: note}, else: state
+      put_fact(state, kind, content, {:item, kind, key})
+    else
+      show(state, route, "refused", nil)
     end
   end
 
@@ -308,6 +345,8 @@ defmodule AtlasControl.Session do
   end
 
   defp put_fact(state, kind, content, after_route, retry \\ nil, note \\ nil) do
+    content = Map.put(content, "by", state.by)
+    content = if state.cause, do: Map.put(content, "cause", state.cause), else: content
     envelope = Envelope.new("fact", kind)
     :ok = AtlasBus.send(envelope, content)
     timer = Process.send_after(self(), {:resend, envelope.id}, @first_resend)
@@ -363,7 +402,7 @@ defmodule AtlasControl.Session do
     answers =
       Enum.map(Pages.reads(route, state.description), fn {kind, content} -> ask(kind, content) end)
 
-    page = Pages.render(route, state.description, answers, state.form)
+    page = Pages.render(route, state.description, answers, Map.put(state.form, :by, state.by))
 
     # Remember the version a change form was made from, so the change names it.
     form =

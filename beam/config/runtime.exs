@@ -34,5 +34,7 @@ if config_env() != :test do
 
   config :atlas_control,
     host: settings["control"]["host"],
-    port: settings["control"]["port"]
+    port: settings["control"]["port"],
+    # Who uses a TUI of this environment (a key), until Control has sign-in.
+    tui_user: settings["tui_user"]
 end

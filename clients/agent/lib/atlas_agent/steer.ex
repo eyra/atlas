@@ -19,11 +19,11 @@ defmodule AtlasAgent.Steer do
   "tone","text"}`.
 
   Nothing is written except by `run`, and only the steps of the plan it was given, so
-  nothing the planner answers runs before a person accepts it. Each plan and each run
+  nothing the planner answers runs before a user accepts it. Each plan and each run
   has a Control connection of its own, closed when it is done.
 
   A run goes one step at a time, and waits `agent.step_pause_ms` (from the settings, 0 by
-  default) before the next, so a person can follow it. A stop is seen before the next
+  default) before the next, so a user can follow it. A stop is seen before the next
   step, also during that wait (UC-Atlas-18); the steps not run say so.
   """
 
@@ -165,7 +165,7 @@ defmodule AtlasAgent.Steer do
 
   defp planned(_result, state), do: state
 
-  # A step's values as the person left them: only the inputs it has.
+  # A step's values as the user left them: only the inputs it has.
   defp edited(step, values) do
     names = Enum.map(step["inputs"], & &1["name"])
     values = Map.take(values || %{}, names)

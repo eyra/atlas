@@ -56,7 +56,7 @@ defmodule AtlasAgent.ToolsTest do
     assert Tools.put(top, @form)["in"] == nil
   end
 
-  test "set: the fields a person may change, not those only a connector fills" do
+  test "set: the fields a user may change, not those only a connector fills" do
     tool = Tools.set(@part)
     assert Enum.map(tool["fields"], & &1["name"]) == ["title", "size", "notes"]
     assert tool["usage"] == "set <part key> <field>=<text> ..."

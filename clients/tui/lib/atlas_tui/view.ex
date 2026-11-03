@@ -199,9 +199,17 @@ defmodule AtlasTui.View do
       Enum.flat_map(item.fields, fn pair ->
         [first | rest] = Text.wrap(pair.value || "—", width - @label_width - 4)
 
+        indent = String.duplicate(" ", @label_width + 3)
+
+        # The fact that set it: since when, by whom, why (a link's origin).
+        origin =
+          for line <- Text.wrap(origin_text(pair.origin), width - @label_width - 4),
+              line != "",
+              do: [{:plain, indent}, {:dim, line}]
+
         [
           [{:dim, "   " <> pad(pair.label, @label_width)}, text_row(first)]
-          | Enum.map(rest, &[{:plain, String.duplicate(" ", @label_width + 3)}, text_row(&1)])
+          | Enum.map(rest, &[{:plain, indent}, text_row(&1)]) ++ origin
         ]
       end)
 
@@ -651,4 +659,29 @@ defmodule AtlasTui.View do
 
   defp pad(text, n), do: String.pad_trailing(String.slice(text, 0, n), n)
   defp pad_left(text, n), do: String.pad_leading(text, max(n, 0))
+
+  @doc "A link's origin in a line: `since 3 Nov 15:10 · by melle · why`; empty without one."
+  def origin_text(nil), do: ""
+
+  def origin_text(origin) do
+    since =
+      case DateTime.from_iso8601(origin.since || "") do
+        {:ok, at, _} -> "since " <> local(at)
+        _ -> nil
+      end
+
+    by = origin.by && "by " <> origin.by
+    [since, by, origin.cause] |> Enum.reject(&(&1 in [nil, ""])) |> Enum.join(" · ")
+  end
+
+  # In this machine's local time: "3 Nov 15:10".
+  defp local(at) do
+    {{y, mo, d}, {h, mi, _}} =
+      at
+      |> DateTime.to_naive()
+      |> NaiveDateTime.to_erl()
+      |> :calendar.universal_time_to_local_time()
+
+    Calendar.strftime(NaiveDateTime.from_erl!({{y, mo, d}, {h, mi, 0}}), "%-d %b %H:%M")
+  end
 end

@@ -1,5 +1,6 @@
 {
   "env": "test",
+  "tui_user": "melle",
   "control": { "host": "127.0.0.1", "port": 7691 },
   "rela": {
     "url": "http://127.0.0.1:7690/api/v1",

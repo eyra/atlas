@@ -38,9 +38,9 @@ scenario "UC-Atlas-24: Link a pull request and follow its issue", fn %{t1: t1, i
     again["key"] == pr["key"] || raise inspect(again)
   end
 
-  step "atlas set stage=testing: TUI 1 shows the new stage by hint", fn ->
+  step "atlas set stage=development: TUI 1 shows the new stage by hint", fn ->
     issue = Process.get(:uc24)
-    {_, at} = atlas_json(i, ["set", issue, "stage=testing"])
-    by_hint(t1, ~r/Stage\s+Testing/, at)
+    {_, at} = atlas_json(i, ["set", issue, "stage=development"])
+    by_hint(t1, ~r/Stage\s+Development/, at)
   end
 end

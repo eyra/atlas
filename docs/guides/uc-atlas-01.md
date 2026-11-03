@@ -27,7 +27,7 @@ In TUI 1:
 | Step | Keys | What you should see |
 |---|---|---|
 | List | (start) | **Scenes**, sorted by code. In the status bar: `connected · opened at …`. |
-| Create | `n`, type a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `… Sent to State; waiting until it is stored…`, then `✓ Stored as SC-Atlas-01 (position N)`, and the new scene opens. The code is made for you: the next free number. The rest takes its default (status Refine, completed no). |
+| Create | `n`, type a title, ↓, a description, `ctrl-s` | The form asks only for a title and a description. `… Sent to State; waiting until it is stored…`, then `✓ Stored as SC-Atlas-01 (position N)`, and the new scene opens. The code is made for you: the next free number. The rest takes its default (status Refine). |
 | Open | `esc` back to the list, ↑/↓, `enter` | The scene with its fields. Flux id shows only once a Flux sync has filled it, so not for scenes made in Atlas. |
 | Change | `e`, ↓ to a field, edit (backspace, type; ←/→ for a choice), `ctrl-s` | The form shows the code read-only and every field you may change. `✓ Stored …` and the changed scene. |
 | Delete | `d`, then `y` | `✓ Stored …` and the list without it. |
