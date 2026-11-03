@@ -6,9 +6,10 @@ defmodule AtlasE2E.AtlasCommandTest do
 
   @root Path.expand("../..", __DIR__)
 
-  defp atlas(args, env \\ []) do
+  defp atlas(args, env \\ [], cd \\ @root) do
     System.cmd(Path.join(@root, "bin/atlas"), args,
       env: [{"ATLAS_ENV_FILE", nil}, {"ATLAS_NO_UPDATE", "1"} | env],
+      cd: cd,
       stderr_to_stdout: true
     )
   end
@@ -25,9 +26,9 @@ defmodule AtlasE2E.AtlasCommandTest do
 
   test "prod is the default; --env test chooses test" do
     assert {"prod " <> file, 0} = atlas(["env"])
-    assert String.trim(file) == Path.join(@root, "env/prod.json")
+    assert String.trim(file) == Path.join(real(@root), "env/prod.json")
     assert {"test " <> file, 0} = atlas(["env", "--env", "test"])
-    assert String.trim(file) == Path.join(@root, "env/test.json")
+    assert String.trim(file) == Path.join(real(@root), "env/test.json")
   end
 
   test "a private file is its own environment, and must agree with --env" do
@@ -55,6 +56,33 @@ defmodule AtlasE2E.AtlasCommandTest do
     assert out =~ "never on prod"
     assert {out, 1} = atlas(["e2e", "uc-atlas-01", "--env=prod"])
     assert out =~ "never on prod"
+  end
+
+  test "atlas works from any folder: from /, and from inside another repository" do
+    {common, 0} =
+      System.cmd("git", ["-C", @root, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+
+    main = common |> String.trim() |> Path.dirname() |> real()
+
+    other = Path.join(System.tmp_dir!(), "atlas-other-repo-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(other)
+    on_exit(fn -> File.rm_rf!(other) end)
+    {_, 0} = System.cmd("git", ["init", "-q", other])
+
+    for cd <- ["/", other] do
+      assert {out, 0} = atlas(["main-clone"], [], cd)
+      assert String.trim(out) == main, "atlas main-clone from #{cd}: #{out}"
+      assert {out, 0} = atlas(["where"], [], cd)
+      assert String.trim(out) == real(@root), "atlas where from #{cd}: #{out}"
+      assert {"prod " <> file, 0} = atlas(["env"], [], cd)
+      assert String.trim(file) == Path.join(real(@root), "env/prod.json")
+    end
+  end
+
+  # The physical path, as `pwd -P` gives it (macOS's /tmp and /var are links).
+  defp real(path) do
+    {out, 0} = System.cmd("pwd", ["-P"], cd: path)
+    String.trim(out)
   end
 
   test "test and prod share no port and no data, and neither is the live store" do
