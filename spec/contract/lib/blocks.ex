@@ -12,7 +12,7 @@ defmodule AtlasContract.Blocks do
   """
   use AtlasSpec.Schema
 
-  version "0.5.0"
+  version "0.6.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -32,7 +32,9 @@ defmodule AtlasContract.Blocks do
 
   # One line of a list; opening it opens `to`. Its links are for the row while it is
   # selected.
+  # `id` is the item's id, which a client shows first, in a column of its own.
   defmodel :row do
+    field :id, :string
     field :label, :string, required: true
     field :detail, :string
     field :to, :string, required: true

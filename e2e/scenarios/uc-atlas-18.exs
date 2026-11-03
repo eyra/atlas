@@ -11,14 +11,15 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
   - Watch the third step
   """
 
-  row = fn title -> ~r/#{Regex.escape(title)}\s+UC-Atlas-\d+/ end
+  row = fn title -> ~r/UC-Atlas-\d+\s+#{Regex.escape(title)}/ end
 
   scene = fn title ->
     {scene, at} =
       atlas_json(i, ["put", "scene", "--title", title, "--description", "-"], 0, description)
 
+    for t <- [t1, t2], do: by_hint(t, title, at)
+
     for t <- [t1, t2] do
-      by_hint(t, title, at)
       open_row(t, title)
       see(t, "No use cases yet.")
     end
@@ -117,6 +118,25 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     see(t1, "#{key} is not a scene in Atlas")
     press(t1, "Enter")
     see(t1, "Step 1, 2 cannot run; drop it with space.")
+    press(t1, "Escape")
+    for t <- [t1, t2], do: home(t)
+  end
+
+  step "A plan of one step runs without asking; a longer one still asks", fn ->
+    key = scene.("A scene to rename")
+    press(t1, ":")
+    type(t1, "rename to A renamed scene")
+    press(t1, "Enter")
+    see(t1, "Done: 1 of 1 stored, without asking", 10_000)
+    see(t1, "[✓] 1. Update #{key}")
+    # Planning comes first, so this is not the 1-second hint of a save.
+    see(t2, "Scene #{key}: A renamed scene", 5_000)
+    press(t1, "Enter")
+    see(t1, "Scene #{key}: A renamed scene")
+
+    # Three steps: it asks.
+    ask.()
+    refute_see(t1, "without asking")
     press(t1, "Escape")
   end
 end
