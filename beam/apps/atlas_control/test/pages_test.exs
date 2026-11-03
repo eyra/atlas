@@ -298,6 +298,35 @@ defmodule AtlasControl.PagesTest do
     assert Enum.map(item["actions"], & &1["key"]) == ["d"]
   end
 
+  test "a fact with a web address can be opened in a browser, on its page and on its row" do
+    site = "https://example.org/tags/1"
+    tag = fact("T-a-1", %{"name" => "#a/1", "site" => site})
+    link = [%{"label" => "Open in browser", "key" => "o", "url" => site}]
+
+    %{blocks: [%{"props" => item}]} =
+      Pages.render({:item, "tag", "T-a-1"}, @d, [%{"fact" => tag}])
+
+    assert item["links"] == link
+
+    part = %{
+      "fact" => fact("P-1", %{"title" => "Wheel"}),
+      "incoming" => %{"on_part" => ["T-a-1"]}
+    }
+
+    page = Pages.render({:item, "part", "P-1"}, @d, [part, %{"facts" => [tag]}])
+    [%{"props" => part_item}, %{"props" => tags}] = page.blocks
+    refute Map.has_key?(part_item, "links")
+    assert [%{"links" => ^link}] = tags["rows"]
+
+    # Nothing to open without a value, nor anything but http and https.
+    for values <- [%{"name" => "#a/1"}, %{"name" => "#a/1", "site" => "file:///etc/passwd"}] do
+      %{blocks: [%{"props" => item}]} =
+        Pages.render({:item, "tag", "T-a-1"}, @d, [%{"fact" => fact("T-a-1", values)}])
+
+      refute Map.has_key?(item, "links")
+    end
+  end
+
   test "form text becomes the described types" do
     spec = @d["entities"]["widget"]
 

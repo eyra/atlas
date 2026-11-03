@@ -42,18 +42,24 @@ defmodule AtlasTui.View do
       [{:dim, String.duplicate("─", width)}]
     ]
 
-    # The footer: help, a rule, the notice and the status line.
-    room = max(height - length(header) - 4, 1)
-    lines = body(model, width, room)
+    # The footer: help (on more lines when it does not fit on one), a rule, the notice and
+    # the status line. A page longer than its room adds scrolling to the help.
+    room_for = fn help -> max(height - length(header) - 3 - length(help), 1) end
+    short = help_lines(help(model, false), width)
+    lines = body(model, width, room_for.(short))
+    help = help_lines(help(model, length(lines) > room_for.(short)), width)
+    room = room_for.(help)
+    lines = if room == room_for.(short), do: lines, else: body(model, width, room)
     body = window(lines, model, room)
     body = body ++ Elixir.List.duplicate([], room - length(body))
 
-    footer = [
-      [{:dim, " " <> help(model, length(lines) > room)}],
-      [{:dim, String.duplicate("─", width)}],
-      notice(model),
-      status(model, reconcile_seconds)
-    ]
+    footer =
+      Enum.map(help, &[{:dim, " " <> &1}]) ++
+        [
+          [{:dim, String.duplicate("─", width)}],
+          notice(model),
+          status(model, reconcile_seconds)
+        ]
 
     Enum.map(header ++ body ++ footer, &fit(&1, width))
   end
@@ -416,8 +422,26 @@ defmodule AtlasTui.View do
         if confirm.confirm_to, do: "y confirm   n cancel", else: "↵ back"
 
       true ->
-        Enum.map_join(Model.actions(model), "   ", &"#{&1.key} #{&1.label}") <> nav(model, long)
+        Enum.map_join(Model.actions(model) ++ Model.links(model), "   ", &"#{&1.key} #{&1.label}") <>
+          nav(model, long)
     end
+  end
+
+  # The help's entries ("key what", three spaces apart) on as many lines as they need;
+  # an entry is never split.
+  defp help_lines(help, width) do
+    help
+    |> String.split("   ", trim: true)
+    |> Enum.reduce([], fn
+      entry, [] ->
+        [entry]
+
+      entry, [line | done] ->
+        if String.length(line <> "   " <> entry) < width,
+          do: [line <> "   " <> entry | done],
+          else: [entry, line | done]
+    end)
+    |> Enum.reverse()
   end
 
   defp multiline_focused?(model) do
