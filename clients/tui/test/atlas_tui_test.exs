@@ -477,4 +477,15 @@ defmodule AtlasTuiTest do
       assert screen(model(@list)) =~ "Things"
     end
   end
+
+  test "the view knows every block and kind of markup in Control's contract" do
+    schema = AtlasContract.Blocks.__schema__()
+    known = View.known()
+
+    for %{name: name} <- schema.blocks,
+        do: assert(Atom.to_string(name) in known.blocks, "the TUI does not draw block #{name}")
+
+    for %{name: name} <- schema.markup,
+        do: assert(Atom.to_string(name) in known.markup, "the TUI does not know markup #{name}")
+  end
 end

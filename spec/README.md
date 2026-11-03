@@ -4,21 +4,27 @@ Control is a spec-driven backend for frontend (architecture, section 14). The sp
 
 mica-bff (`~/projects/nova/mica-bff`) was the inspiration for the format. Atlas shares no code, catalogue or package with it (d-0009).
 
-## Where things are
+## Generator, contract, targets
 
-The spec is Elixir: the block catalogue is written in a small DSL and is the single source. Everything else is generated from it.
+The spec is in three parts, as in prism (ADR [0001](../docs/adr/0001-generator-contract-targets.md)):
 
-| What | Where |
-|---|---|
-| The block catalogue, the spec itself (source, edit this) | `spec/control/blocks.ex` (this folder) |
-| The DSL: `version`, `defblock`, `defmodel`, `defmarkup`, `field`, and its compile-time checks | `beam/apps/atlas_control/lib/atlas_control/spec.ex` |
-| The rules of markup (nesting, the tree, delete, move, place), as tested functions; Control and the TUI both compile them | `spec/control/rules/markup.ex` (`AtlasSpec.Markup`) |
-| The generators | `beam/apps/atlas_control/lib/atlas_control/spec/gen.ex`, run with `mix atlas.gen` in `beam/` |
-| Generated server code (builders that check each block) | `beam/apps/atlas_control/lib/atlas_control/blocks.ex` |
-| Generated client code for the TUI (structs, decoder with fallback) | `clients/tui/lib/atlas_tui/blocks.ex` |
-| Generated catalogue as JSON, for clients in other languages | `spec/control/blocks.json` (this folder; never edit it) |
+| Part | Where | What |
+|---|---|---|
+| Generator | `spec/generator/` (Mix app `atlas_spec`) | The DSL (`AtlasSpec.Schema`: `version`, `defblock`, `defmodel`, `defmarkup`, `field`) and its compile-time checks; the rules of markup (`AtlasSpec.Markup`); the header (`AtlasSpec.Header`); the targets; `mix atlas.gen`. None of Atlas's values: it compiles and is tested without the contract, on a neutral example (`test/support/example.ex`). |
+| Contract | `spec/contract/` (Mix app `atlas_contract`) | `lib/blocks.ex`, `AtlasContract.Blocks`: the blocks, models and kinds of markup Control sends and every client renders. Only that. It depends on the generator by path. **Edit this.** |
+| Targets | see below | What the contract becomes, for each consumer. |
 
-A block in the catalogue:
+A contract compiles to one function, `__schema__/0`: plain data, documented in `AtlasSpec.Schema`. Every target reads only that (a test refuses a target that calls into the DSL).
+
+| Target | Kind | Gives |
+|---|---|---|
+| `AtlasSpec.Targets.Server` | compile time | `AtlasControl.Blocks` (`use AtlasSpec.Targets.Server, contract: AtlasContract.Blocks`): a builder macro per block, model and kind of markup, and `view_model/2`. |
+| `AtlasSpec.Targets.Client` | compile time | `AtlasTui.Blocks`: a struct per block, model and kind of markup, `decode/1` with a fallback, and `view_model/1`. |
+| `AtlasSpec.Targets.Json` | file | `spec/targets/json/blocks.json`, the contract as data for clients in other languages. Never edit it. |
+
+Control and the TUI depend on the contract by path, and read it when they compile: changing the contract recompiles them, and no Elixir code is generated into files. A Swift package for iOS will be a file target under `spec/targets/swift/`.
+
+A block in the contract:
 
 ```elixir
 defblock :form do
@@ -31,14 +37,14 @@ defblock :form do
 end
 ```
 
-Types are `:string`, `:integer`, `:boolean`, a model (`defmodel`), or `{:list, type}`. `blocks.ex` compiles into Control (`elixirc_paths` in `atlas_control/mix.exs`), so a mistake fails the build and points at its line:
+Types are `:string`, `:integer`, `:boolean`, a model (`defmodel`), or `{:list, type}`. A mistake fails the build and points at its line:
 
-- in the catalogue: an unknown type, a name or field defined twice, a block that holds a block, a field that holds markup, a name that is not snake_case, an option other than `required:`, a missing `version`;
+- in the contract: an unknown type, a name or field defined twice, a block that holds a block, a field that holds markup, a name that is not snake_case, an option other than `required:`, a missing `version`;
 - in Control's code: a builder call (`Blocks.form(title: ..., ...)`) that leaves out a required prop or names one the block does not have. The builders are macros, so a caller writes `require AtlasControl.Blocks, as: Blocks`. A wrong value, or a required prop that is `nil` at run time, raises when the block is built.
 
-Change the catalogue, run `cd beam && mix atlas.gen`, commit the catalogue and the three generated files. A test fails when they are out of date, and CI runs `mix atlas.gen --check`.
+Change the contract, run `cd spec/contract && mix atlas.gen`, commit the contract and `spec/targets/`. CI runs `mix atlas.gen --check`, which fails on a file that would change and on a generated file no target writes any more. Every generated file starts with a header that says so and names the contract file; `mix atlas.gen` never overwrites a file without it. Then check the TUI still knows every block and kind of markup (`AtlasTui.View.known/0`; its tests fail otherwise).
 
-The DSL is plain macros (`AtlasControl.Spec`, about 170 lines), not Spark: a catalogue of a few blocks and models needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency. Markup is one more kind of entry, `defmarkup`, beside `defblock` and `defmodel`.
+The DSL is plain macros, not Spark: a contract of a few blocks, models and kinds of markup needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency.
 
 ## View model (spec 0.2.0)
 
@@ -68,7 +74,7 @@ On the wire a block is `{"id": "item", "type": "list", "props": {...}}`. An opti
 
 On the wire an entry is `{"kind": "section", "start": "<block id>", "end": "<block id>", "props": {...}}`, covering `start` to `end`, both included, with `"group"` on the pieces of split markup.
 
-All markup nests, of every kind, as in XML: two entries share no block, or one covers all of the other. Entries over the same stretch nest in list order, the first outermost. So a view model's markup is one well-formed tree, which a client renders top down. Markup that would cross (a highlight over the end of one section and the start of the next) is placed as pieces that each nest and share a group id. The rules, as functions with tests, are `AtlasSpec.Markup` in `spec/control/rules/markup.ex`:
+All markup nests, of every kind, as in XML: two entries share no block, or one covers all of the other. Entries over the same stretch nest in list order, the first outermost. So a view model's markup is one well-formed tree, which a client renders top down. Markup that would cross (a highlight over the end of one section and the start of the next) is placed as pieces that each nest and share a group id. The rules, as functions with tests, are `AtlasSpec.Markup` in the generator (`spec/generator/lib/atlas_spec/markup.ex`):
 
 - `check/2`: refuses crossing markup, an unknown block id, an end before its start, an id used twice. Control's `Blocks.view_model/2` raises on it, so Control never sends bad markup; a client leaves out markup that fails it and shows the blocks flat.
 - `tree/2`: the tree a client renders.
@@ -78,7 +84,7 @@ All markup nests, of every kind, as in XML: two entries share no block, or one c
 
 Today an item page puts the item in a `border` and each related list in a `section` carrying its title (a scene: the scene in a border, then a "Use cases" section).
 
-The names (view model, markup) live in one place: the attributes at the top of `gen.ex`, plus the `defmarkup` macro in `spec.ex` and the module name `AtlasSpec.Markup`.
+The names (view model, markup) live in one place: `AtlasSpec.Names`, plus the `defmarkup` macro and the module name `AtlasSpec.Markup`.
 
 ## Protocol
 

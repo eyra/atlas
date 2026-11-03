@@ -1,10 +1,10 @@
-defmodule AtlasControl.Spec do
+defmodule AtlasSpec.Schema do
   @moduledoc """
   The schema of Control's spec, written as a DSL. Inspired by mica-bff's spec format
   (inspiration only, d-0009: nothing is shared with it).
 
       defmodule MyBlocks do
-        use AtlasControl.Spec
+        use AtlasSpec.Schema
 
         version "0.1.0"
 
@@ -31,19 +31,35 @@ defmodule AtlasControl.Spec do
   - `field`: a snake_case name, a type and `required: true | false` (default `false`).
     Types: `:string`, `:integer`, `:boolean`, a model, or `{:list, type}`.
 
-  A mistake fails at compile time and points at its line. Generators read `__spec__/0`,
-  never the source. The catalogue is `spec/control/blocks.ex`.
+  A mistake fails at compile time and points at its line.
+
+  ## The schema as data
+
+  A contract compiles to one function, `__schema__/0`, and the targets read only that,
+  never this module's internals (a test checks it):
+
+      %{
+        version: "1.0.0",
+        file: "/abs/path/to/the/contract.ex",
+        models: [entry],
+        blocks: [entry],
+        markup: [entry]
+      }
+
+  where an entry is `%{name: atom, fields: [%{name: atom, type: type, required: boolean}]}`
+  in the order written, and a type is `:string`, `:integer`, `:boolean`, a model's name,
+  or `{:list, type}`.
   """
 
   @primitives [:string, :integer, :boolean]
 
   defmacro __using__(_opts) do
     quote do
-      import AtlasControl.Spec,
+      import AtlasSpec.Schema,
         only: [version: 1, defblock: 2, defmodel: 2, defmarkup: 2, field: 2, field: 3]
 
       Module.register_attribute(__MODULE__, :spec_entries, accumulate: true)
-      @before_compile AtlasControl.Spec
+      @before_compile AtlasSpec.Schema
     end
   end
 
@@ -58,7 +74,7 @@ defmodule AtlasControl.Spec do
   defp entry(type, name, body, line) do
     quote do
       if open = Module.get_attribute(__MODULE__, :spec_open) do
-        AtlasControl.Spec.__fail__(
+        AtlasSpec.Schema.__fail__(
           __ENV__.file,
           unquote(line),
           "#{inspect(unquote(name))} inside #{inspect(open)}"
@@ -95,7 +111,7 @@ defmodule AtlasControl.Spec do
 
     quote do
       unless Module.get_attribute(__MODULE__, :spec_open) do
-        AtlasControl.Spec.__fail__(
+        AtlasSpec.Schema.__fail__(
           __ENV__.file,
           unquote(line),
           "field #{inspect(unquote(name))} outside a block, model or markup"
@@ -130,14 +146,15 @@ defmodule AtlasControl.Spec do
 
     spec = %{
       version: version,
+      file: env.file,
       models: for(%{type: :model} = e <- entries, do: strip.(e)),
       blocks: for(%{type: :block} = e <- entries, do: strip.(e)),
       markup: for(%{type: :markup} = e <- entries, do: strip.(e))
     }
 
     quote do
-      @doc "The spec as plain data, for generators."
-      def __spec__, do: unquote(Macro.escape(spec))
+      @doc "The schema as plain data, for the targets (see `AtlasSpec.Schema`)."
+      def __schema__, do: unquote(Macro.escape(spec))
     end
   end
 

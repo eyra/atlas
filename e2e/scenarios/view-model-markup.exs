@@ -1,5 +1,5 @@
 # Markup on a scene's page: a border around the scene, a section for its use cases
-# (spec/control/README.md, "Markup").
+# (spec/README.md, "Markup").
 import AtlasE2E.Scenario
 
 scenario "Markup: a border around the scene, a section for its use cases", fn %{t1: t1, t2: t2} ->

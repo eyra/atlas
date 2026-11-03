@@ -4,7 +4,18 @@ defmodule AtlasTui.View do
   the screen. Each line is a list of `{style, text}` segments; `to_ansi/1` adds colour.
   """
 
-  alias AtlasTui.Blocks.{Border, Confirm, Fallback, Form, Input, Item, Section}
+  alias AtlasTui.Blocks.{
+    Border,
+    Columns,
+    Confirm,
+    Fallback,
+    Form,
+    Highlight,
+    Input,
+    Item,
+    Section
+  }
+
   alias AtlasTui.Blocks.List, as: ListBlock
   alias AtlasTui.{Model, Text}
 
@@ -13,6 +24,13 @@ defmodule AtlasTui.View do
   @resting_rows 8
   # A focused one never shows fewer than this, however small the screen.
   @least_rows 3
+
+  @doc """
+  The contract's names this view knows: the blocks it draws, and the kinds of markup it
+  draws or, for now, passes through. A test fails when the contract has one it does not.
+  """
+  def known,
+    do: %{blocks: ~w(list item form confirm), markup: ~w(section border columns highlight)}
 
   @doc "The screen: exactly `height` lines of plain segments."
   def render(%Model{} = model, width, height, reconcile_seconds) do
@@ -132,7 +150,8 @@ defmodule AtlasTui.View do
     [[{:dim, top}]] ++ lines ++ [[{:dim, " └" <> String.duplicate("─", inner) <> "┘"}]]
   end
 
-  defp markup(_other, children, model, width, room), do: nodes(children, model, width, room)
+  defp markup(%kind{}, children, model, width, room) when kind in [Columns, Highlight],
+    do: nodes(children, model, width, room)
 
   defp block(%ListBlock{} = list, model, _width, _room) do
     rows =

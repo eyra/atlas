@@ -1,8 +1,9 @@
 defmodule AtlasSpec.Markup do
   @moduledoc """
-  The rules of markup, as functions. Part of Control's spec: Control compiles this file to
-  refuse bad markup, the TUI compiles it to render markup as a tree. A client in another
-  language implements the same rules; these functions and their tests say what they are.
+  The rules of markup, as functions: part of the format, so of the generator, not of a
+  contract. The server target refuses bad markup with them; the client target leaves it
+  out; the TUI renders the tree. A client in another language implements the same rules;
+  these functions and their tests say what they are.
 
   A view model is its content, a flat list of blocks with stable ids, and its markup: a
   list of entries `%{"kind" => kind, "start" => id, "end" => id, "props" => %{}}`, plus
