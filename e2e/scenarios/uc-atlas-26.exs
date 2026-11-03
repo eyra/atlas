@@ -59,8 +59,12 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     see(t1, ~r/State\s+Open/)
     see(t1, ~r/Draft\s+yes/)
     see(t1, ~r/Last read\s+\d{4}-\d\d-\d\d \d\d:\d\d UTC from GitHub/)
-    # Still GitHub's: nobody changes them in Atlas.
-    refute_see(t1, "e Change")
+    # Still GitHub's: a change only moves it to another issue, and never sets them.
+    press(t1, "e")
+    see(t1, ~r/In issue \*\s+‹ IS-Atlas-\d+/)
+    for field <- ["Title", "State", "Draft"], do: refute_see(t1, ~r/^\s+#{field}\s/m)
+    press(t1, "Escape")
+    see(t1, ~r/Last read\s+\d{4}-\d\d-\d\d/)
   end
 
   step "The issue's row: the title, then Open and draft; TUI 2 too", fn ->

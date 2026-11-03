@@ -193,6 +193,7 @@ defmodule AtlasControl.PagesTest do
     assert fields["Has under it"] == "tag"
     assert fields["Id"] =~ "P-"
     assert fields["Fields"] =~ "title: text; required"
+    assert fields["Fields"] =~ "of_widget: the key of a widget; a change moves it there"
 
     widget = Enum.find(items, &(&1["title"] =~ "(widget)"))
 
@@ -305,6 +306,44 @@ defmodule AtlasControl.PagesTest do
              "choices" => [%{"value" => ""}, %{"value" => "light", "label" => "Light"}, _]
            } =
              Enum.find(form["inputs"], &(&1["name"] == "shade"))
+  end
+
+  test "a change form offers each parent relation: every fact of the parent's kind" do
+    part = Map.put(fact("P-1", %{"title" => "Wheel"}), "links", %{"of_widget" => ["W-2"]})
+    widgets = %{"facts" => [fact("W-2", %{"title" => "Two"}), fact("W-1", %{"title" => "One"})]}
+
+    assert Pages.reads({:edit, "part", "P-1"}, @d) == [
+             {"part", %{"key" => "P-1"}},
+             {"widget", %{}}
+           ]
+
+    %{blocks: [%{"props" => form}]} =
+      Pages.render({:edit, "part", "P-1"}, @d, [%{"fact" => part}, widgets])
+
+    assert Enum.map(form["inputs"], & &1["name"]) == ["_key", "title", "of_widget"]
+
+    # The current parent selected; a fact that has one keeps one, so no empty choice.
+    assert %{
+             "label" => "Of widget",
+             "kind" => "choice",
+             "value" => "W-2",
+             "required" => true,
+             "choices" => [
+               %{"value" => "W-1", "label" => "W-1: One"},
+               %{"value" => "W-2", "label" => "W-2: Two"}
+             ]
+           } = Enum.find(form["inputs"], &(&1["name"] == "of_widget"))
+
+    # Without a parent: the empty choice first, and selected.
+    loose = Map.put(part, "links", %{})
+
+    %{blocks: [%{"props" => form}]} =
+      Pages.render({:edit, "part", "P-1"}, @d, [%{"fact" => loose}, widgets])
+
+    assert %{"value" => "", "required" => false, "choices" => [%{"value" => ""} | _]} =
+             Enum.find(form["inputs"], &(&1["name"] == "of_widget"))
+
+    assert Pages.parent_values(@d, "part", part) == %{"of_widget" => "W-2"}
   end
 
   test "text of several lines keeps its line breaks, on the page and in a change form" do
@@ -424,12 +463,18 @@ defmodule AtlasControl.PagesTest do
 
     assert Enum.map(edit["inputs"], &{&1["name"], &1["kind"], &1["value"]}) == [
              {"_key", "readonly", "T-a-1"},
-             {"name", "readonly", "#a/1"}
+             {"name", "readonly", "#a/1"},
+             {"on_part", "choice", ""}
            ]
 
-    # Labelled by that property; nothing a person may change, so no Change action.
+    # Labelled by that property; no field a person may set, but it can move to another part.
     %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [stored])
     assert item["title"] == "Tag T-a-1: #a/1"
+    assert Enum.map(item["actions"], & &1["key"]) == ["e", "d"]
+
+    # A kind with nothing to set and no parent has nothing to change.
+    loose = put_in(@d, ["relations", "on_part", "max_outgoing"], 2)
+    %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, loose, [stored])
     assert Enum.map(item["actions"], & &1["key"]) == ["d"]
   end
 
