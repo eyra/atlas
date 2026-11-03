@@ -15,7 +15,11 @@ defmodule AtlasTui.App do
   @reconnect 2_000
 
   def run(env, settings) do
-    :ok = :shell.start_interactive({:noshell, :raw})
+    with {:error, reason} <- :shell.start_interactive({:noshell, :raw}) do
+      IO.puts(:stderr, "atlas: the TUI needs a terminal (#{inspect(reason)})")
+      System.halt(1)
+    end
+
     Logger.configure(level: :error)
     IO.write("\e[?1049h\e[?25l")
     parent = self()

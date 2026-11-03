@@ -12,8 +12,8 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-02.md`: manage the use cases of a scene (UC-Atlas-02).
 
 ```sh
-bin/atlas up  --env test   # rela test (background) and the core (foreground)
-bin/atlas tui --env test   # a TUI; open a second one beside it
+atlas tui     # starts what is needed in the background, then opens a TUI; again for a second one
+atlas status  # what runs, and which build (also: atlas logs, atlas stop, atlas restart)
 ```
 
 ## Layout
@@ -25,7 +25,7 @@ bin/atlas tui --env test   # a TUI; open a second one beside it
 | `spec/control/` | Control's spec: blocks, wire format, protocol. The spec itself is Elixir in `atlas_control`; `mix atlas.gen` makes server and client code from it. |
 | `rela/` | rela's description (`schema.yaml`): every entity Atlas knows. `atlas.json` adds what this rela cannot hold, as data per kind: which fields a create asks for, how ids are made, defaults, fields only a connector fills. Plus the scripts that run the rela test instance. |
 | `env/` | One settings file per environment (`test.json`), read by the core and the clients. |
-| `bin/atlas` | Starts the environment and the TUI. |
+| `bin/atlas` | The `atlas` command: starts the environment in the background and opens the TUI. `bin/atlas install` links it into `~/.local/bin` from the main clone. |
 | `docs/guides/` | How to try each use case. |
 
 ## Rules the tests check

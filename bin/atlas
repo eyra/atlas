@@ -1,43 +1,134 @@
 #!/usr/bin/env bash
-# Atlas on this Mac.
+# atlas: try Atlas from any folder (test only, for now).
 #
-#   bin/atlas up  --env test   # rela test in the background (started if it is not
-#                              # answering, also after a reboot), then the core (Bus,
-#                              # State, Control) in the foreground; Ctrl-C twice stops it
-#   bin/atlas tui --env test   # a TUI; open as many as you like, each in its own terminal
-#   bin/atlas rela-status --env test
-#   bin/atlas rela-stop   --env test
+#   atlas              open a TUI; starts rela test and the core in the background when
+#                      they are not answering, and restarts a core from an older build
+#   atlas tui          the same; open as many as you like, each in its own terminal
+#   atlas stop         stop the core (rela test keeps running)
+#   atlas restart      stop the core and start this build in the background
+#   atlas status       what runs, and which build
+#   atlas logs         follow the core's log
+#   atlas where        the folder the build comes from
+#   atlas install      link `atlas` into ~/.local/bin (from the main clone only)
+#   atlas up           run the core in the foreground (what `atlas` starts in the background)
+#   atlas rela-status, atlas rela-stop
 #
-# prod is the default environment and is not built yet.
+# Every command takes --env test, the default; prod is not built yet. ATLAS_ENV_FILE
+# runs a private instance (other ports and data), so an agent's run never meets Melle's.
 set -euo pipefail
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+# The repository this script lives in, also when it is called through a link.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  target="$(readlink "$src")"
+  case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
+done
+root="$(cd "$(dirname "$src")/.." && pwd)"
+usage() { sed -n '2,17p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
-cmd="${1:-}"; [ -n "$cmd" ] || usage; shift
-env=prod
+cmd=tui
+case "${1:-}" in -*|"") ;; *) cmd="$1"; shift ;; esac
+env=test
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) env="${2:-}"; shift 2 ;;
     --env=*) env="${1#--env=}"; shift ;;
+    -h|--help) usage ;;
     *) echo "atlas: unknown option $1" >&2; usage ;;
   esac
 done
 
 if [ "$env" = prod ]; then echo "atlas: prod is not built yet; use --env test" >&2; exit 1; fi
-# ATLAS_ENV_FILE: a private instance of the environment (other ports and data), so a
-# test run by an agent never meets the one Melle uses. The default is env/<env>.json.
 settings="${ATLAS_ENV_FILE:-$root/env/$env.json}"
 [ -f "$settings" ] || { echo "atlas: no environment '$env' (no $settings)" >&2; exit 1; }
 export ATLAS_ROOT="$root" ATLAS_ENV="$env"
 
 setting() { v="$(plutil -extract "$1" raw -o - "$settings")"; echo "${v/#\~/$HOME}"; }
 rela_url="$(setting rela.url)"
+port="$(setting control.port)"
 # The rela scripts take their port, data and binaries from these.
 export ATLAS_RELA_PORT="$(setting rela.port)" ATLAS_RELA_DATA="$(setting rela.data)" ATLAS_RELA_BIN="$(setting rela.bin)"
 export ATLAS_TEST_ROOT="$(dirname "$ATLAS_RELA_DATA")"
 
+# The background core's files, beside rela's (the same files the stopgap used).
+state="$ATLAS_TEST_ROOT"
+pidfile="$state/core.pid"
+headfile="$state/core.head"
+log="$state/core.log"
+
+head_now() { git -C "$root" rev-parse --short HEAD 2>/dev/null || echo unknown; }
+listening() { nc -z 127.0.0.1 "$port" 2>/dev/null; }
+
+core_pid() {
+  local pid; pid="$(cat "$pidfile" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+stop_core() {
+  local pid; pid="$(core_pid || true)"
+  if [ -n "$pid" ]; then
+    pkill -TERM -P "$pid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  # A core started by hand (atlas up) on this environment's port is stopped too.
+  local other; other="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$other" ]; then
+    kill -TERM $other 2>/dev/null || true
+    for _ in $(seq 1 20); do listening || break; sleep 0.5; done
+  fi
+  rm -f "$pidfile" "$headfile"
+}
+
+start_core() {
+  echo "atlas: starting the core from $root at $(head_now) (a first start compiles, about half a minute)..."
+  mkdir -p "$state"
+  nohup "$root/bin/atlas" up --env "$env" >"$log" 2>&1 </dev/null &
+  echo $! >"$pidfile"
+  head_now >"$headfile"
+  for _ in $(seq 1 240); do
+    listening && { echo "atlas: core ready"; return 0; }
+    kill -0 "$(cat "$pidfile")" 2>/dev/null || { echo "atlas: the core stopped; the last lines of $log:" >&2; tail -20 "$log" >&2; exit 1; }
+    sleep 0.5
+  done
+  echo "atlas: the core did not start within 2 minutes; see $log" >&2
+  exit 1
+}
+
+# A core from another build than this checkout is restarted, so nobody tries an old build.
+ensure_core() {
+  if listening && [ "$(cat "$headfile" 2>/dev/null)" != "$(head_now)" ]; then
+    echo "atlas: the running core is not this build ($(head_now)); restarting it"
+    stop_core
+  fi
+  listening || { [ -z "$(core_pid || true)" ] || stop_core; start_core; }
+}
+
+# The main clone follows develop: take the newest build before trying it.
+update_build() {
+  if [ "$(main_clone)" = "$root" ] && [ "$(git -C "$root" branch --show-current)" = develop ]; then
+    git -C "$root" pull --ff-only -q || echo "atlas: could not update develop; trying the build as it is" >&2
+  fi
+}
+
+# The repository's main clone (not a worktree of it).
+main_clone() { (cd "$(git -C "$root" rev-parse --git-common-dir)/.." && pwd); }
+
 case "$cmd" in
+  tui)
+    update_build
+    curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null || "$root/rela/scripts/start-bg.sh"
+    ensure_core
+    # Ctrl-S saves a form; without this the terminal would take it as "pause output".
+    saved="$(stty -g 2>/dev/null || true)"
+    stty -ixon 2>/dev/null || true
+    cd "$root/clients/tui"
+    status=0
+    mix atlas.tui --env "$env" || status=$?
+    [ -n "$saved" ] && stty "$saved" 2>/dev/null || true
+    exit $status
+    ;;
   up)
     if curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null; then
       echo "rela $env: answering at $rela_url"
@@ -47,15 +138,35 @@ case "$cmd" in
     cd "$root/beam"
     exec mix run --no-halt
     ;;
-  tui)
-    # Ctrl-S saves a form; without this the terminal would take it as "pause output".
-    saved="$(stty -g 2>/dev/null || true)"
-    stty -ixon 2>/dev/null || true
-    cd "$root/clients/tui"
-    status=0
-    mix atlas.tui --env "$env" || status=$?
-    [ -n "$saved" ] && stty "$saved" 2>/dev/null || true
-    exit $status
+  stop) stop_core; echo "atlas: core stopped (rela keeps running)" ;;
+  restart)
+    stop_core
+    curl -fsS -o /dev/null "$rela_url/_schema" 2>/dev/null || "$root/rela/scripts/start-bg.sh"
+    start_core
+    ;;
+  status)
+    echo "build:  $root at $(head_now)"
+    if pid="$(core_pid)"; then
+      echo "core:   running (pid $pid, build $(cat "$headfile" 2>/dev/null)), log $log"
+    elif listening; then
+      echo "core:   a core listens on $port, started by hand (atlas up)"
+    else
+      echo "core:   not running"
+    fi
+    "$root/rela/scripts/status.sh" 2>&1 | sed 's/^/rela:   /' || true
+    ;;
+  logs) exec tail -f "$log" ;;
+  where) echo "$root" ;;
+  install)
+    # Only the main clone: a worktree goes away, and its build is not develop.
+    if [ "$(main_clone)" != "$root" ]; then
+      echo "atlas: install from the main clone ($(main_clone)), not from a worktree" >&2
+      exit 1
+    fi
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$root/bin/atlas" "$HOME/.local/bin/atlas"
+    echo "atlas: ~/.local/bin/atlas -> $root/bin/atlas"
+    case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "atlas: add ~/.local/bin to your PATH" ;; esac
     ;;
   rela-status) exec "$root/rela/scripts/status.sh" ;;
   rela-stop) exec "$root/rela/scripts/stop.sh" ;;
