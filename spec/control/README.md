@@ -6,16 +6,38 @@ mica-bff (`~/projects/nova/mica-bff`) was the inspiration for the format. Atlas 
 
 ## Where things are
 
+The spec is Elixir: the block catalogue is written in a small DSL and is the single source. Everything else is generated from it.
+
 | What | Where |
 |---|---|
-| The schema of the spec (the DSL: `defblock`, `defmodel`, `field`) | `beam/apps/atlas_control/lib/atlas_control/spec.ex` |
-| The block catalogue, the spec itself | `beam/apps/atlas_control/lib/atlas_control/spec/blocks.ex` |
+| The block catalogue, the spec itself (source, edit this) | `spec/control/blocks.ex` (this folder) |
+| The DSL: `version`, `defblock`, `defmodel`, `field`, and its compile-time checks | `beam/apps/atlas_control/lib/atlas_control/spec.ex` |
 | The generators | `beam/apps/atlas_control/lib/atlas_control/spec/gen.ex`, run with `mix atlas.gen` in `beam/` |
 | Generated server code (builders that check each block) | `beam/apps/atlas_control/lib/atlas_control/blocks.ex` |
 | Generated client code for the TUI (structs, decoder with fallback) | `clients/tui/lib/atlas_tui/blocks.ex` |
-| The catalogue as JSON, for clients in other languages | `spec/control/blocks.json` (this folder) |
+| Generated catalogue as JSON, for clients in other languages | `spec/control/blocks.json` (this folder; never edit it) |
 
-Change the catalogue, run `cd beam && mix atlas.gen`, commit all three generated files. A test fails when they are out of date (`mix atlas.gen --check` does the same).
+A block in the catalogue:
+
+```elixir
+defblock :form do
+  field :title, :string, required: true
+  field :inputs, {:list, :input}, required: true
+  field :submit_label, :string, required: true
+  field :submit_to, :string, required: true
+  field :cancel_to, :string
+  field :errors, {:list, :string}
+end
+```
+
+Types are `:string`, `:integer`, `:boolean`, a model (`defmodel`), or `{:list, type}`. `blocks.ex` compiles into Control (`elixirc_paths` in `atlas_control/mix.exs`), so a mistake fails the build and points at its line:
+
+- in the catalogue: an unknown type, a name or field defined twice, a block that holds a block, a name that is not snake_case, an option other than `required:`, a missing `version`;
+- in Control's code: a builder call (`Blocks.form(title: ..., ...)`) that leaves out a required prop or names one the block does not have. The builders are macros, so a caller writes `require AtlasControl.Blocks, as: Blocks`. A wrong value, or a required prop that is `nil` at run time, raises when the block is built.
+
+Change the catalogue, run `cd beam && mix atlas.gen`, commit the catalogue and the three generated files. A test fails when they are out of date, and CI runs `mix atlas.gen --check`.
+
+The DSL is plain macros (`AtlasControl.Spec`, about 170 lines), not Spark: a catalogue of a few blocks and models needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency. Another kind of entry, such as the regions planned for sections and layouts, is one more `def…` macro beside `defblock` and `defmodel`.
 
 ## Blocks (spec 0.1.0)
 

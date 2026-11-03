@@ -20,7 +20,7 @@ defmodule AtlasControl.Pages do
   page lists the facts that point at it, and adds new ones already pointing at it.
   """
 
-  alias AtlasControl.Blocks
+  require AtlasControl.Blocks, as: Blocks
 
   # Keys for the "add" action of each related list on a page, in order.
   @add_keys ~w(a s x z)
