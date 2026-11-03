@@ -213,6 +213,26 @@ defmodule AtlasControl.SessionTest do
     assert %{"reason" => "hint", "blocks" => [_, %{"props" => %{"rows" => []}}]} = next(b, "page")
   end
 
+  test "a client that knows only the parent's key submits to _parent", %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    a = client(port)
+    next(a, "page")
+
+    put(a, %{"op" => "open", "to" => "/k/part/new/_parent/W-1"})
+
+    assert %{"title" => "New part in W-1", "blocks" => [%{"props" => form}]} = next(a, "page")
+    assert form["submit_to"] == "/k/part/new/of_widget/W-1"
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/part/new/_parent/W-1",
+      "values" => %{"title" => "Wheel"}
+    })
+
+    assert %{"path" => "/k/part/P-01", "back" => "/k/widget/W-1", "reason" => "stored"} =
+             next(a, "page")
+  end
+
   test "a fact with parts under it is not deleted", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     FakeStore.link("P-1", "W-1")

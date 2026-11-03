@@ -128,6 +128,52 @@ defmodule AtlasControl.PagesTest do
     assert form["cancel_to"] == "/k/widget/W-1"
   end
 
+  test "a client that knows only the parent's key: _parent becomes the kind's parent relation" do
+    route = Pages.route("/k/part/new/_parent/W-1")
+    assert Pages.resolve(route, @d) == {:new, "part", {"of_widget", "W-1"}}
+
+    assert Pages.resolve(Pages.route("/k/tag/new/_parent/P-1"), @d) ==
+             {:new, "tag", {"on_part", "P-1"}}
+
+    # A top kind belongs to no parent.
+    assert Pages.resolve(Pages.route("/k/widget/new/_parent/W-1"), @d) == :unknown
+    assert Pages.resolve({:list, "part"}, @d) == {:list, "part"}
+  end
+
+  test "a client that knows only a key: _ becomes the kind with that id prefix" do
+    prefix = fn kind -> Pages.create_rule(@d["entities"][kind]).prefix end
+    part = prefix.("part") <> "07"
+    assert Pages.resolve(Pages.route("/k/_/#{part}"), @d) == {:item, "part", part}
+    assert Pages.resolve(Pages.route("/k/_/#{part}/edit"), @d) == {:edit, "part", part}
+    assert Pages.resolve(Pages.route("/k/_/#{part}/delete"), @d) == {:delete, "part", part}
+    assert Pages.resolve(Pages.route("/k/_/nothing-1"), @d) == :unknown
+  end
+
+  test "the kinds page: per kind what a create asks, its id, its parent and its fields" do
+    assert Pages.route("/_kinds") == :kinds
+    assert Pages.path(:kinds) == "/_kinds"
+    %{title: "Kinds", blocks: blocks} = Pages.render(:kinds, @d, [])
+    items = for %{"type" => "item", "props" => props} <- blocks, do: props
+
+    kinds =
+      for item <- items,
+          do: Enum.find_value(item["fields"], &(&1["label"] == "Kind" && &1["value"]))
+
+    assert kinds == @d["entities"] |> Map.keys() |> Enum.sort()
+
+    part = Enum.find(items, &(&1["title"] =~ "(part)"))
+    fields = Map.new(part["fields"], &{&1["label"], &1["value"]})
+    assert fields["Belongs under"] == "widget"
+    assert fields["Has under it"] == "tag"
+    assert fields["Id"] =~ "P-"
+    assert fields["Fields"] =~ "title: text; required"
+
+    widget = Enum.find(items, &(&1["title"] =~ "(widget)"))
+
+    assert Enum.find_value(widget["fields"], &(&1["label"] == "Belongs under" && &1["value"])) ==
+             "nothing; a top kind"
+  end
+
   test "a hint of a child kind refreshes its parent's page" do
     assert Pages.shows?({:item, "widget", "W-1"}, @d, "part")
     assert Pages.shows?({:item, "widget", "W-1"}, @d, "widget")

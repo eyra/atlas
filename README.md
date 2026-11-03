@@ -23,12 +23,26 @@ atlas tui --env test      # the same for test; again for a second one
 atlas status --env test   # what runs, and which build (also: logs, stop, restart, env)
 ```
 
+## Driving Atlas from an agent
+
+Agents use the same Control as the TUI, from the command line: `atlas help`, `put`, `set`, `get`, `list`. Nothing writes rela directly. The same rules, refusals and generated codes apply, and an open TUI shows each change at once. `atlas help` (or `atlas put --help`) lists the kinds, what a create asks, how ids are made, what a kind belongs under and its fields, all from rela's description. Every command takes `--json` and then prints one JSON value: the item, the list, or `{"refused": [...]}`. The exit status is 0 when done, 1 when refused (the reasons also go to stderr) and 2 on an error. Like `atlas`, it works on prod unless given `--env test`.
+
+```sh
+atlas put use_case --in SC-Atlas-05 --title "Read items from the command line" --description-file uc.md --json
+atlas set IS-Atlas-33 stage=testing --json
+atlas put pull_request --url https://github.com/eyra/atlas/pull/14 --in IS-Atlas-33 --json
+```
+
+`--in <code>` names the parent, `--<field>-file <path>` or `--<field> -` (stdin) reads text of several lines, and `atlas get <code>` and `atlas list <kind> [--in <code>]` read. `atlas load-plan <SCENES.md> tools/plan/links.json [--dry-run]` loaded the plan from SCENES.md this way (UC-Atlas-05). It never changes an existing item, and when a code is taken it maps it to the next one.
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `beam/` | The BEAM platform, an umbrella with one application per layer: `atlas_bus`, `atlas_state`, `atlas_control`. Layers depend on the Bus only and talk only over it. |
 | `clients/tui/` | The TUI, a client of Control. Renders Control's blocks; knows no entity. Not part of the BEAM platform. |
+| `clients/agent/` | The agents' command line (`atlas help/put/set/get/list`), a client of Control like the TUI: it reads pages and fills forms, and knows no entity. |
+| `tools/plan/` | `atlas load-plan` (UC-Atlas-05): SCENES.md into Atlas through `clients/agent`, with `links.json` for pull requests and stages. |
 | `spec/` | Control's spec, in three parts (ADR 0001): `generator/` (the DSL, the rules of markup, the targets, `mix atlas.gen`; none of Atlas's values), `contract/` (the blocks, models and markup Control sends; only that), `targets/` (generated files: `json/blocks.json` for clients in other languages). Control and the TUI read the contract at compile time. `spec/README.md` has the view model, the wire format and the protocol. |
 | `rela/` | rela's description (`schema.yaml`): every entity Atlas knows. `atlas.json` adds what this rela cannot hold, as data per kind: which fields a create asks for, how ids are made, defaults, fields only a connector fills. Plus the scripts that run the rela test instance. |
 | `env/` | One settings file per environment (`test.json`, `prod.json`), read by the core and the clients. Test and prod share no port and no data. |
@@ -40,7 +54,7 @@ atlas status --env test   # what runs, and which build (also: logs, stop, restar
 ## Rules the tests check
 
 - Layers talk only over the Bus: no layer depends on, calls or names another (`beam/apps/atlas_bus/test/boundary_test.exs`).
-- Nothing on the BEAM side or in the TUI names an entity; entities live in `rela/schema.yaml` only (same test).
+- Nothing on the BEAM side, in the TUI or in the agents' command line names an entity; entities live in `rela/schema.yaml` only (same test).
 - The generated files match the contract, and none is left over (`mix atlas.gen --check` in `spec/contract`).
 - The generator holds none of Atlas's values and compiles without the contract; its targets read only `__schema__/0`.
 

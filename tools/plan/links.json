@@ -1,0 +1,38 @@
+{
+  "_about": "What SCENES.md does not hold, for `atlas load-plan`: the merged pull requests of each issue (by URL) and the stage of each issue that is past specification. Codes as SCENES.md writes them; the loader maps them to Atlas's.",
+  "pull_requests": [
+    { "url": "https://github.com/eyra/atlas/pull/1", "issue": "IS-01" },
+    { "url": "https://github.com/eyra/atlas/pull/2", "issue": "IS-09" },
+    { "url": "https://github.com/eyra/atlas/pull/3", "issue": "IS-10" },
+    { "url": "https://github.com/eyra/atlas/pull/5", "issue": "IS-28" },
+    { "url": "https://github.com/eyra/atlas/pull/6", "issue": "IS-27" },
+    { "url": "https://github.com/eyra/atlas/pull/7", "issue": "IS-29" },
+    { "url": "https://github.com/eyra/atlas/pull/8", "issue": "IS-13" },
+    { "url": "https://github.com/eyra/atlas/pull/9", "issue": "IS-30" },
+    { "url": "https://github.com/eyra/atlas/pull/10", "issue": "IS-11" },
+    { "url": "https://github.com/eyra/atlas/pull/11", "issue": "IS-32" },
+    { "url": "https://github.com/eyra/atlas/pull/12", "issue": "IS-28" },
+    { "url": "https://github.com/eyra/atlas/pull/13", "issue": "IS-31" }
+  ],
+  "stages": {
+    "IS-01": "testing",
+    "IS-02": "testing",
+    "IS-08": "testing",
+    "IS-09": "testing",
+    "IS-10": "testing",
+    "IS-11": "testing",
+    "IS-13": "testing",
+    "IS-27": "testing",
+    "IS-28": "testing",
+    "IS-29": "testing",
+    "IS-30": "testing",
+    "IS-31": "testing",
+    "IS-32": "testing",
+    "IS-12": "development",
+    "IS-33": "development",
+    "IS-34": "development",
+    "IS-35": "development",
+    "IS-36": "development",
+    "IS-37": "development"
+  }
+}

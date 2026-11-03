@@ -16,6 +16,16 @@
 #   atlas e2e [uc-atlas-01 ...]  the end-to-end test, on a private test instance of its own
 #   atlas rela-status, atlas rela-stop
 #
+#   atlas help [<kind>] [--json]    the agents' commands, and every kind from rela's description:
+#                      what a create asks, its id, its parent, its fields (Control must run)
+#   atlas put <kind> [--in <key>] --title <text> --description-file <path>   create
+#   atlas set <key> <field>=<text> ...       change, e.g. `atlas set IS-Atlas-12 stage=testing`
+#   atlas get <key> [--json]                 one item, and what hangs under it
+#   atlas list <kind> [--json]               the items of a kind
+#   atlas load-plan <SCENES.md> <links.json> [--dry-run]   UC-Atlas-05: the plan into Atlas
+#                      put, set, get, list and load-plan go through Control like the TUI,
+#                      and start nothing: Control must run (`atlas status`).
+#
 # Every command works on prod unless it gets --env test: `atlas tui --env test`. Scripts,
 # tests and agents always pass --env test, or ATLAS_ENV_FILE: a private instance (other
 # ports and data) whose environment is the file's "env", so a trial never meets Melle's.
@@ -30,8 +40,9 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
-usage() { sed -n '2,23p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,33p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; exit 2; }
 
+caller="$PWD"
 no_env() { echo "atlas: --env needs test or prod" >&2; exit 2; }
 
 cmd=tui
@@ -43,8 +54,11 @@ while [ $# -gt 0 ]; do
     --env) [ -n "${2:-}" ] || no_env; env="$2"; shift 2 ;;
     --env=?*) env="${1#--env=}"; shift ;;
     --env=) no_env ;;
-    -h|--help) usage ;;
-    *) [ "$cmd" = e2e ] || { echo "atlas: unknown option $1" >&2; usage; }; args+=("$1"); shift ;;
+    *)
+      case "$cmd" in
+        e2e|put|set|get|list|load-plan|help) args+=("$1"); shift ;;
+        *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
+      esac ;;
   esac
 done
 
@@ -63,6 +77,9 @@ if [ -z "$settings" ]; then
   settings="$root/env/$env.json"
 fi
 [ -f "$settings" ] || { echo "atlas: no environment '$env' (no $settings)" >&2; exit 1; }
+# Absolute, so the core and the clients find it from their own folders.
+settings="$(cd "$(dirname "$settings")" && pwd -P)/$(basename "$settings")"
+[ -z "${ATLAS_ENV_FILE:-}" ] || export ATLAS_ENV_FILE="$settings"
 
 # A value from the settings file: plutil on macOS, jq elsewhere (CI).
 setting() {
@@ -211,6 +228,21 @@ case "$cmd" in
     ln -sfn "$root/bin/atlas" "$HOME/.local/bin/atlas"
     echo "atlas: ~/.local/bin/atlas -> $root/bin/atlas"
     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "atlas: add ~/.local/bin to your PATH" ;; esac
+    ;;
+  # The clients run in their own folders; a path the caller gives is read from where they called.
+  put|set|get|list|help)
+    # `atlas help` (not --json) starts with this script's own commands.
+    if [ "$cmd" = help ] && [[ " ${args[*]-} " != *" --json "* ]]; then
+      sed -n '2,33p' "$root/bin/atlas" | sed 's/^# \{0,1\}//'; echo
+    fi
+    cd "$root/clients/agent"
+    mix compile >&2
+    ATLAS_CALLER_CWD="$caller" exec mix atlas.agent "$cmd" --env "$env" ${args[@]+"${args[@]}"}
+    ;;
+  load-plan)
+    cd "$root/tools/plan"
+    mix compile >&2
+    ATLAS_CALLER_CWD="$caller" exec mix atlas.load_plan --env "$env" ${args[@]+"${args[@]}"}
     ;;
   rela-status) exec "$root/rela/scripts/status.sh" ;;
   rela-stop) exec "$root/rela/scripts/stop.sh" ;;

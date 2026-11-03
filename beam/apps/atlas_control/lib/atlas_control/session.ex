@@ -174,7 +174,7 @@ defmodule AtlasControl.Session do
     do: {:noreply, notice(state, "error", "Say hello first.")}
 
   defp handle_op("open", %{"to" => to}, state) do
-    {:noreply, show(%{state | form: %{}}, Pages.route(to), "open", nil)}
+    {:noreply, show(%{state | form: %{}}, route(to, state), "open", nil)}
   end
 
   defp handle_op("refresh", _message, state) do
@@ -187,11 +187,13 @@ defmodule AtlasControl.Session do
 
   defp handle_op("submit", %{"to" => to} = message, state) do
     raw = Map.new(message["values"] || %{}, fn {k, v} -> {k, to_string(v)} end)
-    {:noreply, submit(Pages.route(to), raw, state)}
+    {:noreply, submit(route(to, state), raw, state)}
   end
 
   defp handle_op(op, _message, state),
     do: {:noreply, notice(state, "error", "Unknown op #{inspect(op)}")}
+
+  defp route(to, state), do: to |> Pages.route() |> Pages.resolve(state.description)
 
   # Writes
 
