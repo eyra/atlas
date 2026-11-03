@@ -1,13 +1,14 @@
 import Config
 
-# The Atlas environment (test or prod) is not Mix's environment. `bin/atlas up --env test`
+# The Atlas environment (test or prod) is not Mix's environment. `bin/atlas up --env <env>`
 # sets ATLAS_ENV; its settings come from env/<env>.json at the repository root, the one
-# file the BEAM node and the clients both read.
+# file the BEAM node and the clients both read. There is no default: a node only starts
+# for the environment it was told, so nothing reaches prod by accident.
 if config_env() != :test do
-  env = System.get_env("ATLAS_ENV", "prod")
+  env = System.get_env("ATLAS_ENV")
 
-  if env != "test" do
-    raise "Atlas #{env} is not built yet; start with --env test"
+  if env not in ["test", "prod"] do
+    raise "ATLAS_ENV is #{inspect(env)}; start the core with bin/atlas up --env test|prod"
   end
 
   root = System.get_env("ATLAS_ROOT") || Path.expand("../..", __DIR__)
@@ -15,6 +16,11 @@ if config_env() != :test do
   # data), so an agent's test run never meets the one Melle is using.
   file = System.get_env("ATLAS_ENV_FILE") || Path.join(root, "env/#{env}.json")
   settings = file |> File.read!() |> JSON.decode!()
+
+  if settings["env"] != env do
+    raise "#{file} is for #{inspect(settings["env"])}, not #{env}"
+  end
+
   expand = &Path.expand(String.replace_prefix(&1, "~", System.user_home!()))
 
   config :atlas_bus, environment: env

@@ -203,6 +203,14 @@ defmodule AtlasControl.SessionTest do
     assert {:error, :closed} = :gen_tcp.recv(c, 0, 1_000)
   end
 
+  test "Control prod sends a test client away", %{port: port} do
+    Application.put_env(:atlas_bus, :environment, "prod")
+    on_exit(fn -> Application.put_env(:atlas_bus, :environment, "test") end)
+    c = client(port, "test")
+    assert %{"op" => "bye", "text" => text} = JSON.decode!(elem(:gen_tcp.recv(c, 0, 1_000), 1))
+    assert text =~ "This is Control prod; it does not serve \"test\""
+  end
+
   @tag timeout: 15_000
   test "a fact without an answer is sent again with the same id", %{port: port} do
     a = client(port)

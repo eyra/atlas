@@ -1,0 +1,13 @@
+{
+  "env": "prod",
+  "control": { "host": "127.0.0.1", "port": 7591 },
+  "rela": {
+    "url": "http://127.0.0.1:7590/api/v1",
+    "port": 7590,
+    "data": "~/.local/share/atlas/prod/rela",
+    "bin": "~/.local/share/atlas/prod/bin",
+    "extra": "rela/atlas.json"
+  },
+  "state": { "data": "~/.local/share/atlas/prod/beam" },
+  "reconcile_seconds": 5
+}

@@ -41,7 +41,7 @@ defmodule AtlasBus do
   @doc "The environment this Bus serves."
   def environment, do: Application.fetch_env!(:atlas_bus, :environment)
 
-  @doc "Test environment only: drop the next `count` hints, to show reconciling."
+  @doc "Test environment only (prod refuses): drop the next `count` hints, to show reconciling."
   defdelegate drop_hints(count), to: Router
 
   @doc "The classes of message the Bus routes."

@@ -18,7 +18,7 @@ defmodule AtlasTui.View do
   def render(%Model{} = model, width, height, reconcile_seconds) do
     header = [
       [
-        {:bold, " Atlas · #{model.env}"},
+        {env_style(model.env), " Atlas · #{model.env}"},
         {:dim, pad_left(model.title <> " ", width - 13 - String.length(model.env))}
       ],
       [{:dim, String.duplicate("─", width)}]
@@ -53,7 +53,12 @@ defmodule AtlasTui.View do
     ["\e[H", Enum.intersperse(rows, "\r\n"), "\e[J"]
   end
 
+  # Prod stands out (white on red), so Melle never takes one environment for the other.
+  defp env_style("prod"), do: :prod
+  defp env_style(_env), do: :bold
+
   defp segment({:plain, text}), do: ["\e[0m", text]
+  defp segment({:prod, text}), do: ["\e[0;1;97;41m", text]
   defp segment({:bold, text}), do: ["\e[0;1m", text]
   defp segment({:dim, text}), do: ["\e[0;2m", text]
   defp segment({:selected, text}), do: ["\e[0;7m", text]
