@@ -123,7 +123,10 @@ defmodule AtlasState.Rela.Http do
   defp failure({:ok, status, body, _}) when status in 400..499,
     do: {:error, {:invalid, [problem(body, status)]}}
 
-  defp failure({:ok, _status, _body, _}), do: {:error, :unavailable}
+  # rela answered, but failed: not "not reachable", and worth trying again later.
+  defp failure({:ok, status, body, _}),
+    do: {:error, {:failed, "rela answered #{status}: #{problem(body, status)}"}}
+
   defp failure({:error, _} = error), do: error
 
   # rela puts a JSON path in `detail` for some refusals; the message is then in `title`.
