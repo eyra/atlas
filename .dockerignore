@@ -1,0 +1,10 @@
+# The Fly images (fly/*.Dockerfile) are built from the repository root.
+.git
+.github
+.herdr-project
+**/_build
+**/deps
+e2e
+clients
+tools
+docs
