@@ -47,6 +47,12 @@ defmodule AtlasBus.BoundaryTest do
     |> Enum.reject(&(&1 == __ENV__.file))
   end
 
+  # Control's block catalogue, compiled into Control from spec/control.
+  defp sources(dir, "AtlasControl"),
+    do: sources(dir) ++ Path.wildcard(Path.join([@root, "spec/control", "*.ex"]))
+
+  defp sources(dir, _own), do: sources(dir)
+
   describe "the checks catch violations" do
     test "a layer that names another layer" do
       assert foreign_names("AtlasState.Server.handle(x)", "AtlasControl") == ["AtlasState"]
@@ -109,7 +115,7 @@ defmodule AtlasBus.BoundaryTest do
     test "no layer or client names another layer in its source" do
       dirs = Enum.map(@layers, fn {app, ns} -> {"beam/apps/#{app}", ns} end) ++ [@client]
 
-      for {dir, own} <- dirs, file <- sources(dir) do
+      for {dir, own} <- dirs, file <- sources(dir, own) do
         names = foreign_names(File.read!(file), own)
 
         assert names == [],
@@ -118,8 +124,9 @@ defmodule AtlasBus.BoundaryTest do
     end
 
     test "nothing on the BEAM side or in the TUI names an entity" do
-      dirs = Enum.map(@layers, fn {app, _} -> "beam/apps/#{app}" end) ++ [elem(@client, 0)]
-      files = Enum.flat_map(dirs, &sources/1)
+      dirs = Enum.map(@layers, fn {app, ns} -> {"beam/apps/#{app}", ns} end) ++ [@client]
+      files = Enum.flat_map(dirs, fn {dir, own} -> sources(dir, own) end)
+      assert Path.join(@root, "spec/control/blocks.ex") in files
       assert length(files) > 20
 
       for file <- files do
