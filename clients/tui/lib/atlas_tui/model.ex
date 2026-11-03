@@ -19,6 +19,9 @@ defmodule AtlasTui.Model do
             title: "",
             back: nil,
             blocks: [],
+            # The view model's block ids, in order, and its markup (decoded entries).
+            ids: [],
+            markup: [],
             selected: 0,
             # A page longer than the screen: nil follows the selected row or the focus;
             # a number of lines is scrolled to by page up and page down.
@@ -48,7 +51,7 @@ defmodule AtlasTui.Model do
   end
 
   def message(model, %{"op" => "page"} = msg) do
-    blocks = Enum.map(msg["blocks"] || [], &Blocks.decode/1)
+    {blocks, ids, markup} = Blocks.view_model(msg)
     same = msg["path"] == model.path
     updated = %{reason: msg["reason"], at: msg["at"], position: msg["position"]}
 
@@ -58,6 +61,8 @@ defmodule AtlasTui.Model do
         title: msg["title"] || "",
         back: msg["back"],
         blocks: blocks,
+        ids: ids,
+        markup: markup,
         updated: updated,
         waiting: model.waiting and msg["reason"] not in ["stored", "refused"]
     }

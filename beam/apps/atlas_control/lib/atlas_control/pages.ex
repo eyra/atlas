@@ -230,10 +230,17 @@ defmodule AtlasControl.Pages do
           |> Enum.zip(child_answers)
           |> Enum.zip(@add_keys)
           |> Enum.map(fn {{{relation, from, rel_spec}, child_answer}, add_key} ->
-            child_list(description, {relation, from, rel_spec}, key, child_answer, add_key)
+            {"list:" <> relation,
+             child_list(description, {relation, from, rel_spec}, key, child_answer, add_key)}
           end)
 
-        page("#{singular(spec, kind)} #{key}", back, [item | lists])
+        # The fact in a border; each related list in a section that carries its title.
+        markup =
+          [Blocks.border("item", "item")] ++
+            for {id, {title, _list}} <- lists, do: Blocks.section(id, id, title: title)
+
+        content = [{"item", item} | for({id, {_title, list}} <- lists, do: {id, list})]
+        page("#{singular(spec, kind)} #{key}", back, content, markup)
 
       %{"error" => error} ->
         unavailable(error, path({:list, kind}))
@@ -350,7 +357,17 @@ defmodule AtlasControl.Pages do
   defp page(_route, _kind, _spec, _description, _answers, _form),
     do: missing("Nothing here", "This page does not exist.", "/")
 
-  defp page(title, back, blocks), do: %{title: title, back: back, blocks: blocks}
+  # The view model of a page. A block without an id of its own is named by its type; a
+  # page holds at most one such block of each type.
+  defp page(title, back, content, markup \\ []) do
+    content =
+      Enum.map(content, fn
+        {id, block} -> {id, block}
+        block -> {block["type"], block}
+      end)
+
+    Map.merge(%{title: title, back: back}, Blocks.view_model(content, markup))
+  end
 
   defp child_list(description, {relation, from, rel_spec}, key, answer, add_key) do
     from_spec = description["entities"][from] || %{}
@@ -380,14 +397,18 @@ defmodule AtlasControl.Pages do
         _ -> "No #{String.downcase(title)} yet. Press #{add_key} to add one."
       end
 
-    Blocks.list(
-      title: title,
-      rows: rows,
-      empty: empty,
-      actions: [
-        Blocks.action(label: "Add #{name}", key: add_key, to: path({:new, from, {relation, key}}))
-      ]
-    )
+    {title,
+     Blocks.list(
+       rows: rows,
+       empty: empty,
+       actions: [
+         Blocks.action(
+           label: "Add #{name}",
+           key: add_key,
+           to: path({:new, from, {relation, key}})
+         )
+       ]
+     )}
   end
 
   @doc "Where to go after a fact of `kind` is deleted: its parent, or the list of its kind."

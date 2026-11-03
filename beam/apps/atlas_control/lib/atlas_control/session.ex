@@ -354,6 +354,7 @@ defmodule AtlasControl.Session do
       "title" => page.title,
       "back" => page.back,
       "blocks" => page.blocks,
+      "markup" => page.markup,
       "reason" => reason,
       "position" => as_of,
       "at" => now()

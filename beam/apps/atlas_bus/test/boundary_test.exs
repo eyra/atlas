@@ -49,7 +49,7 @@ defmodule AtlasBus.BoundaryTest do
 
   # Control's block catalogue, compiled into Control from spec/control.
   defp sources(dir, "AtlasControl"),
-    do: sources(dir) ++ Path.wildcard(Path.join([@root, "spec/control", "*.ex"]))
+    do: sources(dir) ++ Path.wildcard(Path.join([@root, "spec/control", "**", "*.ex"]))
 
   defp sources(dir, _own), do: sources(dir)
 
