@@ -857,6 +857,27 @@ defmodule AtlasControl.PagesTest do
     assert %{"label" => "Agent record", "value" => "request"} in log["fields"]
   end
 
+  test "a read that failed says what happened: no answer, no connection, or rela's error" do
+    page = fn answer ->
+      %{title: title, blocks: [%{"props" => confirm}]} =
+        Pages.render({:list, "widget"}, @d, [answer])
+
+      {title, confirm["text"]}
+    end
+
+    assert page.(%{"error" => "State did not answer"}) ==
+             {"State did not answer",
+              "State did not answer. Showing nothing rather than something old."}
+
+    assert {"rela is not reachable", "rela is not reachable. " <> _} =
+             page.(%{"error" => "rela is not reachable", "error_kind" => "unreachable"})
+
+    older = "rela does not know widget: its description is older than this build; run x"
+
+    assert {"rela answered with an error", ^older <> ". Showing nothing" <> _} =
+             page.(%{"error" => older, "error_kind" => "answered"})
+  end
+
   test "a page about a kind rela does not describe says so" do
     assert %{blocks: [%{"type" => "confirm"}]} =
              Pages.render({:list, "gadget"}, @d, [%{"facts" => []}])

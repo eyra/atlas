@@ -107,6 +107,10 @@ defmodule AtlasState.Server do
       # Not recorded: the same id may be stored once rela is back.
       :unavailable ->
         reply(envelope, "refused", Map.put(about, "reasons", ["rela is not reachable"]), nil)
+
+      # rela answered but failed: not recorded either, so the same id may be stored later.
+      {:unavailable, reason} ->
+        reply(envelope, "refused", Map.put(about, "reasons", [reason]), nil)
     end
   end
 
@@ -170,7 +174,7 @@ defmodule AtlasState.Server do
   defp read(state, @description, _content) do
     case describe(state) do
       {:ok, description} -> {%{"description" => description}, %{state | description: description}}
-      {:error, _} -> {%{"error" => "rela is not reachable"}, state}
+      {:error, reason} -> {read_error(reason), state}
     end
   end
 
@@ -182,9 +186,24 @@ defmodule AtlasState.Server do
         _ -> {read_all(state, kind, spec, %{}), state}
       end
     else
-      {:error, reason, state} -> {%{"error" => reason}, state}
+      {:error, :unavailable, state} -> {read_error(:unavailable), state}
+      {:error, reason, state} -> {%{"error" => reason, "error_kind" => "answered"}, state}
     end
   end
+
+  # What a read could not do, and whether rela answered at all: "unreachable" (no
+  # connection) or "answered" (rela said no, or failed), with rela's own words.
+  defp read_error(:unavailable),
+    do: %{"error" => "rela is not reachable", "error_kind" => "unreachable"}
+
+  defp read_error({:invalid, problems}),
+    do: answered("rela answered with an error: " <> Enum.join(problems, "; "))
+
+  defp read_error({:failed, text}), do: answered(text)
+  defp read_error(:not_found), do: answered("rela answered: not found")
+  defp read_error(other), do: answered("rela answered with an error: #{inspect(other)}")
+
+  defp answered(text), do: %{"error" => text, "error_kind" => "answered"}
 
   defp read_all(state, kind, spec, linked) do
     with {:ok, facts} <- Rela.list(state.rela, spec["plural"]),
@@ -195,7 +214,7 @@ defmodule AtlasState.Server do
          {:ok, facts} <- with_progress(state, kind, facts) do
       %{"facts" => Enum.map(facts, &wire(state, kind, &1))}
     else
-      {:error, _} -> %{"error" => "rela is not reachable"}
+      {:error, reason} -> read_error(reason)
     end
   end
 
@@ -215,7 +234,7 @@ defmodule AtlasState.Server do
       end
     else
       {:error, :not_found} -> %{"fact" => nil}
-      {:error, _} -> %{"error" => "rela is not reachable"}
+      {:error, reason} -> read_error(reason)
     end
   end
 
@@ -407,29 +426,39 @@ defmodule AtlasState.Server do
   defp loose(value), do: to_string(value)
 
   defp failure({:error, :unavailable}), do: :unavailable
+  defp failure({:error, {:failed, text}}), do: {:unavailable, text}
   defp failure({:error, {:invalid, problems}}), do: {:refused, problems}
   defp failure({:error, problems}) when is_list(problems), do: {:refused, problems}
   defp failure({:error, other}), do: {:refused, [inspect(other)]}
 
+  # A kind rela describes has a plural (its collection). One that only Atlas's additions
+  # (rela/atlas.json) name is one rela does not know: it runs an older description than
+  # this build. The description is read again first, in case rela was restarted since.
   defp kind_spec(state, kind) do
     case state.description && Description.kind(state.description, kind) do
-      nil ->
+      %{"plural" => _} = spec ->
+        {:ok, spec, state}
+
+      _ ->
         case describe(state) do
           {:ok, description} ->
             state = %{state | description: description}
 
             case Description.kind(description, kind) do
               nil -> {:error, "rela does not describe #{inspect(kind)}", state}
-              spec -> {:ok, spec, state}
+              %{"plural" => _} = spec -> {:ok, spec, state}
+              _ -> {:error, older(kind), state}
             end
 
           {:error, _} ->
             {:error, :unavailable, state}
         end
-
-      spec ->
-        {:ok, spec, state}
     end
+  end
+
+  defp older(kind) do
+    "rela does not know #{kind}: its description is older than this build; " <>
+      "run atlas restart --env #{AtlasBus.environment()}"
   end
 
   defp content_op(%{"op" => op}) when is_binary(op), do: op
