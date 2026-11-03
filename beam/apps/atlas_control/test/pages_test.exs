@@ -263,6 +263,32 @@ defmodule AtlasControl.PagesTest do
     assert second["empty"] == "No parts yet. Press s to create one."
   end
 
+  test "a limit on a relation: only children whose field counts, never the fact itself" do
+    tag = fn key, note -> fact(key, %{"name" => key, "note" => note}) end
+    over = &Pages.over_limit(@d, "on_part", "tag", &1, "P-1", &2)
+
+    assert Pages.limited(@d, %{"on_part" => ["P-1"], "of_widget" => ["W-1"]}) == [
+             {"on_part", "P-1"}
+           ]
+
+    assert over.(nil, []) == nil
+    # A dropped one, or one not read yet, does not count.
+    assert over.(nil, [tag.("T-1", "dropped"), tag.("T-2", nil)]) == nil
+
+    assert over.(nil, [tag.("T-2", "kept"), tag.("T-1", "live")]) ==
+             "P-1 already has T-1 (live); one tag per part"
+
+    # The same fact again (a create sent twice, a change that stays) is not over the limit.
+    assert over.("T-1", [tag.("T-1", "live")]) == nil
+
+    # The value as the description labels it.
+    labelled =
+      put_in(@d, ["entities", "tag", "properties", "note", "labels"], %{"live" => "Live"})
+
+    assert Pages.over_limit(labelled, "on_part", "tag", nil, "P-1", [tag.("T-1", "live")]) ==
+             "P-1 already has T-1 (Live); one tag per part"
+  end
+
   test "a hint of a child kind refreshes its parent's page" do
     assert Pages.shows?({:item, "widget", "W-1"}, @d, "part")
     assert Pages.shows?({:item, "widget", "W-1"}, @d, "widget")

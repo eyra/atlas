@@ -761,6 +761,47 @@ defmodule AtlasControl.Pages do
       end)
   end
 
+  @doc """
+  The relations among `links` (`%{relation => [parent]}`) that limit how many facts point
+  at one parent (`relations.<name>.limit` in `rela/atlas.json`): `[{relation, parent}]`.
+  """
+  def limited(description, links) do
+    for {relation, parents} <- links,
+        is_map(get_in(description, ["relations", relation, "limit"])),
+        parent <- parents,
+        do: {relation, parent}
+  end
+
+  @doc """
+  Why a fact of `kind` with key `key` may not point at `parent` through `relation`, or nil.
+  `children` are the facts of `kind` that point at it now. Only those whose `field` is one
+  of the limit's `values` count, and never the fact itself (sent again, or not moving).
+  """
+  def over_limit(description, relation, kind, key, parent, children) do
+    limit = get_in(description, ["relations", relation, "limit"]) || %{}
+    field = limit["field"]
+    prop = get_in(description, ["entities", kind, "properties", field]) || %{}
+
+    counted =
+      Enum.filter(children, fn child ->
+        child["key"] != key and (child["values"] || %{})[field] in (limit["values"] || [])
+      end)
+
+    if is_integer(limit["max"]) and length(counted) >= limit["max"] do
+      [first | _] = Enum.sort_by(counted, & &1["key"])
+      value = first["values"][field]
+
+      label =
+        get_in(prop, ["labels", value]) ||
+          get_in(description, ["types", prop["type"], "labels", value]) || to_text(value)
+
+      (limit["error"] || "{parent} already has {child} ({value})")
+      |> String.replace("{parent}", parent)
+      |> String.replace("{child}", first["key"])
+      |> String.replace("{value}", label)
+    end
+  end
+
   @doc "The parent a fact points at through each of its parent relations: `%{relation => key}`."
   def parent_values(description, kind, fact) do
     for relation <- parent_relations(description, kind),
