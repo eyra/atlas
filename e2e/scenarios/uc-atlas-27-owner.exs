@@ -86,3 +86,5 @@ scenario "UC-Atlas-27: Every fact has an owner", fn %{t1: t1, t2: t2, instance: 
     ["Assigned to", "coordinator"] in got["fields"] || raise inspect(got["fields"])
     got["origins"]["Assigned to"]["by"] == "migration" || raise inspect(got["origins"])
     got["origins"]["Assigned to"]["cause"] == "owner introduced" || raise inspect(got["origins"])
+  end
+end
