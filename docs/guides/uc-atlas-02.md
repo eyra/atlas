@@ -22,8 +22,8 @@ Keep TUI 2 open on the same scene: every use case you add, change or remove in T
 Also try:
 
 - **No title.** Add a use case with an empty title. State refuses it (`title is required`). The form keeps what you typed.
-- **Deleting a scene that has use cases.** In the scene, press `d`. It is refused: `still has 2 use cases. Remove them first`. Atlas never deletes use cases along with their scene.
-- **Issues.** A use case already shows an empty **Issues** list, with `a` to add one. rela describes Issue already; UC-Atlas-03 is about testing that.
+- **Deleting a scene that has use cases.** In the scene, press `d`. It is refused: `still has 2 use cases. Remove them first` (with one: `still has 1 use case. Remove it first`). Atlas never deletes use cases along with their scene.
+- **Issues.** A use case shows an **Issues** list, with `a` to add one (UC-Atlas-03).
 
 ## What changed for this
 

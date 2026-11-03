@@ -203,7 +203,12 @@ defmodule AtlasControl.PagesTest do
 
     %{blocks: [%{"props" => refusal}]} = Pages.render({:delete, "widget", "W-1"}, @d, [held])
     refute Map.has_key?(refusal, "confirm_to")
-    assert refusal["text"] =~ "still has 2 parts"
+    assert refusal["text"] =~ "still has 2 parts. Remove them first"
+
+    one = %{"fact" => fact("W-1", %{"title" => "One"}), "incoming" => %{"of_widget" => ["P-1"]}}
+    %{blocks: [%{"props" => refusal}]} = Pages.render({:delete, "widget", "W-1"}, @d, [one])
+    assert refusal["text"] =~ "still has 1 part. Remove it first"
+    assert refusal["text"] =~ "never deletes it along with its parent"
   end
 
   test "form text becomes the described types" do
