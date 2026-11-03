@@ -106,6 +106,21 @@ defmodule AtlasControl.FakeStore do
           "max_outgoing" => 1,
           "inverse" => %{"id" => "checked", "label" => "checked"}
         },
+        # Only a member approves, and only as itself; as `rela/atlas.json` adds it.
+        "approved_by" => %{
+          "label" => "approved by",
+          "from" => ["widget"],
+          "to" => ["member"],
+          "max_outgoing" => 1,
+          "only_target" => %{"error" => "only a member approves", "also" => ["migration"]},
+          "actions" => %{
+            "set" => %{"label" => "Approve", "key" => "a"},
+            "remove" => %{"label" => "Withdraw", "key" => "r"}
+          },
+          "requires_completed_children" => "{key} has {children} open",
+          "closes_parent" =>
+            "{parent} is approved; withdraw it first, or put this under another {kind}"
+        },
         # History only: a migration sets it.
         "seen_in" => %{
           "label" => "also seen in",
