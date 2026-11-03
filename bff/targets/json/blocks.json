@@ -166,32 +166,27 @@
           "type": "string"
         },
         {
+          "name": "role",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "part"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
           "name": "collapsible",
           "required": false,
           "type": "boolean"
         }
       ],
       "name": "section"
-    },
-    {
-      "fields": [
-        {
-          "name": "title",
-          "required": false,
-          "type": "string"
-        }
-      ],
-      "name": "border"
-    },
-    {
-      "fields": [
-        {
-          "name": "count",
-          "required": true,
-          "type": "integer"
-        }
-      ],
-      "name": "columns"
     },
     {
       "fields": [
@@ -406,7 +401,7 @@
       "name": "step"
     }
   ],
-  "version": "0.7.0",
+  "version": "0.8.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

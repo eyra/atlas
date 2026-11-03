@@ -46,7 +46,7 @@ Change the contract, run `cd bff/contract && mix atlas.gen`, commit the contract
 
 The DSL is plain macros, not Spark: a contract of a few blocks, models and kinds of markup needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency.
 
-## View model (contract 0.6.0)
+## View model (contract 0.7.0)
 
 Control sends a view model, not a data model: its **content**, a flat list of blocks, and its **markup**, entries that cover a stretch of those blocks. Every block has an id, stable for as long as the page shows the same thing; markup points at ids, never at positions, so inserting, deleting or moving a block (or a hint that changes one) never shifts other markup.
 
@@ -70,12 +70,13 @@ On the wire a block is `{"id": "item", "type": "list", "props": {...}}`. An opti
 
 ### Markup
 
-| Kind | Props | The TUI draws |
-|---|---|---|
-| `section` | `title`, `collapsible` | a heading with a rule, above its blocks |
-| `border` | `title` (optional) | a box around its blocks |
-| `columns` | `count` | over a whole page, its parts: side by side from 120 columns, else one above the other; each part with its own room and scrolling, tab moves the focus between them. Elsewhere not yet: its blocks show one under the other |
-| `highlight` | `tone` (info, ok, error, pending) | not yet: its blocks show as they are |
+Markup says what a stretch of blocks means, never how it looks. Each client turns meaning into layout as suits its screen: the TUI draws boxes and columns, a phone may show one part after the other or behind a tab. Ask of every new kind: does it name a meaning, or an appearance? (Contract 0.7.0 replaced the appearance kinds `border` and `columns` with `part`, IS-Atlas-66.)
+
+| Kind | Props | Means | The TUI draws |
+|---|---|---|---|
+| `part` | `title`, `role` (`main`, `related`) | a top-level division of a view: `main` is the item itself, `related` what it links to. Parts do not nest in parts; sections nest in parts | a box with its title. Two or more parts over a whole page: side by side from 120 columns, else one above the other with the related part given room first; each with its own room and scrolling, tab moves the focus between them |
+| `section` | `title`, `collapsible` | a titled stretch | a heading with a rule, above its blocks |
+| `highlight` | `tone` (info, ok, error, pending) | the blocks in a tone | not yet: its blocks show as they are |
 
 On the wire an entry is `{"kind": "section", "start": "<block id>", "end": "<block id>", "props": {...}}`, covering `start` to `end`, both included, with `"group"` on the pieces of split markup.
 
@@ -87,7 +88,7 @@ All markup nests, of every kind, as in XML: two entries share no block, or one c
 - `move/4`: a moved block keeps an entry only while it stays inside the stretch, and joins those it lands inside; markup of the block alone moves with it.
 - `place/3`: adds an entry, split into grouped pieces where it would cross.
 
-An item page is in two parts (IS-Atlas-48): `columns` over the whole page, then a `border` titled "Content" around the item (later also what is said about it, such as comments) and a `border` titled "References" around its related lists and the facts it points at, each list in a `section` carrying its title (a scene: the scene in Content; its "Use cases" in References; a use case also lists "In scene" there, to open its scene from). The rows of all lists on a page are one selection.
+An item page is in two parts (IS-Atlas-48, IS-Atlas-66): a `part` with role `main` titled "Content" over the item (later also what is said about it, such as comments) and a `part` with role `related` titled "References" over its related lists and the facts it points at, each list in a `section` carrying its title (a scene: the scene in Content; its "Use cases" in References; a use case also lists "In scene" there, to open its scene from). The rows of all lists on a page are one selection.
 
 The names (view model, markup) live in one place: `AtlasBFF.Names`, plus the `defmarkup` macro and the module name `AtlasBFF.Markup`.
 
@@ -99,7 +100,7 @@ Client to Control:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"hello","env":"test","client":"tui","spec":"0.6.0"}` | First message. Control of another environment answers `bye` and closes. |
+| `{"op":"hello","env":"test","client":"tui","spec":"0.7.0"}` | First message. Control of another environment answers `bye` and closes. |
 | `{"op":"open","to":"/k/<kind>/<key>"}` | Show the page at this path. |
 | `{"op":"submit","to":"<form submit_to or confirm_to>","values":{...}}` | Submit a form or a confirm. Values travel as text. |
 | `{"op":"refresh"}` | Reconcile: read the page again from State. Clients send it on an interval. |
@@ -108,7 +109,7 @@ Control to client:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"welcome","env":"test","spec":"0.6.0"}` | Answer to hello. |
+| `{"op":"welcome","env":"test","spec":"0.7.0"}` | Answer to hello. |
 | `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. On a page without a form, a `refused` page also has `refused`: State's reasons. |
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |

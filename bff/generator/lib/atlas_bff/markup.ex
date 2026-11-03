@@ -15,6 +15,11 @@ defmodule AtlasBFF.Markup do
   one covers all of the other. Entries with the same stretch nest in list order, the first
   outermost. Markup that would cross is placed as pieces that share a group (`place/3`).
 
+  Markup says what a stretch of blocks means, never how it looks. A kind names a meaning
+  (a part of a view and its role, a section, a tone); each client turns meaning into
+  layout as suits its screen: boxes, columns, tabs. Ask of every new kind whether it
+  names a meaning or an appearance.
+
   Functions take `ids`, the content's block ids in order, and `markup`.
   """
 
