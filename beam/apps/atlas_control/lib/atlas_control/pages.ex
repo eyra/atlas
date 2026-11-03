@@ -562,8 +562,8 @@ defmodule AtlasControl.Pages do
         back = if start?, do: nil, else: "/"
         page(plural(spec, kind), back, [list])
 
-      %{"error" => error} ->
-        unavailable(error, "/")
+      %{"error" => _} = failed ->
+        unavailable(failed, "/")
     end
   end
 
@@ -654,8 +654,8 @@ defmodule AtlasControl.Pages do
         content = [{"item", item} | for({id, {_title, list}} <- references, do: {id, list})]
         page("#{singular(spec, kind)} #{key}", back, content, markup)
 
-      %{"error" => error} ->
-        unavailable(error, path({:list, kind}))
+      %{"error" => _} = failed ->
+        unavailable(failed, path({:list, kind}))
     end
   end
 
@@ -712,8 +712,8 @@ defmodule AtlasControl.Pages do
             page(title, back, [form_block])
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -751,8 +751,8 @@ defmodule AtlasControl.Pages do
             missing(title, problem, back)
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -803,8 +803,8 @@ defmodule AtlasControl.Pages do
             page(title, back, [form_block])
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -876,8 +876,8 @@ defmodule AtlasControl.Pages do
 
         page("#{verb(:update)} #{key}", back, [form_block])
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -922,8 +922,8 @@ defmodule AtlasControl.Pages do
             page("#{verb(:delete)} #{key}", back, [confirm])
         end
 
-      %{"error" => error} ->
-        unavailable(error, back)
+      %{"error" => _} = failed ->
+        unavailable(failed, back)
     end
   end
 
@@ -1254,13 +1254,19 @@ defmodule AtlasControl.Pages do
   defp missing(title, text, back),
     do: page(title, back, [Blocks.confirm(title: title, text: text, cancel_to: back)])
 
-  defp unavailable(error, back),
-    do:
-      missing(
-        "State did not answer",
-        "#{error}. Showing nothing rather than something old.",
-        back
-      )
+  # A read that failed, titled by what happened: State did not answer at all, rela could not
+  # be reached, or rela answered with an error (its own words, and what to do, are in the
+  # text). Never "not reachable" when rela answered.
+  defp unavailable(%{"error" => error} = failed, back) do
+    title =
+      case failed["error_kind"] do
+        "unreachable" -> "rela is not reachable"
+        "answered" -> "rela answered with an error"
+        _ -> "State did not answer"
+      end
+
+    missing(title, "#{error}. Showing nothing rather than something old.", back)
+  end
 
   @doc "The relations whose facts point at `kind`, with the keys pointing at this fact."
   def children(description, kind, answer) do

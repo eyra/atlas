@@ -18,6 +18,7 @@ defmodule AtlasState.Rela do
           | :exists
           | :version_mismatch
           | {:invalid, [String.t()]}
+          | {:failed, String.t()}
 
   @callback description(config) :: {:ok, map()} | {:error, failure}
   @callback list(config, plural :: String.t()) :: {:ok, [fact]} | {:error, failure}
