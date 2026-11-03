@@ -20,12 +20,24 @@ Run it again in a second terminal for TUI 2, on the same scene.
 
 Nothing is rolled back by itself: undoing a stored step is an overrule (UC-Atlas-19).
 
+### A refused step
+
+When State refuses a step, the run stops there, and the agent proposes what next as a new plan. That plan runs only on `enter`, like any other. The agent never retries a refused step by itself.
+
+| Step | Keys | What you should see |
+|---|---|---|
+| The item is gone | ask on a scene, then in TUI 2 delete that scene (`d`, `y`) before you press `enter` in TUI 1 | Step 1 is refused: `SC-Atlas-NN does not exist`. Then `Planning…`, and the new plan says **Before**: `Step 1 (New use case in SC-Atlas-NN) was refused: SC-Atlas-NN does not exist. Nothing was stored. Not run: step 2, step 3.` What the agent proposes there cannot run either: its steps show `[!] … SC-Atlas-NN is not a scene in Atlas`. `esc`. |
+| A step that breaks a rule | ask, `e` on step 2, clear its title, `ctrl-s`, `enter` | Step 1 is stored. Step 2 is refused (`title is required`), and the rest is not run. The new plan's **Before** says so and proposes what is left. `enter` runs it. |
+
+With Claude as the planner, the summary says what was refused and why. Claude is told never to propose the refused step again only to get it stored.
+
 ## How it works
 
 The agent (`atlas steer`) runs one step at a time and reads its messages between steps, so a stop is seen before the next step. It waits `agent.step_pause_ms` between steps, set in `env/<env>.json` and 0 when unset. That is long enough to follow a run and to stop it. The end-to-end test uses 500.
 
 ## What changed for this
 
-- **The agent:** the pause between steps; steps not run say why.
+- **The agent:** the pause between steps; steps not run say why; after a refusal it asks the planner what next, with what happened (`before`).
+- **Control's contract:** the plan block's `before` (spec 0.5.0).
 - **The TUI:** "Stopping after this step…" is cleared when the plan ends.
 - **The end-to-end test:** `e2e/scenarios/uc-atlas-18.exs`.

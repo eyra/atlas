@@ -7,6 +7,8 @@
 #   per line, of the kind that goes in the page's kind.
 # - "rename to <title>": one set of the page's item.
 # - "colour it <x>": a set of a field nobody has, which the plan check must catch.
+# - after a refusal ("before" in the input): the steps that were not run, again, or no
+#   steps when there are none.
 # - anything else: no steps.
 
 input = IO.read(:stdio, :eof) |> JSON.decode!()
@@ -20,6 +22,16 @@ description = Enum.find_value(fields, "", &(&1["label"] == "Description" && &1["
 
 plan =
   cond do
+    before = input["before"] ->
+      steps =
+        for step <- before["not_run"],
+            do: Map.take(step, ~w(tool kind in key values)) |> Map.put("why", "It was not run.")
+
+      %{
+        "summary" => "#{before["refused"]["label"]} was refused: #{before["refused"]["detail"]}",
+        "steps" => steps
+      }
+
     request =~ ~r/propose use cases/i ->
       tool = Enum.find(input["tools"], &(&1["tool"] == "put" and &1["in"] == kind))
 

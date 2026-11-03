@@ -65,5 +65,58 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
 
     press(t1, "Enter")
     see(t1, row.("Watch the first step"))
+    for t <- [t1, t2], do: home(t)
+  end
+
+  step "A refused step stops the run; the agent says why and proposes the rest", fn ->
+    key = scene.("A scene with a refusal")
+    ask.()
+    # Step 2 loses its title, which a create requires.
+    press(t1, ["Down", "e"])
+    see(t1, "[ Keep ]")
+    press(t1, List.duplicate("BSpace", 30))
+    press(t1, "C-s")
+    see(t1, "Proposed: 3 steps")
+    press(t1, "Enter")
+    see(t1, "Proposed: 1 step", 5_000)
+    see(t1, ~r/Before\s+Step 2 \(New use case in #{key}\) was refused: title is required\./)
+    see(t1, ~r/Stored\s+before\s+it:\s+step\s+1\./)
+    see(t1, ~r/Not\s+run:\s+step\s+3\./)
+    see(t1, "[✓] 1. New use case in #{key}")
+    see(t1, "Watch the third step")
+
+    {got, _} = atlas_json(i, ["get", key])
+    [%{"label" => "Watch the first step"}] = hd(got["lists"])["rows"]
+
+    # The proposal runs only on enter, like any plan.
+    press(t1, "Enter")
+    see(t1, "Done: 1 of 1 stored", 5_000)
+    {got, _} = atlas_json(i, ["get", key])
+    2 = length(hd(got["lists"])["rows"])
+    press(t1, "Enter")
+    for t <- [t1, t2], do: home(t)
+  end
+
+  step "State refuses when the scene is gone; what next cannot run there either", fn ->
+    key = scene.("A scene that goes away")
+    ask.()
+    # TUI 2 deletes the scene before the plan runs.
+    press(t2, "d")
+    see(t2, "Delete scene #{key}?")
+    press(t2, "y")
+    gone(t2, "A scene that goes away")
+    press(t1, "Enter")
+
+    see(
+      t1,
+      ~r/Before\s+Step 1 \(New use case in #{key}\) was refused: #{key} does not exist/,
+      5_000
+    )
+
+    see(t1, ~r/Nothing\s+was\s+stored\./)
+    see(t1, "#{key} is not a scene in Atlas")
+    press(t1, "Enter")
+    see(t1, "Step 1, 2 cannot run; drop it with space.")
+    press(t1, "Escape")
   end
 end
