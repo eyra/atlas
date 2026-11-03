@@ -9,7 +9,7 @@ defmodule AtlasState.Completion do
   - `%{"by" => relation}`: the fact has a link through that association (someone
     accepted it);
   - `%{"over" => relation, "field" => f, "value" => v}`: a fact that points at this one
-    through `relation` has `f` = `v` (one of its pull requests is merged);
+    through `relation` has `f` = `v` (something that points at it is merged);
   - `%{"through" => relation, "field" => f, "value" => v}`: a fact this one points at
     through `relation` has `f` = `v`.
 

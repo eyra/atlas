@@ -116,7 +116,7 @@ defmodule AtlasAgent.Planner do
           "items" => %{
             "type" => "object",
             "properties" => %{
-              "tool" => %{"type" => "string", "enum" => ["put", "set"]},
+              "tool" => %{"type" => "string", "enum" => ["put", "set", "delete"]},
               "kind" => %{"type" => "string"},
               "in" => %{"type" => "string"},
               "key" => %{"type" => "string"},
@@ -149,9 +149,9 @@ defmodule AtlasAgent.Planner do
     #{JSON.encode!(input["page"])}
 
     The tools a step may use:
-    #{JSON.encode!(Enum.filter(input["tools"] || [], &(&1["tool"] in ["put", "set"])))}
+    #{JSON.encode!(Enum.filter(input["tools"] || [], &(&1["tool"] in ["put", "set", "delete"])))}
 
-    A step is {"tool": "put", "kind": <kind>, "in": <the key of the item it goes in, when the tool has "in">, "values": {<field>: <text>}, "why": <one sentence>} or {"tool": "set", "key": <key>, "values": {<only the fields that change>: <text>}, "why": <one sentence>}. Use only fields the tool asks for. Ids are made by Atlas: never give one. Write titles and descriptions in the language and style of the items on the page; a title says what, without a code. The summary says in one or two sentences what the plan does.
+    A step is {"tool": "put", "kind": <kind>, "in": <the key of the item it goes in, when the tool has "in">, "values": {<field>: <text>}, "why": <one sentence>} or {"tool": "set", "key": <key>, "values": {<only the fields that change>: <text>}, "why": <one sentence>} or {"tool": "delete", "key": <key>, "values": {}, "why": <one sentence>}. Atlas refuses to delete an item while anything hangs under it; propose deleting what hangs under it first, deepest first. Use only fields the tool asks for. Ids are made by Atlas: never give one. Write titles and descriptions in the language and style of the items on the page; a title says what, without a code. The summary says in one or two sentences what the plan does.
     """
   end
 

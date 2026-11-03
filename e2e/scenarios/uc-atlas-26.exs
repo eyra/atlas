@@ -18,14 +18,17 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     {scene, _} = atlas_json(i, ["put", "scene", "--title", "A scene on GitHub"])
     {use_case, _} = atlas_json(i, ["put", "use_case", "--in", scene["key"], "--title", "Its UC"])
 
-    atlas_json(i, [
-      "put",
-      "issue",
-      "--in",
-      use_case["key"],
-      "--title",
-      "An issue whose code is on GitHub"
-    ])
+    {made, _} =
+      atlas_json(i, [
+        "put",
+        "issue",
+        "--in",
+        use_case["key"],
+        "--title",
+        "An issue whose code is on GitHub"
+      ])
+
+    Process.put(:uc26, %{issue: made["key"], use_case: use_case["key"]})
 
     for t <- [t1, t2] do
       open_row(t, "A scene on GitHub")
@@ -96,8 +99,36 @@ scenario "UC-Atlas-26: See each pull request's title and state from GitHub", fn 
     Process.put(:uc26_reads, reads.(skeleton))
   end
 
+  # IS-Atlas-60: an issue is one change, so it has one open or merged pull request.
+  step "A second pull request for an issue whose first is merged is refused, and why", fn ->
+    %{issue: key} = Process.get(:uc26)
+
+    refusal =
+      "#{key} already has PR-eyra-atlas-e2e-2601 (Merged); an issue is one change: " <>
+        "close that PR first, or make a new issue"
+
+    press(t1, "c")
+    see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
+    type(t1, flaky)
+    at = press(t1, "C-s")
+    stored(t1, "#{key} already has PR-eyra-atlas-e2e-2601 (Merged); an issue is one change", at)
+    see(t1, "Not sent: the form says why.")
+    press(t1, "Escape")
+    see(t1, issue)
+
+    {answer, _} = atlas_json(i, ["put", "pull_request", "--in", key, "--url", flaky], 1)
+    answer["refused"] == [refusal] || raise inspect(answer)
+    {got, _} = atlas_json(i, ["get", key])
+    length(hd(got["lists"])["rows"]) == 1 || raise inspect(got["lists"])
+  end
+
   step "A read that fails: the page says so, and the next round tries again", fn ->
+    %{use_case: use_case} = Process.get(:uc26)
+    atlas_json(i, ["put", "issue", "--in", use_case, "--title", "A second change on GitHub"])
     GitHub.put(flaky, {:status, 503})
+    press(t1, "Escape")
+    open_row(t1, "A second change on GitHub")
+    see(t1, ~r/Issue IS-Atlas-\d+: A second change on GitHub/)
     press(t1, "c")
     see(t1, ~r/^ Create pull request in IS-Atlas-\d+$/m)
     type(t1, flaky)

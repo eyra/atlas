@@ -9,6 +9,7 @@ defmodule AtlasAgent do
     refused.
   - `set/3` changes fields of one fact through its change form, and the links of an
     association (`<association>=<key>`; empty removes them) through that association's form.
+  - `delete/2` deletes one fact through the confirm the TUI's d opens.
   - `get/2` reads one fact: its page (fields, and the lists of facts under it) and the
     exact values of its change form.
   - `list/2` reads the list of a kind.
@@ -116,6 +117,36 @@ defmodule AtlasAgent do
 
       if result == :ok, do: {:cont, :ok}, else: {:halt, result}
     end)
+  end
+
+  @doc """
+  Delete the fact with `key`: the confirm Control shows before a delete, confirmed. When
+  Control says it cannot be deleted (something still hangs under it), that is the
+  refusal, in Control's words. `{:ok, key}`, `{:refused, reasons}` or `{:error, text}`.
+  """
+  def delete(client, key) do
+    with {:ok, confirm} <- delete_confirm(client, key) do
+      case confirm do
+        %{"confirm_to" => to} when is_binary(to) ->
+          case Client.submit(client, to, %{}) do
+            {:stored, _page} -> {:ok, key}
+            other -> other
+          end
+
+        %{"text" => text} ->
+          {:refused, [text]}
+      end
+    end
+  end
+
+  @doc "The confirm Control shows before deleting the fact with `key`: `{:ok, props}`."
+  def delete_confirm(client, key) do
+    with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}/delete") do
+      case Client.blocks(page, "confirm") do
+        [confirm] -> {:ok, confirm}
+        _ -> {:error, why(page, key)}
+      end
+    end
   end
 
   @doc """
