@@ -4,3 +4,4 @@
 /apps/*/deps/
 erl_crash.dump
 *.ez
+/apps/*/tmp/
