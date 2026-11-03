@@ -716,6 +716,107 @@ defmodule AtlasControl.PagesTest do
              %{"title" => "x", "done" => true, "shade" => ""}
   end
 
+  # A record a client writes (as the agent keeps its requests): kept off the start page,
+  # newest first, made by no key; its entries name the fact they changed.
+  @logged @d
+          |> put_in(["entities", "log"], %{
+            "label" => "Log",
+            "plural" => "logs",
+            "primary" => "title",
+            "id_prefixes" => ["L-"],
+            "top" => false,
+            "start" => %{"key" => "w", "label" => "What happened"},
+            "order" => "newest",
+            "by_hand" => false,
+            "properties" => %{"title" => %{"type" => "string", "required" => true}}
+          })
+          |> put_in(["entities", "entry"], %{
+            "label" => "Entry",
+            "plural" => "entries",
+            "primary" => "title",
+            "id_prefixes" => ["E-"],
+            "by_hand" => false,
+            "properties" => %{
+              "title" => %{"type" => "string", "required" => true},
+              "about" => %{"type" => "string", "cause" => "What happened here"}
+            }
+          })
+          |> put_in(["relations", "in_log"], %{
+            "label" => "in log",
+            "from" => ["entry"],
+            "to" => ["log"],
+            "max_outgoing" => 1,
+            "parent" => true,
+            "add" => false,
+            "inverse" => %{"id" => "entries", "label" => "entries"}
+          })
+
+  test "a kind kept off the start page: an action there opens its list, newest first" do
+    assert Pages.top_kinds(@logged) == ["widget"]
+    %{blocks: [%{"props" => start}]} = Pages.render(:home, @logged, [%{"facts" => []}])
+
+    assert [%{"key" => "c"}, %{"key" => "w", "label" => "What happened", "to" => "/k/log"}] =
+             start["actions"]
+
+    logs = %{
+      "facts" => [fact("L-01", %{"title" => "First"}), fact("L-02", %{"title" => "Second"})]
+    }
+
+    %{back: "/", blocks: [%{"props" => list}]} = Pages.render({:list, "log"}, @logged, [logs])
+    assert Enum.map(list["rows"], & &1["id"]) == ["L-02", "L-01"]
+    assert list["actions"] == []
+    refute list["empty"] =~ "Press"
+  end
+
+  test "a kind made by no key: its page has no actions, its entries no add" do
+    answer = %{"fact" => fact("L-01", %{"title" => "First"})}
+    entries = %{"facts" => [fact("E-01", %{"title" => "Made W-1", "about" => "W-1"})]}
+    page = Pages.render({:item, "log", "L-01"}, @logged, [answer, entries])
+    [item, entry_list] = for b <- page.blocks, do: b["props"]
+    assert item["actions"] == []
+    assert entry_list["actions"] == []
+    assert [%{"id" => "E-01"}] = entry_list["rows"]
+  end
+
+  test "an item page lists the facts whose cause field names it; a hint of them refreshes it" do
+    assert Pages.reads({:item, "widget", "W-1"}, @logged) == [
+             {"widget", %{"key" => "W-1"}},
+             {"part", %{"linked" => %{"of_widget" => "W-1"}}},
+             {"entry", %{}}
+           ]
+
+    answer = %{"fact" => fact("W-1", %{"title" => "One"})}
+
+    entries = %{
+      "facts" => [
+        fact("E-01", %{"title" => "Made W-1", "about" => "W-1"}),
+        fact("E-02", %{"title" => "Made W-2", "about" => "W-2"})
+      ]
+    }
+
+    page = Pages.render({:item, "widget", "W-1"}, @logged, [answer, %{"facts" => []}, entries])
+
+    assert %{"kind" => "section", "props" => %{"title" => "What happened here"}} =
+             Enum.find(page.markup, &(&1["start"] == "cause:entry:about"))
+
+    cause = Enum.find(page.blocks, &(&1["id"] == "cause:entry:about"))
+    assert [%{"id" => "E-01", "to" => "/k/entry/E-01"}] = cause["props"]["rows"]
+
+    # Nothing names it: no list.
+    page = Pages.render({:item, "widget", "W-3"}, @logged, [answer, %{"facts" => []}, entries])
+    refute Enum.any?(page.blocks, &String.starts_with?(&1["id"], "cause:"))
+
+    assert Pages.shows?({:item, "widget", "W-1"}, @logged, "entry")
+  end
+
+  test "the kinds page names the kinds that hold a record" do
+    %{blocks: blocks} =
+      Pages.render(:kinds, put_in(@logged, ["entities", "log", "agent"], "request"), [])
+
+    log = Enum.find(blocks, &(&1["id"] == "kind:log"))["props"]
+    assert %{"label" => "Agent record", "value" => "request"} in log["fields"]
+  end
+
   test "a page about a kind rela does not describe says so" do
     assert %{blocks: [%{"type" => "confirm"}]} =
              Pages.render({:list, "gadget"}, @d, [%{"facts" => []}])

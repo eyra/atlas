@@ -153,19 +153,16 @@ defmodule AtlasAgent do
   One fact: `%{"key", "path", "title", "fields" => [[label, value]], "origins" =>
   %{label => %{"since", "by", "cause"}}, "lists" => [%{"title", "rows"}], "values" =>
   %{name => text}}`. `origins` holds the fact that set a field's value, for a link. `values`
-  are what its change form holds, so exactly what was stored; empty when the fact cannot
-  be changed.
+  are what its change form holds, so exactly what was stored; empty when it has no change
+  form.
   """
   def get(client, key) do
     with {:ok, page} <- Client.open(client, "/k/_/#{enc(key)}") do
       case Client.blocks(page, "item") do
         [item] ->
-          edit = page["path"] <> "/edit"
-
-          values =
-            if Enum.any?(item["actions"] || [], &(&1["to"] == edit)),
-              do: edit_values(client, edit),
-              else: %{}
+          # The change form holds the exact values; it answers at its path also for a kind
+          # that offers no key to change it (one only the agent writes).
+          values = edit_values(client, page["path"] <> "/edit")
 
           # The fact that set a value (a link): since, by, cause, by the field's label.
           origins =
