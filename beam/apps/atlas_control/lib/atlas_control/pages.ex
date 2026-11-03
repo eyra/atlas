@@ -18,11 +18,22 @@ defmodule AtlasControl.Pages do
   | `/k/<kind>/<key>`         | one fact, with a list per relation pointing at it |
   | `/k/<kind>/<key>/edit`    | form to change it, and to move it to another parent |
   | `/k/<kind>/<key>/delete`  | confirm deleting it, or why it cannot be deleted  |
+  | `/k/<kind>/<key>/links/<rel>` | form to set or remove its links of an association |
   | `/_kinds`                 | every kind: what a create asks, its id, its parent, its fields, its actions |
 
-  A top kind is one that does not belong to a parent: it is not the `from` of a relation
-  with `max_outgoing: 1`. Kinds that belong to a parent are reached through it: a fact's
-  page lists the facts that point at it, and adds new ones already pointing at it.
+  Relations are of two sorts, as the description marks them (`relations.<name>.parent`
+  in `rela/atlas.json`):
+
+  - A parent relation (`parent: true`, at most one): a fact belongs under the one it
+    points at. A top kind is one that belongs under nothing, unless the description says
+    `top: false` (it is reached only through the facts that point at it). Kinds that
+    belong to a parent are reached through it: a fact's page lists the facts that point
+    at it, and adds new ones already pointing at it.
+  - An association (any other relation): a concept a kind has by being in its `from`,
+    such as who accepted it. Its page shows the link together with the fact that set it:
+    since when, by whom, why (State's `origins`). It is set or removed through its own
+    form, never through the change form. One marked `set_by` (a migration, say) is
+    history only: shown, and set only by a client that says it is that (`by`).
   """
 
   require AtlasControl.Blocks, as: Blocks
@@ -48,6 +59,7 @@ defmodule AtlasControl.Pages do
       ["k", kind, key] -> {:item, kind, key}
       ["k", kind, key, "edit"] -> {:edit, kind, key}
       ["k", kind, key, "delete"] -> {:delete, kind, key}
+      ["k", kind, key, "links", relation] -> {:links, kind, key, relation}
       _ -> :unknown
     end
   end
@@ -57,9 +69,10 @@ defmodule AtlasControl.Pages do
   as an agent:
 
   - `_parent` in place of a relation (`/k/<kind>/new/_parent/<p>`) becomes the relation
-    by which the kind belongs to a parent (its one relation with `max_outgoing: 1`).
-  - `_` in place of a kind (`/k/_/<key>`, `.../edit`, `.../delete`) becomes the kind
-    whose id prefix the key has; the longest prefix wins.
+    by which the kind belongs to a parent (its one parent relation).
+  - `_` in place of a kind (`/k/_/<key>`, `.../edit`, `.../delete`, `.../links/<rel>`)
+    becomes the kind whose id prefix the key has; the longest prefix wins. A key no prefix
+    claims belongs to the one kind without a prefix (such as one whose ids are names).
 
   When the description gives no single answer, the page does not exist.
   """
@@ -74,6 +87,13 @@ defmodule AtlasControl.Pages do
     case kind_of_key(description, key) do
       nil -> :unknown
       kind -> {page, kind, key}
+    end
+  end
+
+  def resolve({:links, "_", key, relation}, description) do
+    case kind_of_key(description, key) do
+      nil -> :unknown
+      kind -> {:links, kind, key, relation}
     end
   end
 
@@ -92,19 +112,51 @@ defmodule AtlasControl.Pages do
           do: nil,
           else: kind
 
+      # A key no prefix claims belongs to the one kind without a prefix, if there is one.
       [] ->
-        nil
+        case for({kind, spec} <- description["entities"] || %{}, unprefixed?(spec), do: kind) do
+          [kind] -> kind
+          _ -> nil
+        end
     end
   end
 
+  defp unprefixed?(spec),
+    do: create_rule(spec).prefix in [nil, ""] and (spec["id_prefixes"] || []) == []
+
   @doc """
   The relations by which a fact of `kind` belongs to a parent: those that start at the
-  kind with `max_outgoing: 1`, sorted. A change form offers each, to move the fact.
+  kind and the description marks as `parent` (at most one), sorted. A change form offers
+  each, to move the fact. An association is never one.
   """
   def parent_relations(description, kind) do
-    for {relation, %{"max_outgoing" => 1} = spec} <- Enum.sort(description["relations"] || %{}),
+    for {relation, spec} <- Enum.sort(description["relations"] || %{}),
+        parent?(spec),
         kind in (spec["from"] || []),
         do: relation
+  end
+
+  # A fact belongs under the one it points at through a parent relation, as the
+  # description marks it; there is at most one.
+  defp parent?(spec), do: spec["parent"] == true and spec["max_outgoing"] == 1
+
+  @doc "The associations that start at `kind`: `[{relation, spec}]`, its other relations."
+  def associations(description, kind) do
+    for {relation, spec} <- Enum.sort(description["relations"] || %{}),
+        not parent?(spec),
+        kind in (spec["from"] || []),
+        do: {relation, spec}
+  end
+
+  @doc """
+  Whether a client that is `by` may set `relation`: an association, unless the description
+  says only a migration or a connector sets it (`set_by`), and `by` is not that.
+  """
+  def settable_relation?(description, relation, by \\ nil) do
+    case get_in(description, ["relations", relation]) do
+      %{} = spec -> not parent?(spec) and spec["set_by"] in [nil, by]
+      _ -> false
+    end
   end
 
   def path(:kinds), do: "/_kinds"
@@ -117,6 +169,9 @@ defmodule AtlasControl.Pages do
   def path({:item, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}"
   def path({:edit, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/edit"
   def path({:delete, kind, key}), do: "/k/#{enc(kind)}/#{enc(key)}/delete"
+
+  def path({:links, kind, key, relation}),
+    do: "/k/#{enc(kind)}/#{enc(key)}/links/#{enc(relation)}"
 
   defp enc(part), do: URI.encode(part, &URI.char_unreserved?/1)
 
@@ -181,11 +236,14 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  def form?(route), do: elem_match?(route, [:new, :edit])
+  def form?(route), do: elem_match?(route, [:new, :edit, :links])
 
   defp elem_match?(route, pages), do: is_tuple(route) and elem(route, 0) in pages
 
-  @doc "The relations whose facts point at `kind`: `[{relation, from kind, spec}]`."
+  @doc """
+  The relations whose facts point at `kind`, from one kind each: `[{relation, from kind,
+  spec}]`. A fact's page lists those facts; under a parent relation it can add one.
+  """
   def child_relations(description, kind) do
     for {relation, %{"to" => to, "from" => [from]} = spec} <-
           Enum.sort(description["relations"] || %{}),
@@ -223,16 +281,32 @@ defmodule AtlasControl.Pages do
   end
 
   def reads({_, kind, key}, _), do: [{kind, %{"key" => key}}]
+
+  # The fact, and the facts it may point at.
+  def reads({:links, kind, key, relation}, description) do
+    case get_in(description, ["relations", relation, "to"]) do
+      [to] -> [{kind, %{"key" => key}}, {to, %{}}]
+      _ -> [{kind, %{"key" => key}}]
+    end
+  end
+
   def reads(:unknown, _), do: []
   def reads(:kinds, _), do: []
 
   def top_kinds(description) do
     children =
-      for {_name, %{"max_outgoing" => 1, "from" => from}} <- description["relations"] || %{},
+      for {_name, %{"from" => from} = spec} <- description["relations"] || %{},
+          parent?(spec),
           kind <- from,
           do: kind
 
-    description |> Map.get("entities", %{}) |> Map.keys() |> Kernel.--(children) |> Enum.sort()
+    hidden = for {kind, %{"top" => false}} <- description["entities"] || %{}, do: kind
+
+    description
+    |> Map.get("entities", %{})
+    |> Map.keys()
+    |> Kernel.--(children ++ hidden)
+    |> Enum.sort()
   end
 
   # Pages
@@ -263,7 +337,22 @@ defmodule AtlasControl.Pages do
           for relation <- parent_relations(description, kind),
               do: parent_of(description, relation)
 
-        children = for {_relation, from, _} <- child_relations(description, kind), do: from
+        children =
+          for {_relation, from, spec} <- child_relations(description, kind),
+              parent?(spec),
+              do: from
+
+        associations =
+          for {relation, spec} <- associations(description, kind) do
+            limit = if spec["max_outgoing"] == 1, do: ", at most one", else: ""
+
+            how =
+              if Map.has_key?(spec, "set_by"),
+                do: "; set by a #{spec["set_by"]}, never by hand",
+                else: "; set #{relation}=<key>, empty removes it"
+
+            "#{relation}: to #{Enum.join(spec["to"] || [], " or ")}#{limit}#{how}"
+          end
 
         # A parent relation is a field a change sets too: it moves the fact.
         fields =
@@ -275,22 +364,27 @@ defmodule AtlasControl.Pages do
         {"kind:#{kind}",
          Blocks.item(
            title: "#{singular(spec, kind)} (#{kind})",
-           fields: [
-             Blocks.pair(label: "Kind", value: kind),
-             Blocks.pair(label: "About", value: String.trim(spec["description"] || "")),
-             Blocks.pair(label: "Create asks", value: Enum.join(rule.ask, ", ")),
-             Blocks.pair(label: "Id", value: id_text(spec, rule)),
-             Blocks.pair(
-               label: "Belongs under",
-               value:
-                 if(parents == [], do: "nothing; a top kind", else: Enum.join(parents, " or "))
-             ),
-             Blocks.pair(
-               label: "Has under it",
-               value: if(children == [], do: "nothing", else: Enum.join(children, ", "))
-             ),
-             Blocks.pair(label: "Fields", value: Enum.join(fields, "\n"))
-           ],
+           fields:
+             [
+               Blocks.pair(label: "Kind", value: kind),
+               Blocks.pair(label: "About", value: String.trim(spec["description"] || "")),
+               Blocks.pair(label: "Create asks", value: Enum.join(rule.ask, ", ")),
+               Blocks.pair(label: "Id", value: id_text(spec, rule)),
+               Blocks.pair(
+                 label: "Belongs under",
+                 value:
+                   if(parents == [], do: "nothing; a top kind", else: Enum.join(parents, " or "))
+               ),
+               Blocks.pair(
+                 label: "Has under it",
+                 value: if(children == [], do: "nothing", else: Enum.join(children, ", "))
+               ),
+               Blocks.pair(label: "Fields", value: Enum.join(fields, "\n"))
+             ] ++
+               if(associations == [],
+                 do: [],
+                 else: [Blocks.pair(label: "Links", value: Enum.join(associations, "\n"))]
+               ),
            # What can be done with one, named as every page names it; `<key>` is its key.
            actions: [
              action(:create, spec, kind, path({:new, kind})),
@@ -388,13 +482,13 @@ defmodule AtlasControl.Pages do
             end) ++
             Enum.map(parents(description, kind, fact), fn {label, keys} ->
               Blocks.pair(label: label, value: Enum.join(keys, ", "))
-            end) ++ copy(answer["copy"])
+            end) ++ linked(description, kind, fact) ++ copy(answer["copy"])
 
         item =
           Blocks.item(
             title: "#{singular(spec, kind)} #{key}: #{label(spec, fact)}",
             fields: fields,
-            # Nothing to change when a person may set nothing but where the id comes from, and
+            # Nothing to change when a user may set nothing but where the id comes from, and
             # there is no parent to move it to.
             actions:
               if(changeable?(description, kind, spec),
@@ -408,7 +502,11 @@ defmodule AtlasControl.Pages do
           description
           |> child_relations(kind)
           |> Enum.zip(child_answers)
-          |> Enum.zip([key_of(:create) | @more_create_keys])
+          |> Enum.zip(create_keys(description, kind))
+          # A list of what points here through an association shows only when it has some.
+          |> Enum.reject(fn {{_relation, answer}, create_key} ->
+            create_key == nil and match?(%{"facts" => []}, answer)
+          end)
           |> Enum.map(fn {{{relation, from, rel_spec}, child_answer}, create_key} ->
             {"list:" <> relation,
              child_list(description, {relation, from, rel_spec}, key, child_answer, create_key)}
@@ -437,6 +535,62 @@ defmodule AtlasControl.Pages do
 
       %{"error" => error} ->
         unavailable(error, path({:list, kind}))
+    end
+  end
+
+  # Set or remove the links of one association; the change becomes a fact with its note.
+  defp page({:links, kind, key, relation}, kind, spec, description, [answer | targets], form) do
+    back = path({:item, kind, key})
+    rel = get_in(description, ["relations", relation]) || %{}
+    name = rel["label"] || relation
+    title = "#{String.capitalize(name)}: #{key}"
+
+    case answer do
+      %{"fact" => nil} ->
+        missing(title, "#{key} does not exist (any more).", path({:list, kind}))
+
+      %{"fact" => fact} ->
+        cond do
+          kind not in (rel["from"] || []) ->
+            missing(title, "#{singular(spec, kind)} has no #{name}.", back)
+
+          not settable_relation?(description, relation, form[:by]) ->
+            why =
+              if rel["set_by"],
+                do: "only a #{rel["set_by"]} sets it",
+                else: "it says what the fact belongs under"
+
+            missing(title, "#{String.capitalize(name)} is not set here: #{why}.", back)
+
+          true ->
+            current = Enum.join(get_in(fact, ["links", relation]) || [], ", ")
+            values = Map.merge(%{"to" => current}, form[:values] || %{})
+
+            form_block =
+              Blocks.form(
+                title: title,
+                inputs: [
+                  Blocks.input(name: "_key", label: "Id", kind: "readonly", value: key),
+                  link_input(rel, values["to"], targets),
+                  Blocks.input(
+                    name: "note",
+                    label: "Note",
+                    kind: "multiline",
+                    value: values["note"],
+                    hint: "Why; kept with the change"
+                  )
+                ],
+                submit_label: "Save",
+                submit_to: path({:links, kind, key, relation}),
+                cancel_to: back,
+                errors: form[:errors] || []
+              )
+
+            page(title, back, [form_block])
+        end
+
+      %{"error" => error} ->
+        unavailable(error, back)
     end
   end
 
@@ -574,6 +728,54 @@ defmodule AtlasControl.Pages do
     Map.merge(%{title: title, back: back}, Blocks.view_model(content, markup))
   end
 
+  # The key that creates a fact in each related list, in order; a list of the facts that
+  # point at this one through an association creates nothing (nil).
+  defp create_keys(description, kind) do
+    {keys, _} =
+      Enum.map_reduce(
+        child_relations(description, kind),
+        [key_of(:create) | @more_create_keys],
+        fn {_, _, spec}, free ->
+          case {parent?(spec), free} do
+            {true, [key | rest]} -> {key, rest}
+            _ -> {nil, free}
+          end
+        end
+      )
+
+    keys
+  end
+
+  defp link_input(%{"max_outgoing" => 1}, value, [%{"facts" => facts}]) do
+    Blocks.input(
+      name: "to",
+      label: "To",
+      kind: "choice",
+      value: value,
+      choices:
+        [Blocks.choice(value: "", label: "— none")] ++
+          for(
+            fact <- Enum.sort_by(facts, & &1["key"]),
+            do: Blocks.choice(value: fact["key"], label: fact["key"])
+          )
+    )
+  end
+
+  defp link_input(_rel, value, _targets),
+    do:
+      Blocks.input(
+        name: "to",
+        label: "To",
+        kind: "text",
+        value: value,
+        hint: "Keys, separated by commas; empty removes them"
+      )
+
+  @doc "The keys a links form's `to` names; none removes the links."
+  def link_keys(text) do
+    text |> to_string() |> String.split(~r/[,\s]+/, trim: true) |> Enum.uniq()
+  end
+
   defp child_list(description, {relation, from, rel_spec}, key, answer, create_key) do
     from_spec = description["entities"][from] || %{}
     title = String.capitalize(get_in(rel_spec, ["inverse", "label"]) || plural(from_spec, from))
@@ -603,14 +805,12 @@ defmodule AtlasControl.Pages do
         _ -> "No #{String.downcase(title)} yet. Press #{create_key} to create one."
       end
 
-    {title,
-     Blocks.list(
-       rows: rows,
-       empty: empty,
-       actions: [
-         action(:create, from_spec, from, path({:new, from, {relation, key}}), create_key)
-       ]
-     )}
+    actions =
+      if create_key,
+        do: [action(:create, from_spec, from, path({:new, from, {relation, key}}), create_key)],
+        else: []
+
+    {title, Blocks.list(rows: rows, empty: empty, actions: actions)}
   end
 
   @doc "Where to go after a fact of `kind` is deleted: its parent, or the list of its kind."
@@ -619,11 +819,11 @@ defmodule AtlasControl.Pages do
 
   def after_delete(_description, kind, _answer), do: {:list, kind}
 
-  # A fact's parent page, when it points at one through an at-most-one relation.
+  # A fact's parent page, when it points at one through a parent relation.
   defp up(description, kind, fact) do
     parent =
       Enum.find_value(description["relations"] || %{}, fn {relation, spec} ->
-        with true <- kind in (spec["from"] || []) and spec["max_outgoing"] == 1,
+        with true <- kind in (spec["from"] || []) and parent?(spec),
              [to] <- spec["to"],
              [parent_key] <- get_in(fact, ["links", relation]) do
           {:item, to, parent_key}
@@ -635,13 +835,33 @@ defmodule AtlasControl.Pages do
     parent || {:list, kind}
   end
 
-  # The facts this one points at: `[{label, keys}]`.
+  # The facts this one belongs under: `[{label, keys}]`.
   defp parents(description, kind, fact) do
     for {relation, spec} <- Enum.sort(description["relations"] || %{}),
+        parent?(spec),
         kind in (spec["from"] || []),
         keys = get_in(fact, ["links", relation]) || [],
         keys != [],
         do: {String.capitalize(spec["label"] || relation), keys}
+  end
+
+  # Its associations, each with the fact that set it (since, by, cause) when State knows
+  # it. One that was removed shows as removed while that is the latest fact about it.
+  defp linked(description, kind, fact) do
+    for {relation, spec} <- associations(description, kind),
+        keys = get_in(fact, ["links", relation]) || [],
+        origin = [get_in(fact, ["origins", relation])],
+        keys != [] or origin != [nil] do
+      origin = hd(origin)
+
+      Blocks.pair(
+        label: String.capitalize(spec["label"] || relation),
+        value: if(keys == [], do: "—", else: Enum.join(keys, ", ")),
+        origin:
+          origin &&
+            Blocks.origin(since: origin["since"], by: origin["by"], cause: origin["cause"])
+      )
+    end
   end
 
   # The facts this one points at, as lists to open them from: `[{id, {title, list}}]`.
@@ -721,7 +941,7 @@ defmodule AtlasControl.Pages do
 
   # Form inputs from the description
 
-  # `only`: these properties, in this order. Otherwise every property a person may set,
+  # `only`: these properties, in this order. Otherwise every property a user may set,
   # `except` one.
   defp inputs(spec, values, opts) do
     properties =
@@ -753,7 +973,7 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  # A fact can be changed when a person may set one of its fields, or move it.
+  # A fact can be changed when a user may set one of its fields, or move it.
   defp changeable?(description, kind, spec) do
     parent_relations(description, kind) != [] or
       Enum.any?(spec["properties"] || %{}, fn {name, prop} ->
@@ -872,7 +1092,7 @@ defmodule AtlasControl.Pages do
   How a fact of a kind is created, from the description (`create` in `rela/atlas.json`):
   `ask` (the fields a create form asks for), `id` (`prefix` plus the next free number,
   zero-padded to `digits`; or made `from` a property, see `key_for/2`) and `defaults`
-  (values for what it does not ask). Without a rule: every field a person may set,
+  (values for what it does not ask). Without a rule: every field a user may set,
   rela's id prefix, no defaults.
   """
   def create_rule(spec) do
@@ -894,7 +1114,8 @@ defmodule AtlasControl.Pages do
   @doc """
   The key of a new fact whose id is made from a property: the rule's `pattern` must
   match the property's value; `template` puts its groups in (`{1}`, `{2}`, …), after
-  `replace` (`{"from": "to"}`) on each group. `{:error, text}` when it does not match.
+  `replace` (`{"from": "to"}`) on each group, in lower case when `lower` is true.
+  `{:error, text}` when it does not match.
   The same value always makes the same key, so it is never "the next number".
   """
   def key_for(spec, raw) do
@@ -907,10 +1128,12 @@ defmodule AtlasControl.Pages do
          [_ | groups] <- Regex.run(regex, value) do
       groups = Enum.map(groups, &replace_all(&1, rule["replace"] || %{}))
 
-      {:ok,
-       Regex.replace(~r/\{(\d+)\}/, rule["template"] || "", fn _, n ->
-         Enum.at(groups, String.to_integer(n) - 1) || ""
-       end)}
+      key =
+        Regex.replace(~r/\{(\d+)\}/, rule["template"] || "", fn _, n ->
+          Enum.at(groups, String.to_integer(n) - 1) || ""
+        end)
+
+      {:ok, if(rule["lower"] == true, do: String.downcase(key), else: key)}
     else
       _ -> {:error, rule["error"] || "#{name} does not fit the rule for its id"}
     end
@@ -947,7 +1170,7 @@ defmodule AtlasControl.Pages do
     Map.merge(create_rule(spec).defaults, values_for(spec, asked))
   end
 
-  # A field a person may set; not one only a connector or the system fills.
+  # A field a user may set; not one only a connector or the system fills.
   defp settable?(prop), do: not Map.has_key?(prop, "set_by")
 
   defp parent_of(description, relation),

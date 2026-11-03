@@ -168,7 +168,8 @@ defmodule AtlasControl.PagesTest do
     assert Pages.resolve(Pages.route("/k/_/#{part}"), @d) == {:item, "part", part}
     assert Pages.resolve(Pages.route("/k/_/#{part}/edit"), @d) == {:edit, "part", part}
     assert Pages.resolve(Pages.route("/k/_/#{part}/delete"), @d) == {:delete, "part", part}
-    assert Pages.resolve(Pages.route("/k/_/nothing-1"), @d) == :unknown
+    # A key no prefix claims: the one kind without a prefix.
+    assert Pages.resolve(Pages.route("/k/_/ada"), @d) == {:item, "member", "ada"}
   end
 
   test "the kinds page: per kind what a create asks, its id, its parent and its fields" do
@@ -365,7 +366,7 @@ defmodule AtlasControl.PagesTest do
     assert Enum.map(form["inputs"], & &1["kind"]) == ["text", "multiline"]
     assert form["submit_to"] == "/k/widget/new"
 
-    # Without a rule: every field a person may set, still no id.
+    # Without a rule: every field a user may set, still no id.
     %{blocks: [%{"props" => plain}]} = Pages.render({:new, "part"}, @d, [])
     assert Enum.map(plain["inputs"], & &1["name"]) == ["title"]
   end
@@ -377,7 +378,7 @@ defmodule AtlasControl.PagesTest do
     assert Enum.find(form["inputs"], &(&1["name"] == "title"))["value"] == "Mine"
   end
 
-  test "a change form shows the id read-only and every field a person may set" do
+  test "a change form shows the id read-only and every field a user may set" do
     answer = %{"fact" => fact("W-01", %{"title" => "One", "ext_ref" => "X-9"})}
     %{blocks: [%{"props" => form}]} = Pages.render({:edit, "widget", "W-01"}, @d, [answer])
     inputs = Enum.map(form["inputs"], &{&1["name"], &1["kind"]})
@@ -550,7 +551,7 @@ defmodule AtlasControl.PagesTest do
              {"on_part", "choice", ""}
            ]
 
-    # Labelled by that property; no field a person may set, but it can move to another part.
+    # Labelled by that property; no field a user may set, but it can move to another part.
     %{blocks: [%{"props" => item} | _]} = Pages.render({:item, "tag", "T-a-1"}, @d, [stored])
     assert item["title"] == "Tag T-a-1: #a/1"
     assert Enum.map(item["actions"], & &1["key"]) == ["u", "d"]
@@ -605,5 +606,150 @@ defmodule AtlasControl.PagesTest do
   test "a page about a kind rela does not describe says so" do
     assert %{blocks: [%{"type" => "confirm"}]} =
              Pages.render({:list, "gadget"}, @d, [%{"facts" => []}])
+  end
+
+  describe "associations: a concept a kind has by being in a relation's from" do
+    test "an association is no parent: it moves nothing on top, nor the way back" do
+      # widget is in checked_by's from, at most one, and still on top; member is reached
+      # only through what points at it.
+      assert Pages.top_kinds(@d) == ["widget"]
+
+      assert Pages.resolve(Pages.route("/k/part/new/_parent/W-1"), @d) ==
+               {:new, "part", {"of_widget", "W-1"}}
+
+      part = %{
+        "fact" => %{
+          "key" => "P-1",
+          "values" => %{"title" => "Wheel"},
+          "links" => %{"of_widget" => ["W-1"], "checked_by" => ["ada"]},
+          "version" => "v1"
+        }
+      }
+
+      assert %{back: "/k/widget/W-1"} = Pages.render({:item, "part", "P-1"}, @d, [part])
+      assert Pages.after_delete(@d, "part", part) == {:item, "widget", "W-1"}
+    end
+
+    test "the page shows the link with the fact that set it: since, by, why" do
+      origin = %{"since" => "2026-11-03T14:10:00Z", "by" => "ada", "cause" => "tested it"}
+
+      answer = %{
+        "fact" => %{
+          "key" => "W-1",
+          "values" => %{"title" => "One"},
+          "links" => %{"checked_by" => ["ada"], "seen_in" => ["T-a-1", "T-b-2"]},
+          "origins" => %{"checked_by" => Map.put(origin, "keys", ["ada"])},
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "widget", "W-1"}, @d, [answer, %{"facts" => []}])
+
+      fields = Map.new(item["fields"], &{&1["label"], &1})
+      assert %{"value" => "ada", "origin" => ^origin} = fields["Checked by"]
+      assert %{"value" => "T-a-1, T-b-2"} = fields["Also seen in"]
+      refute Map.has_key?(fields["Also seen in"], "origin")
+    end
+
+    test "a removed link shows as removed while that is the latest fact about it" do
+      answer = %{
+        "fact" => %{
+          "key" => "W-1",
+          "values" => %{"title" => "One"},
+          "links" => %{},
+          "origins" => %{"checked_by" => %{"keys" => [], "by" => "ada", "cause" => "broke"}},
+          "version" => "v1"
+        },
+        "incoming" => %{}
+      }
+
+      %{blocks: [%{"props" => item} | _]} =
+        Pages.render({:item, "widget", "W-1"}, @d, [answer, %{"facts" => []}])
+
+      assert %{"value" => "—", "origin" => %{"cause" => "broke"}} =
+               Enum.find(item["fields"], &(&1["label"] == "Checked by"))
+    end
+
+    test "facts that point here through an association are listed, with nothing to add" do
+      answer = %{"fact" => fact("T-a-1", %{"name" => "#a/1"}), "incoming" => %{}}
+      seen = %{"facts" => [fact("W-1", %{"title" => "One"})]}
+
+      %{blocks: blocks} =
+        Pages.render({:item, "tag", "T-a-1"}, @d, [answer, seen])
+
+      assert [%{"props" => list}] = for(%{"type" => "list"} = b <- blocks, do: b)
+      assert list["actions"] == []
+      assert [%{"label" => "One"}] = list["rows"]
+
+      # None: no list at all.
+      %{blocks: blocks} =
+        Pages.render({:item, "tag", "T-a-1"}, @d, [answer, %{"facts" => []}])
+
+      assert for(%{"type" => "list"} = b <- blocks, do: b) == []
+    end
+
+    test "a form sets or removes the links of an association, with a note" do
+      route = Pages.route("/k/widget/W-1/links/checked_by")
+      assert route == {:links, "widget", "W-1", "checked_by"}
+      assert Pages.path(route) == "/k/widget/W-1/links/checked_by"
+      assert Pages.resolve(Pages.route("/k/_/W-1/links/checked_by"), @d) == route
+      assert Pages.reads(route, @d) == [{"widget", %{"key" => "W-1"}}, {"member", %{}}]
+
+      answer = %{
+        "fact" =>
+          %{fact("W-1", %{"title" => "One"}) | "version" => "v1"}
+          |> Map.put("links", %{"checked_by" => ["ada"]})
+      }
+
+      members = %{"facts" => [fact("bob", %{"name" => "Bob"}), fact("ada", %{"name" => "Ada"})]}
+
+      %{back: "/k/widget/W-1", blocks: [%{"type" => "form", "props" => form}]} =
+        Pages.render(route, @d, [answer, members])
+
+      inputs = Map.new(form["inputs"], &{&1["name"], &1})
+      assert inputs["to"]["value"] == "ada"
+      assert Enum.map(inputs["to"]["choices"], & &1["value"]) == ["", "ada", "bob"]
+      assert inputs["note"]["kind"] == "multiline"
+      assert form["submit_to"] == "/k/widget/W-1/links/checked_by"
+      assert Pages.link_keys("ada, bob ada") == ["ada", "bob"]
+      assert Pages.link_keys("") == []
+    end
+
+    test "a link a migration sets, or a parent, is never set through a form" do
+      answer = %{"fact" => fact("W-1", %{"title" => "One"})}
+
+      %{blocks: [%{"type" => "confirm", "props" => confirm}]} =
+        Pages.render({:links, "widget", "W-1", "seen_in"}, @d, [answer, %{"facts" => []}])
+
+      assert confirm["text"] =~ "only a migration sets it"
+      refute Pages.settable_relation?(@d, "seen_in")
+      refute Pages.settable_relation?(@d, "of_widget")
+      assert Pages.settable_relation?(@d, "checked_by")
+    end
+
+    test "a key made from a property can be in lower case" do
+      spec = %{
+        "create" => %{
+          "id" => %{
+            "from" => "name",
+            "pattern" => "^\\s*([A-Za-z]+)",
+            "template" => "{1}",
+            "lower" => true
+          }
+        }
+      }
+
+      assert Pages.key_for(spec, %{"name" => " Melle Lieuwes"}) == {:ok, "melle"}
+    end
+
+    test "the kinds page lists a kind's associations" do
+      %{blocks: blocks} = Pages.render(:kinds, @d, [])
+      widget = Enum.find(blocks, &(&1["props"]["title"] =~ "(widget)"))
+      links = Enum.find_value(widget["props"]["fields"], &(&1["label"] == "Links" && &1["value"]))
+      assert links =~ "checked_by: to member, at most one; set checked_by=<key>"
+      assert links =~ "seen_in: to tag; set by a migration, never by hand"
+    end
   end
 end

@@ -53,7 +53,7 @@ defmodule AtlasTui.Model do
             ask: nil,
             # The agent's plan for the last request, shown over the page; nil when none.
             plan: nil,
-            # What the person makes of a proposed plan: the selected step, the steps they
+            # What the user makes of a proposed plan: the selected step, the steps they
             # dropped, the values they edited (by step number), the step being edited.
             steps: %{selected: 0, dropped: MapSet.new(), values: %{}, editing: nil}
 

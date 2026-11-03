@@ -9,7 +9,7 @@
 # Shared shapes (rela has no base types and refuses unknown top-level keys;
 # reuse is shared enum types and YAML anchors, merged with `<<:`, defined
 # where first used):
-#   flux item  = title, description, completed, flux_id  (&flux_item)
+#   flux item  = title, description, flux_id              (&flux_item)
 #                Scene, Use case, Issue
 #   plan item  = flux item + status (Flux list group)    (&plan_item)
 #                Scene, Use case; Issue has Flux's stage instead
@@ -17,12 +17,19 @@
 #                (a naming convention; no rela construct to share)
 #   outside ref = the field that names the item in its outside system:
 #                flux_id (Scene, Use case, Issue), url (Pull request)
+#
+# A concept is an association, never a base type or a property prefix: a kind
+# has the concept when it is in the association's `from` (Melle, UC-Atlas-32).
+# The link has no attributes; the fact that sets it carries when, by whom and
+# why, and State answers the link with that fact.
+#   completable = accepted_by (Scene, Use case) to a person; an issue is
+#                 completed when its pull request is merged (IS-Atlas-63)
 
 version: "1.0"
 namespace: "https://eyra.co/ontology/atlas#"
 description: |
   The product plan of Atlas: scenes, their use cases, their issues and the
-  pull requests of those issues.
+  pull requests of those issues, and the people who accept them.
 
 types:
   # Flux files scenes and use cases in a group of its Product list; no group
@@ -36,14 +43,14 @@ types:
       refine: Being written and negotiated; not ready to build from.
       ready_to_pick_up: Agreed; the next level can be derived and built.
 
-  # Flux's issue stages; done is `completed`, apart from the stage.
+  # Flux's issue stages. Done is not a stage: an issue is completed when its
+  # pull request is merged (IS-Atlas-63).
   issue_stage:
-    values: [specification, design, development, testing]
+    values: [specification, design, development]
     labels:
       specification: Specification
       design: Design
       development: Development
-      testing: Testing
 
   # GitHub's pull request states (gh: state). A draft is an open pull
   # request, so draft is a separate flag, as in GitHub (gh: isDraft).
@@ -74,7 +81,6 @@ entities:
       <<: &flux_item
         title: { type: string, required: true, description: "Without the code (Flux: name)" }
         description: { type: string, description: "The text (Flux: description)" }
-        completed: { type: boolean, default: false, description: "Flux: completed" }
         flux_id: { type: string, unique: true, description: "Flux (Basecamp) id, set by a later Flux sync" }
       status: { type: plan_status, description: "Flux group; empty = no group" }
 
@@ -120,6 +126,18 @@ entities:
       state: { type: pull_request_state, description: "GitHub: state" }
       draft: { type: boolean, default: false, description: "GitHub: isDraft" }
 
+  # Who can accept (and, with IS-Atlas-52, be assigned): a person. Not part of
+  # the plan; reached through what points at it.
+  person:
+    label: Person
+    plural: people
+    id_type: manual
+    description: |
+      Someone who works with Atlas. The id is short and lower case, made from
+      the name, e.g. melle.
+    properties:
+      name: { type: string, required: true, description: "As it is shown" }
+
 relations:
   in_scene:
     label: in scene
@@ -144,3 +162,24 @@ relations:
     to: [issue]
     max_outgoing: 1
     inverse: { id: pull_requests, label: pull requests }
+
+  # Completable (UC-Atlas-32): a scene or use case is completed when a person
+  # accepts it, after testing. Only a person can be linked, so an agent never
+  # accepts. Reopening removes the link; both are facts with their cause.
+  accepted_by:
+    label: accepted by
+    description: Who accepted a scene or use case, after testing it; at most one.
+    from: [scene, use_case]
+    to: [person]
+    max_outgoing: 1
+    inverse: { id: accepted, label: accepted }
+
+  # History only: issues done in another issue's pull request before each issue
+  # had its own (PR #1, #2, #14). Set by the UC-Atlas-32 migration, never by
+  # hand; going forward an issue gets its own pull request (UC-Atlas-31).
+  done_in:
+    label: also done in
+    description: A merged pull request of another issue that also did this one.
+    from: [issue]
+    to: [pull_request]
+    inverse: { id: also_done, label: also done }

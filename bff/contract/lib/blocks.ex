@@ -13,7 +13,8 @@ defmodule AtlasBFFContract.Blocks do
   use AtlasBFF.Schema
 
   # 0.7.0: markup names meaning; part (main, related) replaces border and columns.
-  version "0.7.0"
+  # 0.8.0: a pair may carry its origin: the fact that set it (since, by, cause).
+  version "0.8.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -42,10 +43,18 @@ defmodule AtlasBFFContract.Blocks do
     field :links, {:list, :link}
   end
 
-  # A labelled value.
+  # The fact that set a value: since when (ISO 8601, UTC), by whom (a key), and why.
+  defmodel :origin do
+    field :since, :string
+    field :by, :string
+    field :cause, :string
+  end
+
+  # A labelled value, with the fact that set it when that is known.
   defmodel :pair do
     field :label, :string, required: true
     field :value, :string
+    field :origin, :origin
   end
 
   # A value an input may take, and how to show it.
@@ -117,7 +126,7 @@ defmodule AtlasBFFContract.Blocks do
   end
 
   # What an agent proposes for a request, and then does: its steps, in order. `state` is
-  # planning, proposed, running, done, stopped, failed or cancelled. A person keeps,
+  # planning, proposed, running, done, stopped, failed or cancelled. The user keeps,
   # edits or drops each proposed step before any of it runs. `before` says what became
   # of the previous plan for the same request, when this one follows a refusal.
   defblock :plan do

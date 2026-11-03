@@ -44,8 +44,7 @@ scenario "UC-Atlas-02: Manage the use cases of a scene", fn %{t1: t1, t2: t2} ->
     press(t1, "Escape")
     see(t1, ~r/Scene SC-Atlas-\d+: A scene with use cases/)
     open_row(t1, "Add the first use case")
-    screen = see(t1, ~r/Flux group\s+Refine/)
-    screen =~ ~r/Completed\s+no/ || raise "completed is not no"
+    see(t1, ~r/Flux group\s+Refine/)
   end
 
   step "Update it; TUI 2 follows by hint", fn ->

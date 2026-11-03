@@ -91,7 +91,7 @@ defmodule AtlasControl.SessionTest do
   test "a client sees the top list at once", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     c = client(port)
-    assert %{"env" => "test", "spec" => "0.7.0"} = next(c, "welcome")
+    assert %{"env" => "test", "spec" => "0.8.0"} = next(c, "welcome")
     assert %{"path" => "/", "title" => "Widgets", "reason" => "open"} = page = next(c, "page")
     assert rows(page) == ["One"]
   end
@@ -416,5 +416,95 @@ defmodule AtlasControl.SessionTest do
              next(a, "notice", 7_000)
 
     assert %{"tone" => "ok"} = next(a, "notice")
+  end
+
+  test "a links form becomes a change of those links, with who sent it and the note as cause",
+       %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    FakeStore.put("ada", %{"name" => "Ada"}, "member")
+    Application.put_env(:atlas_control, :tui_user, "ada")
+    on_exit(fn -> Application.delete_env(:atlas_control, :tui_user) end)
+
+    {:ok, tui} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
+    put(tui, %{"op" => "hello", "env" => "test", "client" => "tui"})
+    next(tui, "page")
+    put(tui, %{"op" => "open", "to" => "/k/_/W-1/links/checked_by"})
+    assert %{"blocks" => [%{"type" => "form"}]} = next(tui, "page")
+
+    put(tui, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/links/checked_by",
+      "values" => %{"to" => "ada", "note" => "tested it"}
+    })
+
+    assert %{"reason" => "stored", "path" => "/k/widget/W-1"} = next(tui, "page")
+
+    assert %{
+             "op" => "change",
+             "key" => "W-1",
+             "values" => %{},
+             "links" => %{"checked_by" => ["ada"]},
+             "by" => "ada",
+             "cause" => "tested it"
+           } = List.last(FakeStore.sent())
+
+    # Any other client is an agent; a submit's cause goes with its fact.
+    a = client(port)
+    next(a, "page")
+    put(a, %{"op" => "open", "to" => "/k/widget/W-1/edit"})
+    next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/edit",
+      "values" => %{"title" => "Uno"},
+      "cause" => "a better name"
+    })
+
+    assert %{"reason" => "stored"} = next(a, "page")
+    assert %{"by" => "agent", "cause" => "a better name"} = List.last(FakeStore.sent())
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/links/checked_by",
+      "values" => %{"to" => ""}
+    })
+
+    assert %{"reason" => "stored"} = next(a, "page")
+    assert %{"links" => %{"checked_by" => []}, "by" => "agent"} = List.last(FakeStore.sent())
+    refute Map.has_key?(List.last(FakeStore.sent()), "cause")
+  end
+
+  test "a link only a migration sets is never sent", %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    a = client(port)
+    next(a, "page")
+    sent = FakeStore.sent()
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/links/seen_in",
+      "values" => %{"to" => "T-1"}
+    })
+
+    assert %{"reason" => "refused", "blocks" => [%{"type" => "confirm"}]} = next(a, "page")
+    assert FakeStore.sent() == sent
+
+    # A client that says it is the migration may.
+    FakeStore.put("T-1", %{"name" => "#t/1"}, "tag")
+    {:ok, m} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, packet: :line, active: false])
+    put(m, %{"op" => "hello", "env" => "test", "client" => "migration"})
+    next(m, "page")
+
+    put(m, %{
+      "op" => "submit",
+      "to" => "/k/widget/W-1/links/seen_in",
+      "values" => %{"to" => "T-1"}
+    })
+
+    assert %{"reason" => "stored"} = next(m, "page")
+
+    assert %{"links" => %{"seen_in" => ["T-1"]}, "by" => "migration"} =
+             List.last(FakeStore.sent())
   end
 end

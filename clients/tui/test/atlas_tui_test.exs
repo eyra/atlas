@@ -448,6 +448,37 @@ defmodule AtlasTuiTest do
     assert lines |> Enum.join() |> String.split("a long title") |> length() == 11
   end
 
+  test "a value set by a fact shows since when, by whom and why, under it" do
+    item = %{
+      @list
+      | "blocks" => [
+          %{
+            "type" => "item",
+            "props" => %{
+              "title" => "Thing T-1",
+              "fields" => [
+                %{
+                  "label" => "Linked to",
+                  "value" => "ada",
+                  "origin" => %{
+                    "since" => "2026-11-03T14:10:00Z",
+                    "by" => "ada",
+                    "cause" => "tested"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+    }
+
+    lines = model(item) |> View.render(80, 20, 5) |> View.plain() |> String.split("\n")
+    at = Enum.find_index(lines, &(&1 =~ "Linked to"))
+    assert Enum.at(lines, at) =~ "ada"
+    assert Enum.at(lines, at + 1) =~ ~r/since 3 Nov \d\d:10 · by ada · tested/
+    assert View.origin_text(nil) == ""
+  end
+
   test "a page longer than the screen scrolls, and keeps a selected row in sight" do
     long = Enum.map_join(1..30, "\n", &"line #{&1}")
 
