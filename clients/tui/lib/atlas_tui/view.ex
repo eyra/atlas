@@ -150,7 +150,7 @@ defmodule AtlasTui.View do
     by_id = Map.new(with_offsets(model), fn {id, block, at} -> {id, {block, at}} end)
 
     model.ids
-    |> AtlasSpec.Markup.tree(model.markup)
+    |> AtlasBFF.Markup.tree(model.markup)
     |> blocks_in(by_id)
   end
 
