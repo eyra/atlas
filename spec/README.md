@@ -58,8 +58,9 @@ Control sends a view model, not a data model: its **content**, a flat list of bl
 | `item` | a title and labelled values | run an action (change, delete) |
 | `form` | a title, inputs (text, multiline, choice, boolean, readonly), errors | fill it in, submit or cancel; a long text wraps; a multiline input takes several lines (enter starts a new line); a readonly input is shown, never changed |
 | `confirm` | a question, or without `confirm_to` only why something cannot be done | confirm or go back |
+| `plan` | what an agent proposes for a request, and then does: the request, who planned, what it says, its steps; a `title` that says how far it is | keep, edit or drop each proposed step, run the kept ones, cancel, stop a run |
 
-Models that blocks hold: `action` (label, key, to), `row`, `pair`, `input`, `choice`. No block holds another block; grouping is markup.
+Models that blocks hold: `action` (label, key, to), `row`, `pair`, `input`, `choice`, `step` (n, label: the title of the form it fills, state, why, detail, inputs: that form's inputs with the step's values). No block holds another block; grouping is markup.
 
 On the wire a block is `{"id": "item", "type": "list", "props": {...}}`. An optional prop without a value is left out. A client ignores unknown keys, and shows an unknown or broken block as a fallback while the rest of the page still renders.
 
@@ -117,3 +118,7 @@ A client without a screen, such as the agents' command line (`clients/agent`), k
 - `/_kinds`: one `item` per kind, with what a create asks, how its id is made, what it belongs under, what hangs under it and its fields.
 
 The page Control answers has the concrete path, such as `/k/issue/IS-Atlas-01`.
+
+### The agent behind `:`
+
+A plan block comes, for now, from the agent the TUI starts (`atlas steer`), not from Control. They talk in JSON lines on its stdin and stdout: the client sends `ask` (request, the page's path), `run` (the kept steps' numbers and values), `cancel` and `stop`. The agent answers `plan` (the whole block, after every change) and `notice`. The full table is in `AtlasAgent.Steer`. The agent is a Control client of its own and writes only on `run`, only the steps it proposed. Once Runtime runs agents (SC-Atlas-02), Control sends the same block.

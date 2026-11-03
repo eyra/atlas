@@ -316,7 +316,7 @@ defmodule AtlasTui.View do
   # A value of a step, at most a few rows; the rest is one edit (e) away.
   @value_rows 3
   defp value_rows(input, width) do
-    label = "       " <> pad(input.label, @label_width - 4)
+    label = "       " <> pad(input.label, @label_width - 3) <> " "
     rows = Text.wrap(input.value || "—", width - String.length(label) - 2)
     shown = Enum.take(rows, @value_rows)
 
@@ -566,7 +566,7 @@ defmodule AtlasTui.View do
     move = if Model.list(model), do: "   ↑↓ move   ↵ open", else: ""
     move = if long, do: move <> "   pgup/pgdn scroll", else: move
     back = if model.back, do: "   esc back", else: ""
-    move <> "   : ask   r refresh" <> back <> "   q quit"
+    move <> back <> "   : ask   r refresh   q quit"
   end
 
   defp notice(%Model{notice: nil}), do: []

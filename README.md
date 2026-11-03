@@ -16,6 +16,7 @@ This repository holds everything during development: the BEAM application, the r
 - `docs/guides/uc-atlas-03.md`: manage the issues of a use case (UC-Atlas-03).
 - `docs/guides/uc-atlas-04.md`: link the pull requests of an issue (UC-Atlas-04).
 - `docs/guides/uc-atlas-16.md`: the agent's tools, and a plan for a request that writes nothing (UC-Atlas-16).
+- `docs/guides/uc-atlas-17.md`: press `:` on any page, say what you want, and decide on the agent's plan (UC-Atlas-17).
 - `docs/guides/uc-atlas-20.md`: long titles and descriptions of several lines and sections (UC-Atlas-20).
 
 ```sh
@@ -34,7 +35,7 @@ atlas set IS-Atlas-33 stage=testing --json
 atlas put pull_request --url https://github.com/eyra/atlas/pull/14 --in IS-Atlas-33 --json
 ```
 
-An agent that plans gets the same actions as tools: `atlas tools` lists them, made from rela's description through Control. `atlas plan --on <code> "<request>"` asks the environment's planner (`agent.planner` in `env/<env>.json`: a local `claude -p` that may only read, or any command) what it would do on that page. It answers steps, each checked against the form it would fill, and writes nothing (UC-Atlas-16).
+An agent that plans gets the same actions as tools: `atlas tools` lists them, made from rela's description through Control. `atlas plan --on <code> "<request>"` asks the environment's planner (`agent.planner` in `env/<env>.json`: a local `claude -p` that may only read, or any command) what it would do on that page. It answers steps, each checked against the form it would fill, and writes nothing (UC-Atlas-16). In the TUI, `:` asks the same agent (`atlas steer`, which the TUI starts) about the page you are on; you keep, edit or drop each step, and `enter` runs the kept ones through Control (UC-Atlas-17).
 
 `--in <code>` names the parent, `--<field>-file <path>` or `--<field> -` (stdin) reads text of several lines, and `atlas get <code>` and `atlas list <kind> [--in <code>]` read. `atlas load-plan <SCENES.md> tools/plan/links.json [--dry-run]` loaded the plan from SCENES.md this way (UC-Atlas-05). It never changes an existing item, and when a code is taken it maps it to the next one.
 
