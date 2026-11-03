@@ -7,7 +7,11 @@ defmodule AtlasState.Rela do
   """
 
   @type config :: term()
-  @type fact :: %{key: String.t(), properties: map(), version: String.t() | nil}
+  @type fact :: %{key: String.t(), properties: map(), links: links(), version: String.t() | nil}
+  @typedoc "Outgoing relations: relation name to the keys it points at."
+  @type links :: %{String.t() => [String.t()]}
+  @typedoc "Links to write: relation name to `{target kind, keys}`."
+  @type targets :: %{String.t() => {String.t(), [String.t()]}}
   @type failure ::
           :unavailable
           | :not_found
@@ -23,9 +27,9 @@ defmodule AtlasState.Rela do
   @callback incoming(config, plural :: String.t(), key :: String.t(), relation :: String.t()) ::
               {:ok, [String.t()]} | {:error, failure}
   @doc "Check a create without storing anything; returns rela's warnings."
-  @callback check_create(config, String.t(), String.t(), map()) ::
+  @callback check_create(config, String.t(), String.t(), map(), targets) ::
               {:ok, [String.t()]} | {:error, failure}
-  @callback create(config, String.t(), String.t(), map()) ::
+  @callback create(config, String.t(), String.t(), map(), targets) ::
               {:ok, [String.t()]} | {:error, failure}
   @callback change(config, String.t(), String.t(), map(), version :: String.t() | nil) ::
               {:ok, [String.t()]} | {:error, failure}
@@ -39,10 +43,11 @@ defmodule AtlasState.Rela do
   def incoming({mod, config}, plural, key, relation),
     do: mod.incoming(config, plural, key, relation)
 
-  def check_create({mod, config}, plural, key, props),
-    do: mod.check_create(config, plural, key, props)
+  def check_create({mod, config}, plural, key, props, targets),
+    do: mod.check_create(config, plural, key, props, targets)
 
-  def create({mod, config}, plural, key, props), do: mod.create(config, plural, key, props)
+  def create({mod, config}, plural, key, props, targets),
+    do: mod.create(config, plural, key, props, targets)
 
   def change({mod, config}, plural, key, props, version),
     do: mod.change(config, plural, key, props, version)

@@ -5,11 +5,14 @@ defmodule AtlasState.Server do
   - A `fact` is stored in rela and answered with one `stored` (acknowledgement and hint,
     with the fact's position) or one `refused` (final, with reasons). Never silence.
     A resent id gets its first answer again and is not stored twice.
-  - A `read` is answered with the facts of a kind, one fact with the keys of the facts
-    that point at it, or (kind `_description`) rela's description.
+  - A `read` is answered with the facts of a kind (all, or `"linked" => %{relation => key}`
+    for those that point at `key`), one fact (`"key" => key`) with the keys of the facts
+    that point at it, or (kind `_description`) rela's description. Facts carry their
+    outgoing `links`.
 
   Fact content: `%{"op" => "create" | "change" | "delete", "key" => id,
-  "values" => %{property => value}, "version" => version read before, or nil}`.
+  "values" => %{property => value}, "version" => version read before, or nil,
+  "links" => %{relation => [keys]} on a create}`.
   """
   use GenServer
 
@@ -130,17 +133,26 @@ defmodule AtlasState.Server do
     with {:ok, spec, state} <- kind_spec(state, kind) do
       case content do
         %{"key" => key} -> {read_one(state, kind, spec, key), state}
-        _ -> {read_all(state, spec), state}
+        %{"linked" => linked} when is_map(linked) -> {read_all(state, spec, linked), state}
+        _ -> {read_all(state, spec, %{}), state}
       end
     else
       {:error, reason, state} -> {%{"error" => reason}, state}
     end
   end
 
-  defp read_all(state, spec) do
+  defp read_all(state, spec, linked) do
     case Rela.list(state.rela, spec["plural"]) do
-      {:ok, facts} -> %{"facts" => Enum.map(facts, &wire/1)}
-      {:error, _} -> %{"error" => "rela is not reachable"}
+      {:ok, facts} ->
+        facts =
+          Enum.filter(facts, fn fact ->
+            Enum.all?(linked, fn {rel, key} -> key in (fact.links[rel] || []) end)
+          end)
+
+        %{"facts" => Enum.map(facts, &wire/1)}
+
+      {:error, _} ->
+        %{"error" => "rela is not reachable"}
     end
   end
 
@@ -165,7 +177,12 @@ defmodule AtlasState.Server do
   end
 
   defp wire(fact),
-    do: %{"key" => fact.key, "values" => fact.properties, "version" => fact.version}
+    do: %{
+      "key" => fact.key,
+      "values" => fact.properties,
+      "links" => fact[:links] || %{},
+      "version" => fact.version
+    }
 
   # Facts
 
@@ -173,7 +190,19 @@ defmodule AtlasState.Server do
     case kind_spec(state, kind) do
       {:ok, spec, state} ->
         values = content["values"] || %{}
-        {store(state.rela, spec, op, key, values, content["version"]), state}
+
+        result =
+          case Description.targets(state.description, kind, content["links"] || %{}) do
+            {:ok, targets} ->
+              with :ok <- targets_exist(state, op, targets) do
+                store(state.rela, spec, op, key, values, content["version"], targets)
+              end
+
+            {:error, problems} ->
+              {:refused, problems}
+          end
+
+        {result, state}
 
       {:error, :unavailable, state} ->
         {:unavailable, state}
@@ -185,22 +214,23 @@ defmodule AtlasState.Server do
 
   defp store(state, _kind, _content), do: {{:refused, ["a fact needs an op and a key"]}, state}
 
-  defp store(rela, spec, "create", key, values, _version) do
+  defp store(rela, spec, "create", key, values, _version, targets) do
     values = Map.reject(values, fn {_, v} -> v in [nil, ""] end)
     plural = spec["plural"]
 
     with :ok <- both(Description.check_key(spec, key), Description.check(spec, values, :create)),
-         {:ok, []} <- Rela.check_create(rela, plural, key, values),
-         {:ok, _warnings} <- Rela.create(rela, plural, key, values) do
+         {:ok, []} <- Rela.check_create(rela, plural, key, values, targets),
+         {:ok, _warnings} <- Rela.create(rela, plural, key, values, targets) do
       :stored
     else
       {:ok, warnings} -> {:refused, warnings}
-      {:error, :exists} -> resent_create(rela, plural, key, values)
+      {:error, :exists} -> resent_create(rela, plural, key, values, targets)
       error -> failure(error)
     end
   end
 
-  defp store(rela, spec, "change", key, values, version) do
+  # Links are set on create only; moving a fact to another parent comes later.
+  defp store(rela, spec, "change", key, values, version, _targets) do
     values = Map.new(values, fn {k, v} -> {k, if(v == "", do: nil, else: v)} end)
     plural = spec["plural"]
 
@@ -216,7 +246,7 @@ defmodule AtlasState.Server do
     end
   end
 
-  defp store(rela, spec, "delete", key, _values, version) do
+  defp store(rela, spec, "delete", key, _values, version, _targets) do
     # The current rela ignores If-Match on delete, so State compares the version itself.
     current =
       case Rela.get(rela, spec["plural"], key) do
@@ -238,7 +268,7 @@ defmodule AtlasState.Server do
     end
   end
 
-  defp store(_rela, _spec, op, _key, _values, _version),
+  defp store(_rela, _spec, op, _key, _values, _version, _targets),
     do: {:refused, ["unknown op #{inspect(op)}"]}
 
   defp both(:ok, :ok), do: :ok
@@ -248,10 +278,10 @@ defmodule AtlasState.Server do
   defp problems({:error, problems}), do: problems
 
   # A create of an existing id: the same fact sent again (stored), or a clash (refused).
-  defp resent_create(rela, plural, key, values) do
+  defp resent_create(rela, plural, key, values, targets) do
     case Rela.get(rela, plural, key) do
       {:ok, fact} ->
-        if same?(fact, values),
+        if same?(fact, values) and same_links?(fact, targets),
           do: :stored,
           else: {:refused, ["#{key} already exists"], "exists"}
 
@@ -279,6 +309,27 @@ defmodule AtlasState.Server do
         failure(error)
     end
   end
+
+  defp same_links?(fact, targets) do
+    Enum.all?(targets, fn {relation, {_kind, keys}} ->
+      Enum.sort(fact.links[relation] || []) == Enum.sort(keys)
+    end)
+  end
+
+  # The current rela answers 422 to a create that links to a missing fact, but stores the
+  # fact anyway, without the link. So State checks the targets exist before it creates.
+  defp targets_exist(state, "create", targets) do
+    missing =
+      for {_relation, {kind, keys}} <- targets,
+          key <- keys,
+          Rela.get(state.rela, get_in(state.description, ["entities", kind, "plural"]), key) ==
+            {:error, :not_found},
+          do: "#{key} does not exist"
+
+    if missing == [], do: :ok, else: {:refused, missing}
+  end
+
+  defp targets_exist(_state, _op, _targets), do: :ok
 
   defp same?(fact, values) do
     Enum.all?(values, fn {name, value} -> loose(fact.properties[name]) == loose(value) end)

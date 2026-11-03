@@ -17,6 +17,7 @@ defmodule AtlasStateTest do
   defp fact(op, key, values \\ %{}, opts \\ []) do
     envelope = Envelope.new("fact", Keyword.get(opts, :kind, "widget"), Keyword.take(opts, [:id]))
     content = %{"op" => op, "key" => key, "values" => values, "version" => opts[:version]}
+    content = if opts[:links], do: Map.put(content, "links", opts[:links]), else: content
     send_and_wait(envelope, content)
   end
 
@@ -57,7 +58,7 @@ defmodule AtlasStateTest do
   end
 
   test "a create that rela already has, after a lost answer, counts as stored", %{rela: rela} do
-    {:ok, _} = FakeRela.create(rela, "widgets", "W-1", %{"title" => "One"})
+    {:ok, _} = FakeRela.create(rela, "widgets", "W-1", %{"title" => "One"}, %{})
     assert {"stored", _, 1} = fact("create", "W-1", %{"title" => "One"})
 
     assert {"refused", %{"reasons" => ["W-1 already exists"], "code" => "exists"}, nil} =
@@ -173,6 +174,46 @@ defmodule AtlasStateTest do
     assert description["entities"]["widget"]["create"] == %{"ask" => ["title"]}
     assert description["entities"]["widget"]["plural"] == "widgets"
     refute Map.has_key?(description, "_about")
+  end
+
+  test "a create can link to the fact it belongs to; reads show the link and filter by it", _ do
+    fact("create", "W-1", %{"title" => "One"})
+    fact("create", "W-2", %{"title" => "Two"})
+
+    assert {"stored", _, _} =
+             fact("create", "P-1", %{"title" => "Part"},
+               kind: "part",
+               links: %{"of_widget" => ["W-1"]}
+             )
+
+    fact("create", "P-2", %{"title" => "Loose"}, kind: "part")
+
+    assert %{"fact" => %{"links" => %{"of_widget" => ["W-1"]}}} = read("part", %{"key" => "P-1"})
+
+    assert %{"facts" => [%{"key" => "P-1"}]} =
+             read("part", %{"linked" => %{"of_widget" => "W-1"}})
+
+    assert %{"facts" => []} = read("part", %{"linked" => %{"of_widget" => "W-2"}})
+    assert %{"incoming" => %{"of_widget" => ["P-1"]}} = read("widget", %{"key" => "W-1"})
+  end
+
+  test "a link the description does not allow, or to nothing, is refused", _ do
+    fact("create", "W-1", %{"title" => "One"})
+
+    assert {"refused", %{"reasons" => ["of_gadget is not described"]}, nil} =
+             fact("create", "P-1", %{}, kind: "part", links: %{"of_gadget" => ["W-1"]})
+
+    assert {"refused", %{"reasons" => ["of_widget does not start at widget"]}, nil} =
+             fact("create", "W-2", %{"title" => "Two"}, links: %{"of_widget" => ["W-1"]})
+
+    assert {"refused", %{"reasons" => ["of_widget allows at most 1"]}, nil} =
+             fact("create", "P-1", %{}, kind: "part", links: %{"of_widget" => ["W-1", "W-1"]})
+
+    assert {"refused", %{"reasons" => ["W-9 does not exist"]}, nil} =
+             fact("create", "P-1", %{"title" => "x"},
+               kind: "part",
+               links: %{"of_widget" => ["W-9"]}
+             )
   end
 
   test "a stored fact is a hint to listeners of its kind", _ do

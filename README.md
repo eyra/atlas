@@ -8,7 +8,8 @@ This repository holds everything during development: the BEAM application, the r
 
 ## Try it
 
-`docs/guides/uc-atlas-01.md`: start the test environment and two TUIs, and manage scenes (UC-Atlas-01).
+- `docs/guides/uc-atlas-01.md`: start the test environment and two TUIs, and manage scenes (UC-Atlas-01).
+- `docs/guides/uc-atlas-02.md`: manage the use cases of a scene (UC-Atlas-02).
 
 ```sh
 bin/atlas up  --env test   # rela test (background) and the core (foreground)

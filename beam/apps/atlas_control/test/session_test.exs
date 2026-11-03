@@ -133,6 +133,39 @@ defmodule AtlasControl.SessionTest do
     assert rows(page) == []
   end
 
+  test "a fact is added under its parent; a client on the parent sees it by hint", %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    a = client(port)
+    b = client(port)
+    next(a, "page")
+    next(b, "page")
+    put(b, %{"op" => "open", "to" => "/k/widget/W-1"})
+
+    assert %{"blocks" => [%{"type" => "item"}, %{"type" => "list", "props" => %{"rows" => []}}]} =
+             next(b, "page")
+
+    put(a, %{"op" => "open", "to" => "/k/part/new/of_widget/W-1"})
+    assert %{"title" => "New part in W-1"} = next(a, "page")
+
+    put(a, %{
+      "op" => "submit",
+      "to" => "/k/part/new/of_widget/W-1",
+      "values" => %{"title" => "Wheel"}
+    })
+
+    assert %{"path" => "/k/part/P-01", "back" => "/k/widget/W-1", "reason" => "stored"} =
+             next(a, "page")
+
+    assert %{
+             "reason" => "hint",
+             "blocks" => [_, %{"props" => %{"rows" => [%{"label" => "Wheel"}]}}]
+           } = next(b, "page")
+
+    put(a, %{"op" => "submit", "to" => "/k/part/P-01/delete", "values" => %{}})
+    assert %{"path" => "/k/widget/W-1", "reason" => "stored"} = next(a, "page")
+    assert %{"reason" => "hint", "blocks" => [_, %{"props" => %{"rows" => []}}]} = next(b, "page")
+  end
+
   test "a fact with parts under it is not deleted", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     FakeStore.link("P-1", "W-1")

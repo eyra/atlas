@@ -38,12 +38,14 @@ defmodule AtlasControl.FakeStore do
         "part" => %{
           "label" => "Part",
           "plural" => "parts",
+          "id_prefixes" => ["P-"],
           "primary" => "title",
           "properties" => %{"title" => %{"type" => "string", "required" => true}}
         }
       },
       "relations" => %{
         "of_widget" => %{
+          "label" => "of widget",
           "from" => ["part"],
           "to" => ["widget"],
           "max_outgoing" => 1,
@@ -54,8 +56,11 @@ defmodule AtlasControl.FakeStore do
   end
 
   def start_link(_), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
-  def put(key, values), do: GenServer.call(__MODULE__, {:put, key, values})
-  def link(part, widget), do: GenServer.call(__MODULE__, {:link, part, widget})
+
+  def put(key, values, kind \\ "widget", links \\ %{}),
+    do: GenServer.call(__MODULE__, {:put, kind, key, values, links})
+
+  def link(part, widget), do: put(part, %{"title" => part}, "part", %{"of_widget" => [widget]})
   def silent(on?), do: GenServer.call(__MODULE__, {:silent, on?})
 
   @doc "Make a key taken without listing it, as rela does for a key deleted a moment ago."
@@ -64,15 +69,12 @@ defmodule AtlasControl.FakeStore do
   @impl true
   def init(:ok) do
     :ok = AtlasBus.attach(AtlasBus.store())
-    {:ok, %{facts: %{}, links: %{}, position: 0, silent: false, reserved: MapSet.new()}}
+    {:ok, %{facts: %{}, position: 0, silent: false, reserved: MapSet.new()}}
   end
 
   @impl true
-  def handle_call({:put, key, values}, _from, s),
-    do: {:reply, :ok, put_in(s.facts[key], {values, 0})}
-
-  def handle_call({:link, part, widget}, _from, s),
-    do: {:reply, :ok, put_in(s.links[part], widget)}
+  def handle_call({:put, kind, key, values, links}, _from, s),
+    do: {:reply, :ok, put_in(s.facts[{kind, key}], {values, 0, links})}
 
   def handle_call({:silent, on?}, _from, s), do: {:reply, :ok, %{s | silent: on?}}
 
@@ -86,25 +88,40 @@ defmodule AtlasControl.FakeStore do
         {"_description", _} ->
           %{"description" => description()}
 
-        {"widget", %{"key" => key}} ->
-          case s.facts[key] do
+        {kind, %{"key" => key}} ->
+          case s.facts[{kind, key}] do
             nil ->
               %{"fact" => nil}
 
-            {values, n} ->
-              parts = for {part, ^key} <- s.links, do: part
+            {values, n, links} ->
+              incoming =
+                for {relation, %{"to" => to}} <- description()["relations"],
+                    kind in to,
+                    into: %{} do
+                  {relation,
+                   for({{_, k}, {_, _, l}} <- s.facts, key in (l[relation] || []), do: k)}
+                end
 
               %{
-                "fact" => %{"key" => key, "values" => values, "version" => "v#{n}"},
-                "incoming" => %{"of_widget" => parts}
+                "fact" => %{
+                  "key" => key,
+                  "values" => values,
+                  "links" => links,
+                  "version" => "v#{n}"
+                },
+                "incoming" => incoming
               }
           end
 
-        {"widget", _} ->
-          %{
-            "facts" =>
-              for({k, {v, _}} <- s.facts, do: %{"key" => k, "values" => v, "version" => nil})
-          }
+        {kind, content} ->
+          linked = content["linked"] || %{}
+
+          facts =
+            for {{^kind, k}, {v, _, l}} <- Enum.sort(s.facts),
+                Enum.all?(linked, fn {rel, parent} -> parent in (l[rel] || []) end),
+                do: %{"key" => k, "values" => v, "links" => l, "version" => nil}
+
+          %{"facts" => facts}
       end
 
     :ok = AtlasBus.send(Envelope.reply(e, "answer"), Map.put(answer, "position", s.position))
@@ -116,6 +133,7 @@ defmodule AtlasControl.FakeStore do
 
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = e, %{"op" => op, "key" => key} = c}, s) do
     about = %{"op" => op, "key" => key}
+    id = {e.kind, key}
 
     cond do
       op == "create" and c["values"]["title"] in [nil, ""] ->
@@ -127,7 +145,7 @@ defmodule AtlasControl.FakeStore do
 
         {:noreply, s}
 
-      op == "create" and (Map.has_key?(s.facts, key) or key in s.reserved) ->
+      op == "create" and (Map.has_key?(s.facts, id) or key in s.reserved) ->
         code = if key in s.reserved, do: "reserved", else: "exists"
         refusal = Map.merge(about, %{"reasons" => ["#{key} is taken"], "code" => code})
         :ok = AtlasBus.send(Envelope.reply(e, "refused"), refusal)
@@ -137,11 +155,14 @@ defmodule AtlasControl.FakeStore do
         facts =
           case op do
             "delete" ->
-              Map.delete(s.facts, key)
+              Map.delete(s.facts, id)
 
-            _ ->
-              Map.update(s.facts, key, {c["values"], 0}, fn {old, n} ->
-                {Map.merge(old, c["values"]), n + 1}
+            "create" ->
+              Map.put(s.facts, id, {c["values"], 0, c["links"] || %{}})
+
+            "change" ->
+              Map.update!(s.facts, id, fn {old, n, l} ->
+                {Map.merge(old, c["values"]), n + 1, l}
               end)
           end
 
