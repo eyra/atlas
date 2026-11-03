@@ -1,6 +1,6 @@
 defmodule AtlasE2E.Instance do
   @moduledoc """
-  A private Atlas test instance for one run: a fresh, empty rela dataset on free ports,
+  A private Atlas test instance for one run (always `--env test`, never the default): a fresh, empty rela dataset on free ports,
   and the core, both started with the `atlas` command through `ATLAS_ENV_FILE`. It never
   uses the ports or data of `env/test.json` (Melle's instance) or the live store.
 
@@ -51,19 +51,19 @@ defmodule AtlasE2E.Instance do
     }
 
     # `atlas restart` starts rela when it does not answer, then the core, and waits for it.
-    :ok = atlas!(instance, ["restart"])
+    :ok = atlas!(instance, ["restart", "--env", "test"])
     instance
   end
 
   @doc "Stop the core, as `atlas stop` does."
-  def stop_core(instance), do: atlas!(instance, ["stop"])
+  def stop_core(instance), do: atlas!(instance, ["stop", "--env", "test"])
 
   @doc "Start the core again, as `atlas restart` does."
-  def start_core(instance), do: atlas!(instance, ["restart"])
+  def start_core(instance), do: atlas!(instance, ["restart", "--env", "test"])
 
   def stop(instance) do
-    atlas(instance, ["stop"])
-    atlas(instance, ["rela-stop"])
+    atlas(instance, ["stop", "--env", "test"])
+    atlas(instance, ["rela-stop", "--env", "test"])
     :ok
   end
 

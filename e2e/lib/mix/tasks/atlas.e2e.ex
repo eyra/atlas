@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Atlas.E2e do
         t1 = Tui.start(instance, socket, "tui1", "TUI 1")
         t2 = Tui.start(instance, socket, "tui2", "TUI 2")
 
-        for t <- [t1, t2], do: AtlasE2E.Scenario.see(t, "● connected", 120_000)
+        for t <- [t1, t2], do: AtlasE2E.Scenario.ready(t, 120_000)
 
         Enum.reduce_while(scenarios, :ok, fn {file, scenario}, :ok ->
           IO.puts("\n#{scenario.title}  (#{Path.relative_to(file, Instance.root())})")
