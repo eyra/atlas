@@ -30,6 +30,12 @@ typed error rather than an authoritative fallback. Ordinary open still owns page
 existence/permissions. Boot never navigates, resets editing state, changes a draft
 or writes facts. Both raw and canonical emitted targets obey the 2048-byte limit,
 so a successful target can be reissued on reconnect after percent encoding.
+Component key templates must be nonblank and within 2048 UTF-8 bytes at assembly
+and runtime validation. Canonicalization validates every derived required path
+parameter before calling the existing path builder. Invalid component keys,
+relations, kinds or parent parameters return a typed boot error without replacing
+the editing Session. Canonical tab destinations must also remain unique after
+percent decoding/encoding.
 
 Each boot reads the current description through Bus. Missing/invalid configuration
 or unavailable State returns `{"op":"boot","error":"..."}` without authoritative

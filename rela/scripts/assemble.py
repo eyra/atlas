@@ -214,6 +214,9 @@ def validate(extra, schema, actors=None):
         if 'component' in annotation:
             component = annotation['component']
             keys(component, 'key values', name + '.component')
+            template = component.get('key')
+            if not isinstance(template, str) or not template.strip() or len(template.encode()) > 2048:
+                raise ConfigError(f'{name}: component key template must be nonempty text within 2048 bytes')
             if len(rel['to']) != 1:
                 raise ConfigError(f'{name}: component needs one target kind')
             for prop in component.get('values', {}):

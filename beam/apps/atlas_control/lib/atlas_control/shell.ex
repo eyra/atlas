@@ -10,14 +10,16 @@ defmodule AtlasControl.Shell do
          {:ok, title, configured} <- configuration(description),
          true <- is_nil(target) or text?(target, 2_048),
          true <- Enum.all?(configured, &valid_tab?(&1, description)),
-         true <- distinct?(configured, "id") and distinct?(configured, "to") do
+         true <- distinct?(configured, "id"),
+         configured <- Enum.map(configured, &Map.put(&1, "to", canonical_tab(&1["to"]))),
+         true <- distinct?(configured, "to") do
       tabs =
         configured
         |> Enum.filter(fn tab ->
           tab["assigned"] != true or Pages.assigned_start?(description, by_kind)
         end)
         |> Enum.map(fn tab ->
-          Blocks.shell_tab(id: tab["id"], label: tab["label"], to: canonical_tab(tab["to"]))
+          Blocks.shell_tab(id: tab["id"], label: tab["label"], to: tab["to"])
         end)
 
       if tabs == [] do
@@ -88,7 +90,7 @@ defmodule AtlasControl.Shell do
     optional?(spec["from"], &strings?/1) and optional?(spec["to"], &strings?/1) and
       optional?(spec["component"], fn component ->
         is_map(component) and
-          (not Map.has_key?(component, "key") or is_binary(component["key"]))
+          text?(component["key"], 2_048)
       end)
   end
 
@@ -98,7 +100,8 @@ defmodule AtlasControl.Shell do
   defp strings?(value), do: is_list(value) and Enum.all?(value, &is_binary/1)
 
   defp map_of?(value, check),
-    do: is_map(value) and Enum.all?(value, fn {key, spec} -> is_binary(key) and check.(spec) end)
+    do:
+      is_map(value) and Enum.all?(value, fn {key, spec} -> text?(key, 2_048) and check.(spec) end)
 
   defp configuration(description) do
     case description["shell"] do
@@ -134,38 +137,51 @@ defmodule AtlasControl.Shell do
           else: target |> Pages.route() |> Pages.resolve(description)
       end
 
-    canonical =
-      case route do
-        :home ->
-          "/"
+    with {:ok, canonical} <- canonical_target(route, description) do
+      # A removed overview falls back; valid detail/form targets stay canonical.
+      index? = route == :home or match?({:list, _}, route)
+      configured? = Enum.any?(tabs, &(&1["to"] == canonical))
+      initial = if canonical && (not index? or configured?), do: canonical, else: hd(tabs)["to"]
 
-        :kinds ->
-          "/_kinds"
+      if text?(initial, 2_048),
+        do: {:ok, initial},
+        else: {:error, "Canonical boot target exceeds 2048 bytes"}
+    end
+  end
 
-        {page, kind} when page in [:list, :new] ->
-          if known_kind?(kind, description), do: Pages.path(route)
+  defp canonical_target({:unavailable, _, _}, _description),
+    do: {:error, "State did not resolve the boot target"}
 
-        {page, kind, _key} when page in [:item, :edit, :delete, :new] ->
-          if known_kind?(kind, description), do: Pages.path(route)
+  defp canonical_target(:home, _description), do: {:ok, "/"}
+  defp canonical_target(:kinds, _description), do: {:ok, "/_kinds"}
 
-        {page, kind, _key, _relation} when page in [:links, :set, :remove] ->
-          if known_kind?(kind, description), do: Pages.path(route)
+  defp canonical_target({page, kind} = route, description) when page in [:list, :new],
+    do: target_path(route, kind, [kind], description)
 
-        _ ->
-          nil
-      end
+  defp canonical_target({:new, kind, {relation, parent}} = route, description),
+    do: target_path(route, kind, [kind, relation, parent], description)
 
-    # A removed overview (including an actor-ineligible root) falls back to the
-    # first configured tab. Valid detail/form deep links remain ordinary open targets.
-    index? = route == :home or match?({:list, _}, route)
-    configured? = Enum.any?(tabs, &(&1["to"] == canonical))
+  defp canonical_target({page, kind, key} = route, description)
+       when page in [:item, :edit, :delete],
+       do: target_path(route, kind, [kind, key], description)
 
-    initial = if canonical && (not index? or configured?), do: canonical, else: hd(tabs)["to"]
+  defp canonical_target({:new, _kind, _invalid}, _description),
+    do: {:error, "Invalid derived boot route parameters"}
 
-    cond do
-      match?({:unavailable, _, _}, route) -> {:error, "State did not resolve the boot target"}
-      not text?(initial, 2_048) -> {:error, "Canonical boot target exceeds 2048 bytes"}
-      true -> {:ok, initial}
+  defp canonical_target({page, kind, key, relation} = route, description)
+       when page in [:links, :set, :remove],
+       do: target_path(route, kind, [kind, key, relation], description)
+
+  defp canonical_target(_route, _description), do: {:ok, nil}
+
+  # Validate every required parameter at the path-builder boundary. A malformed
+  # description-derived key/relation must be an error, never an exception or fallback.
+  # No rescue hides unrelated resolver, process or programming failures.
+  defp target_path(route, kind, params, description) do
+    if Enum.all?(params, &text?(&1, 2_048)) do
+      {:ok, if(known_kind?(kind, description), do: Pages.path(route))}
+    else
+      {:error, "Invalid derived boot route parameters"}
     end
   end
 
@@ -175,7 +191,9 @@ defmodule AtlasControl.Shell do
     do: Map.has_key?(description["entities"] || %{}, kind)
 
   defp text?(value, max),
-    do: is_binary(value) and byte_size(value) <= max and String.trim(value) != ""
+    do:
+      is_binary(value) and byte_size(value) <= max and String.valid?(value) and
+        String.trim(value) != ""
 
   defp distinct?(tabs, field) do
     values = Enum.map(tabs, & &1[field])

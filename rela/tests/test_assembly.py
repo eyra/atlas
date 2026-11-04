@@ -50,6 +50,13 @@ class AssemblyTest(unittest.TestCase):
             with self.assertRaises(config.ConfigError):
                 assemble.validate(bad, self.schema)
 
+    def test_component_key_templates_are_usable_and_bounded(self):
+        for template in ['', ' \t', None, 'x' * 2049]:
+            bad = copy.deepcopy(self.original)
+            bad['relations']['assignment']['component']['key'] = template
+            with self.assertRaises(config.ConfigError):
+                assemble.validate(bad, self.schema)
+
     def test_duplicate_leaves_arrays_and_json_keys(self):
         for value in [1, [], 'text', {}]:
             with self.assertRaisesRegex(config.ConfigError, 'duplicate'):

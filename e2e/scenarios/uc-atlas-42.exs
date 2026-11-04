@@ -75,6 +75,20 @@ scenario "UC-Atlas-42: Boot returns a native configured shell without navigating
       %{"op" => "boot", "initial_to" => "/k/person/melle/edit"} = receive_message.(socket)
     end
 
+    step "A valid component association target remains canonical", fn ->
+      {scene, _} = atlas_json(i, ["put", "scene", "--title", "Private component boot proof"])
+      key = scene["key"]
+      is_binary(key) || raise inspect(scene)
+
+      send_message.(
+        socket,
+        ConsoleBootProtocol.message(:boot, :boot, to: "/k/scene/#{key}/links/assigned_to")
+      )
+
+      shell = receive_message.(socket)
+      shell["initial_to"] == "/k/assignment/AS-#{key}/links/assigned_to" || raise inspect(shell)
+    end
+
     step "Reconciliation and reconnect return the same shell revision", fn ->
       send_message.(socket, ConsoleBootProtocol.message(:boot, :boot, to: "/k/scene"))
       Process.get(:console_shell) == receive_message.(socket) || raise "shell revision drifted"

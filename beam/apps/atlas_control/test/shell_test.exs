@@ -262,6 +262,91 @@ defmodule AtlasControl.ShellTest do
     assert FakeStore.sent() == []
   end
 
+  test "component targets reject unusable templates and preserve a refused editing draft", %{
+    port: port
+  } do
+    FakeStore.put("W-01", %{"title" => "Before"})
+    FakeStore.refuse("W-01", "Keep this private draft")
+    s = connected(port)
+    send_message(s, %{"op" => "open", "to" => "/k/widget/W-01/edit"})
+    assert %{"op" => "page"} = receive_message(s)
+
+    submit = %{
+      "op" => "submit",
+      "endpoint" => "update",
+      "params" => %{"kind" => "widget", "key" => "W-01"},
+      "values" => %{"title" => "Private draft"}
+    }
+
+    send_message(s, submit)
+    assert %{"op" => "notice"} = receive_message(s)
+    assert %{"op" => "notice"} = receive_message(s)
+    assert %{"op" => "page", "reason" => "refused"} = receive_message(s)
+    [{_, pid, _, _}] = DynamicSupervisor.which_children(AtlasControl.Sessions)
+    initial = :sys.get_state(pid)
+    sent = FakeStore.sent()
+
+    component = fn template ->
+      description()
+      |> put_in(["relations", "part_slot"], %{
+        "from" => ["widget"],
+        "to" => ["part"],
+        "component" => %{"key" => template}
+      })
+      |> put_in(["relations", "part_only"], %{"from" => ["part"], "to" => ["member"]})
+    end
+
+    for template <- ["", " \t", String.duplicate("x", 2_049)],
+        operation <- ["links", "set", "remove"] do
+      FakeStore.describe(component.(template))
+      reply = boot(s, to: "/k/widget/W-01/#{operation}/part_only")
+      assert {:reply, %{effect: :error}} = Protocol.classify(:boot, reply)
+      assert :sys.get_state(pid) == initial
+      assert FakeStore.sent() == sent
+    end
+
+    FakeStore.describe(component.("P-{key}"))
+
+    assert %{"initial_to" => "/k/part/P-W-01/links/part_only"} =
+             boot(s, to: "/k/widget/W-01/links/part_only")
+
+    assert Map.take(:sys.get_state(pid), [:form, :route, :pending]) ==
+             Map.take(initial, [:form, :route, :pending])
+
+    :sys.replace_state(FakeStore, &%{&1 | refusing: %{}})
+    send_message(s, submit)
+    assert %{"op" => "notice"} = receive_message(s)
+    assert %{"op" => "notice"} = receive_message(s)
+    assert %{"op" => "page", "reason" => "stored"} = receive_message(s)
+    assert FakeStore.last_fact()["values"] == %{"title" => "Private draft"}
+  end
+
+  test "invalid description-derived path parameters are typed errors" do
+    for route <- [
+          {:links, "widget", "", "checked_by"},
+          {:links, "", "W-01", "checked_by"},
+          {:set, "widget", nil, "checked_by"},
+          {:remove, "widget", "W-01", ""},
+          {:new, "part", {"", "W-01"}},
+          {:new, "part", {"of_widget", ""}},
+          {:new, "part", {nil, "W-01"}},
+          {:item, "widget", []},
+          {:new, "part", :invalid}
+        ] do
+      assert {:error, _} = Shell.boot(description(), nil, "/k/widget/W-01", fn _ -> route end)
+    end
+  end
+
+  test "encoded tab aliases cannot produce duplicate canonical destinations" do
+    d =
+      put_in(description(), ["shell", "tabs"], [
+        %{"id" => "one", "label" => "One", "to" => "/k/widget"},
+        %{"id" => "two", "label" => "Two", "to" => "/k/%77idget"}
+      ])
+
+    assert {:error, _} = Shell.boot(d, nil)
+  end
+
   test "fresh boot reconciles and reconnects; failed description is a typed error", %{port: port} do
     s = connected(port)
     first = boot(s)
