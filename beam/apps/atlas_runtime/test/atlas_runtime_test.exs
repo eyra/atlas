@@ -40,6 +40,7 @@ defmodule AtlasRuntimeTest do
         lease: 100,
         every: 200,
         stub_dir: dir,
+        crash_pause: 50,
         name: Engine
       ]
       |> Keyword.merge(more)
@@ -160,6 +161,38 @@ defmodule AtlasRuntimeTest do
              "no process runs it on here any more (Runtime restarted)"
 
     assert run("R-X-1")["values"]["status"] == "going"
+  end
+
+  test "an agent's turn limit: no more turns here than that", %{dir: dir} do
+    box()
+    mode(dir, "ada", "end")
+    engine(dir, agents: %{"ada" => %{"port" => "stub", "turn_limit" => 1}})
+    eventually(fn -> run("R-C-B-1-1")["values"]["status"] == "over" end)
+    assert run("R-C-B-1-1")["values"]["done_at"] =~ ~r/^\d{4}-/
+    Process.sleep(800)
+    assert length(FakeState.all("run")) == 1
+  end
+
+  test "3 crashes in 10 minutes: no more turns here, and the agent says it cannot run", %{
+    dir: dir
+  } do
+    box()
+    mode(dir, "ada", "crash")
+    engine(dir)
+
+    eventually(fn -> run("R-C-B-1-3")["values"]["status"] == "over" end)
+    eventually(fn -> FakeState.get("clerk", "ada")["values"]["stuck"] != nil end)
+
+    assert FakeState.get("clerk", "ada")["values"]["stuck"] =~
+             ~r/^on here since .*: 3 crashes in 10 minutes$/
+
+    Process.sleep(800)
+    assert run("R-C-B-1-4") == nil
+
+    {"clerk", marked} = Enum.find(FakeState.sent(), &match?({"clerk", _}, &1))
+
+    assert marked["by"] == "runtime" and
+             marked["cause"] == "ada crashed 3 times in 10 minutes on here"
   end
 
   test "a machine that runs no agents does nothing", %{dir: dir} do

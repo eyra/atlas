@@ -152,7 +152,9 @@ defmodule AtlasRuntime.Turn do
     if state.agent_pid, do: state.port.stop(state.agent_pid)
     n = state.names
 
-    case put(state, "change", %{n.state => n.ended, n.why => why, n.lease => ""}, why) do
+    values = %{n.state => n.ended, n.why => why, n.lease => "", n.ended_at => at(now())}
+
+    case put(state, "change", values, why) do
       :ok ->
         Logger.info("runtime: #{state.key} ended: #{why}")
 

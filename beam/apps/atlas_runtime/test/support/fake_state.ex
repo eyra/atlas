@@ -44,8 +44,10 @@ defmodule AtlasRuntime.FakeState do
           "machine" => "host",
           "lease" => "until",
           "activity" => "last",
-          "why" => "reason"
-        }
+          "why" => "reason",
+          "ended_at" => "done_at"
+        },
+        "agent" => %{"cannot_run" => "stuck"}
       }
     }
   end
