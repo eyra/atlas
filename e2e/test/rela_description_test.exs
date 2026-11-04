@@ -88,6 +88,15 @@ defmodule AtlasE2E.RelaDescriptionTest do
       File.read!(schema) <> "\nentities:\n" <> @gone
     )
 
+    python = System.get_env("ATLAS_CONFIG_PYTHON") || "python3"
+
+    {assembled, code} =
+      System.cmd(python, [Path.join(@root, "rela/scripts/assemble.py"), "--root", old],
+        stderr_to_stdout: true
+      )
+
+    assert code == 0, assembled
+
     {out, status} =
       System.cmd(Path.join(old, "scripts/start-bg.sh"), [], env: env, stderr_to_stdout: true)
 

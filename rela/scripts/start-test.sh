@@ -44,6 +44,7 @@ if [ ! -x "$bin/rela-server" ] || [ "$("$bin/rela" version)" != "rela version $v
 fi
 [ "${1:-}" != install ] || exit 0
 
+"${ATLAS_CONFIG_PYTHON:-python3}" "$here/scripts/verify.py" "$here"
 mkdir -p "$data/entities" "$data/relations"
 "${ATLAS_CONFIG_PYTHON:-python3}" "$here/scripts/config.py" copy --root "$here" --data "$data"
 "$bin/rela" --project "$data" --quiet validate

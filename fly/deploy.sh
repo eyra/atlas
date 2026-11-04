@@ -36,6 +36,8 @@ as() { # rela|core, then a flyctl command
 }
 machines() { as "$1" status -a "$2" --json | jq '.Machines | length'; }
 
+"${ATLAS_CONFIG_PYTHON:-python3}" "$root/rela/scripts/assemble.py" --check
+
 held=""
 if [ "$(machines rela "$rela_app")" -gt 0 ]; then
   if as rela ssh console -q -a "$rela_app" -C "test -e /data/hold" 2>/dev/null; then
@@ -71,6 +73,19 @@ as rela deploy "$root" --config "$root/fly/$env/rela.toml" --dockerfile "$root/f
   --remote-only --ha=false --image-label "$label" ${strategy[@]+"${strategy[@]}"}
 as core deploy "$root" --config "$root/fly/$env/core.toml" --dockerfile "$root/fly/core.Dockerfile" \
   --remote-only --ha=false --image-label "$label" ${strategy[@]+"${strategy[@]}"}
+
+# Check the actually deployed pair using each app's own token before the client smoke.
+if [ -z "$held" ]; then
+  expected="$(shasum -a 256 "$root/rela/atlas.manifest.json" | cut -d ' ' -f 1)"
+  for side in rela core; do
+    if [ "$side" = rela ]; then paired_app="$rela_app"; else paired_app="$app"; fi
+    running="$(as "$side" status -a "$paired_app" --json | jq -r '.Machines[0].image_ref.tag')"
+    [ "$running" = "$label" ] || fail "$paired_app runs $running, not $label"
+    packaged="$(as "$side" ssh console -q -a "$paired_app" -C "sha256sum /app/rela/atlas.manifest.json" | tr -d '\r' | awk '{print $1}')"
+    [ "$packaged" = "$expected" ] || fail "$paired_app has another description composition"
+  done
+  as rela ssh console -q -a "$rela_app" -C "env ATLAS_RELA_DATA=/data/rela /app/rela/scripts/description.sh same" || fail 'rela runs another schema closure'
+fi
 
 # 3. The smoke check, as the core's token.
 if [ -n "$held" ]; then

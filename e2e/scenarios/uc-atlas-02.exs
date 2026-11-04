@@ -44,6 +44,8 @@ scenario "UC-Atlas-02: Manage the use cases of a scene", fn %{t1: t1, t2: t2} ->
     press(t1, "Escape")
     see(t1, ~r/Scene SC-Atlas-\d+: A scene with use cases/)
     open_row(t1, "Add the first use case")
+    # The parent also shows Refine. Wait for the opened fact before sending Update.
+    see(t1, ~r/Use case UC-Atlas-\d+: Add the first use case/)
     see(t1, ~r/Flux group\s+Refine/)
   end
 
