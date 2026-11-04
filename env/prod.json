@@ -1,0 +1,31 @@
+{
+  "env": "prod",
+  "tui_user": "melle",
+  "fly": {
+    "app": "eyra-atlas",
+    "rela_app": "eyra-atlas-rela",
+    "control_port": 7591,
+    "in_use": false,
+    "tunnel_port": 7593,
+    "local": "~/.local/share/atlas/prod-on-fly",
+    "move_from": "~/.local/share/atlas/prod"
+  },
+  "control": { "host": "127.0.0.1", "port": 7591 },
+  "rela": {
+    "url": "http://127.0.0.1:7590/api/v1",
+    "port": 7590,
+    "data": "~/.local/share/atlas/prod/rela",
+    "bin": "~/.local/share/atlas/prod/bin",
+    "extra": "rela/atlas.json"
+  },
+  "state": { "data": "~/.local/share/atlas/prod/beam" },
+  "connectors": {
+    "github": {
+      "api": "https://api.github.com",
+      "token_command": ["gh", "auth", "token"],
+      "every_seconds": 300
+    }
+  },
+  "reconcile_seconds": 5,
+  "agent": { "planner": "claude", "step_pause_ms": 300, "ask_above": 1 }
+}

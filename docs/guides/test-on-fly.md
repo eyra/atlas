@@ -1,0 +1,88 @@
+# Atlas test on Fly
+
+Test's core (Bus, State, Flow, Control) and its rela run on Fly, in organisation eyra, on test's own private network; nothing of it has a public address. Runtime and the agents stay on the MacBook. Why two apps and how they connect: `docs/adr/0003-test-on-fly.md` (IS-Atlas-26).
+
+| | App | Machine | Data |
+|---|---|---|---|
+| Core | `eyra-atlas-test` | shared-cpu-1x, 256 MB, ams | volume `core_data` at `/data` (State's own: `/data/beam`) |
+| rela | `eyra-atlas-test-rela` | shared-cpu-1x, 256 MB, ams | volume `rela_data` at `/data` (`/data/rela`) |
+
+## Use it
+
+```sh
+atlas tui --env test        # opens the tunnel to test's Control on Fly, then the TUI
+atlas list scene --env test # the agents' commands too; each opens the tunnel when it is closed
+atlas status --env test     # the tunnel, and both apps' machines, checks and deployed build
+atlas logs --env test       # the core's log on Fly (rela's: fly logs -a eyra-atlas-test-rela)
+atlas stop --env test       # closes this Mac's tunnel; test keeps running on Fly
+```
+
+The tunnel is `fly proxy 7693:7691 -a eyra-atlas-test`, flyctl's WireGuard into test's network, running in the background like the core used to. It needs flyctl logged in to organisation eyra (`fly auth whoami`); nothing else on the Mac (no VPN, no root). Its files are in `~/.local/share/atlas/test-on-fly/`.
+
+`atlas up --env test` is gone: a merge to develop deploys test (CI job `deploy-test`, which runs `fly/deploy.sh test`):
+
+1. On rela's machine, on a copy of its data: does this build's description describe all of it? When it does not, nothing is deployed and test keeps its build; that data needs a migration first (below).
+2. rela, then the core.
+3. A smoke check that reads only (`fly/smoke.sh test`).
+
+`atlas status --env test` shows the build as the image label `develop-<commit>`. Prod is deployed the same way from master: `docs/guides/prod.md`.
+
+## The secrets CI needs
+
+Two repository secrets, one deploy token per app (each can manage only its own app):
+
+```sh
+fly tokens create deploy -a eyra-atlas-test -n "eyra/atlas CI"        # secret FLY_API_TOKEN_TEST
+fly tokens create deploy -a eyra-atlas-test-rela -n "eyra/atlas CI"   # secret FLY_API_TOKEN_TEST_RELA
+```
+
+Until both are there, the deploy job fails on its first step and names the missing one.
+
+## Move data from the MacBook
+
+Test's data moved on 3 Nov 2026 (from `~/.local/share/atlas/test-backup-20261103T204658Z-before-fly`). A move works the same any time, from a folder with `rela/` and `beam/`:
+
+```sh
+atlas move-to-fly --env test --from <folder> --dry-run                   # checks and counts; sends nothing
+atlas move-to-fly --env test --from <folder> --replace-live              # the move
+```
+
+1. The dry run checks that this build's description describes all of that data, and counts the items per kind and the links per relation. It also shows what Fly holds now.
+2. The move sends both folders and restarts rela, then the core. The copy is put in place at boot, before anything serves it.
+3. It compares the result item by item. Every file must arrive as sent (SHA-256 of each, both apps), and the counts on Fly must be the ones sent.
+4. What Fly held before stays there, in `/data/before-move/` on both apps.
+
+`--replace-live` is needed because test's clients use Fly: the data there is the live one. A move refuses while a rela on this Mac still serves the folder.
+
+## Back up the data on Fly
+
+```sh
+atlas fetch-from-fly --env test --to ~/.local/share/atlas/test-backup-$(date -u +%Y%m%dT%H%M%SZ)
+```
+
+It holds both apps for about a minute: the machines stay up but serve nothing, so the copy is whole. It then copies `/data/rela` and `/data/beam` into `<folder>/rela` and `<folder>/beam`, the layout `move-to-fly` takes back. Last, it releases both apps.
+
+## A migration
+
+The `atlas migrate-*` commands read rela on the Mac, so `atlas` refuses them for an environment on Fly. A migration runs on a copy, on the Mac, as it always has, and the migrated copy goes back:
+
+1. **Hold and copy.** `atlas fetch-from-fly --env test --to <folder> --hold`. Test on Fly now serves nothing, so nothing writes to it during the migration. The TUI says Control does not answer.
+2. **Migrate the copy on a private instance.**
+   - Write a settings file like `env/test.json` without `"fly"`, with `rela.data`, `rela.bin` and `state.data` pointing into `<folder>`, and with free ports.
+   - Run the migration with `ATLAS_ENV_FILE=<that file>`, exactly as its guide says, for example `atlas migrate-assignment --env test --dry-run`, then the real run.
+   - It runs on the build the migration expects; a private instance never meets the Mac's or Fly's.
+   - Stop that instance: `atlas stop`, then `atlas rela-stop`, with the same `ATLAS_ENV_FILE`.
+3. **Deploy the build the migrated data needs.** Merge its pull request (or re-run `deploy-test`). A held environment is deployed without health checks or smoke check, and serves nothing yet.
+4. **Bring it back.** `atlas move-to-fly --env test --from <folder> --replace-live`. That checks every file and count, and ends the hold: test serves the migrated data on the new build.
+
+If the deploy in step 3 comes first while test is not held, `fly/deploy.sh` refuses it: it names the data the new description does not describe, and test keeps its build. Then start at step 1.
+
+A hold ends without a move with `fly ssh console -a <app> -C "rm /data/hold"` on both apps, then `fly machine restart` (rela first).
+
+## When something is wrong
+
+- `atlas status --env test`: a machine not `started`, or a check not passing.
+- `atlas logs --env test`, `fly logs -a eyra-atlas-test-rela`.
+- A deploy refused before it starts: this build's description does not describe data rela holds on Fly. The job names it; test keeps its build. Migrate it (above).
+- Held: the machines log `held: /data/hold is there`. A `fetch-from-fly --hold` is waiting for its `move-to-fly`.
+- `fly ssh console -a eyra-atlas-test-rela` opens a shell on rela's machine; its data is in `/data/rela`.

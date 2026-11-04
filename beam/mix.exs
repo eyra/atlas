@@ -1,0 +1,25 @@
+defmodule Atlas.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      apps_path: "apps",
+      version: "0.1.0",
+      start_permanent: Mix.env() == :prod,
+      deps: [],
+      # The core as one release, for Fly (fly/core.Dockerfile); on a Mac it runs with `mix run`.
+      releases: [
+        atlas: [
+          applications: [
+            atlas_bus: :permanent,
+            atlas_state: :permanent,
+            atlas_flow: :permanent,
+            atlas_runtime: :permanent,
+            atlas_control: :permanent
+          ],
+          include_executables_for: [:unix]
+        ]
+      ]
+    ]
+  end
+end

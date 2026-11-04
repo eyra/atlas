@@ -1,0 +1,86 @@
+defmodule AtlasControl.Gateway do
+  @moduledoc """
+  Where clients connect: a TCP listener on this environment's Control address. Each
+  connection gets its own `AtlasControl.Session`.
+  """
+  use GenServer
+
+  require Logger
+
+  def start_link(opts),
+    do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+
+  @doc "The port it listens on (useful when started on port 0)."
+  def port(server \\ __MODULE__), do: GenServer.call(server, :port)
+
+  @doc """
+  Test only (IS-Atlas-23): close every client's connection, and take none for `ms`; a
+  client then shows it is not connected, and comes back by itself.
+  """
+  def offline(ms, server \\ __MODULE__), do: GenServer.call(server, {:offline, ms})
+
+  @impl true
+  def init(opts) do
+    {:ok, ip} =
+      opts |> Keyword.get(:host, "127.0.0.1") |> String.to_charlist() |> :inet.parse_address()
+
+    {:ok, listen} =
+      :gen_tcp.listen(Keyword.fetch!(opts, :port), [
+        :binary,
+        ip: ip,
+        packet: :line,
+        buffer: 4_194_304,
+        active: false,
+        reuseaddr: true
+      ])
+
+    {:ok, port} = :inet.port(listen)
+
+    Logger.info(
+      "Control #{AtlasBus.environment()} listens on #{Keyword.get(opts, :host, "127.0.0.1")}:#{port}"
+    )
+
+    gateway = self()
+    acceptor = spawn_link(fn -> accept(listen, gateway) end)
+    {:ok, %{listen: listen, port: port, acceptor: acceptor, offline_until: nil}}
+  end
+
+  @impl true
+  def handle_call(:port, _from, state), do: {:reply, state.port, state}
+
+  # Monotonic time can be below zero: no time at all is online.
+  def handle_call(:online?, _from, %{offline_until: nil} = state), do: {:reply, true, state}
+
+  def handle_call(:online?, _from, state),
+    do: {:reply, System.monotonic_time(:millisecond) >= state.offline_until, state}
+
+  def handle_call({:offline, ms}, _from, state) do
+    if AtlasBus.environment() == "prod" do
+      {:reply, {:error, :prod}, state}
+    else
+      Logger.info("Control goes offline for #{ms} ms, on purpose")
+
+      for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasControl.Sessions),
+          is_pid(pid),
+          do: DynamicSupervisor.terminate_child(AtlasControl.Sessions, pid)
+
+      {:reply, :ok, %{state | offline_until: System.monotonic_time(:millisecond) + ms}}
+    end
+  end
+
+  defp accept(listen, gateway) do
+    {:ok, socket} = :gen_tcp.accept(listen)
+
+    if GenServer.call(gateway, :online?) do
+      {:ok, pid} =
+        DynamicSupervisor.start_child(AtlasControl.Sessions, {AtlasControl.Session, socket})
+
+      :ok = :gen_tcp.controlling_process(socket, pid)
+      send(pid, :go)
+    else
+      :gen_tcp.close(socket)
+    end
+
+    accept(listen, gateway)
+  end
+end

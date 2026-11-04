@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "modules/foundation/atlas.json",
+    "modules/foundation/audit/atlas.json",
+    "modules/software-factory/atlas.json",
+    "modules/eyra/atlas.json",
+    "compositions/atlas-eyra/atlas.json"
+  ],
+  "output": "atlas.json",
+  "provenance": "atlas.manifest.json"
+}

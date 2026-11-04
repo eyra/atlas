@@ -1,0 +1,237 @@
+defmodule AtlasE2E.AtlasCommandTest do
+  # What `bin/atlas` refuses or chooses before it starts anything: no rela, no core and no
+  # prod data is touched here. prod is the default; automation passes --env test or a
+  # private ATLAS_ENV_FILE, and a mismatch between the two is refused.
+  use ExUnit.Case, async: true
+
+  @root Path.expand("../..", __DIR__)
+
+  defp atlas(args, env \\ [], cd \\ @root) do
+    System.cmd(Path.join(@root, "bin/atlas"), args,
+      env: [{"ATLAS_ENV_FILE", nil}, {"ATLAS_NO_UPDATE", "1"} | env],
+      cd: cd,
+      stderr_to_stdout: true
+    )
+  end
+
+  defp private_file(env) do
+    dir = Path.join(System.tmp_dir!(), "atlas-command-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    file = Path.join(dir, "#{env}.json")
+    settings = @root |> Path.join("env/test.json") |> File.read!() |> JSON.decode!()
+    File.write!(file, JSON.encode!(%{settings | "env" => env}))
+    on_exit(fn -> File.rm_rf!(dir) end)
+    file
+  end
+
+  test "prod is the default; --env test chooses test" do
+    assert {"prod " <> file, 0} = atlas(["env"])
+    assert String.trim(file) == Path.join(real(@root), "env/prod.json")
+    assert {"test " <> file, 0} = atlas(["env", "--env", "test"])
+    assert String.trim(file) == Path.join(real(@root), "env/test.json")
+  end
+
+  test "a private file is its own environment, and must agree with --env" do
+    test_file = private_file("test")
+    assert {"test " <> _, 0} = atlas(["env"], [{"ATLAS_ENV_FILE", test_file}])
+
+    assert {out, 1} = atlas(["env", "--env", "prod"], [{"ATLAS_ENV_FILE", test_file}])
+    assert out =~ "is for test, not prod"
+
+    prod_file = private_file("prod")
+    assert {out, 1} = atlas(["tui", "--env", "test"], [{"ATLAS_ENV_FILE", prod_file}])
+    assert out =~ "is for prod, not test"
+  end
+
+  test "an unknown or empty environment is refused" do
+    assert {out, 1} = atlas(["env", "--env", "staging"])
+    assert out =~ "no environment 'staging'"
+    assert {out, 2} = atlas(["env", "--env"])
+    assert out =~ "--env needs test or prod"
+    assert {_, 2} = atlas(["env", "--env="])
+  end
+
+  test "the end-to-end test refuses prod" do
+    assert {out, 1} = atlas(["e2e", "--env", "prod"])
+    assert out =~ "never on prod"
+    assert {out, 1} = atlas(["e2e", "uc-atlas-01", "--env=prod"])
+    assert out =~ "never on prod"
+  end
+
+  test "atlas works from any folder: from /, and from inside another repository" do
+    {common, 0} =
+      System.cmd("git", ["-C", @root, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+
+    main = common |> String.trim() |> Path.dirname() |> real()
+
+    other = Path.join(System.tmp_dir!(), "atlas-other-repo-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(other)
+    on_exit(fn -> File.rm_rf!(other) end)
+    {_, 0} = System.cmd("git", ["init", "-q", other])
+
+    for cd <- ["/", other] do
+      assert {out, 0} = atlas(["main-clone"], [], cd)
+      assert String.trim(out) == main, "atlas main-clone from #{cd}: #{out}"
+      assert {out, 0} = atlas(["where"], [], cd)
+      assert String.trim(out) == real(@root), "atlas where from #{cd}: #{out}"
+      assert {"prod " <> file, 0} = atlas(["env"], [], cd)
+      assert String.trim(file) == Path.join(real(@root), "env/prod.json")
+    end
+  end
+
+  # The physical path, as `pwd -P` gives it (macOS's /tmp and /var are links).
+  defp real(path) do
+    {out, 0} = System.cmd("pwd", ["-P"], cd: path)
+    String.trim(out)
+  end
+
+  test "test and prod share no port and no data, and neither is the live store" do
+    [test, prod] =
+      for env <- ["test", "prod"],
+          do: @root |> Path.join("env/#{env}.json") |> File.read!() |> JSON.decode!()
+
+    assert {test["env"], prod["env"]} == {"test", "prod"}
+
+    # test runs on Fly (IS-Atlas-26): this Mac has only the tunnel's end and its files.
+    assert test["fly"]["app"] == "eyra-atlas-test"
+    refute Map.has_key?(test, "rela")
+    refute test["control"]["port"] in [prod["rela"]["port"], prod["control"]["port"], 7612]
+    refute 7612 in [prod["rela"]["port"], prod["control"]["port"]]
+    refute test["fly"]["local"] =~ "/atlas/prod"
+
+    for key <- [["rela", "data"], ["rela", "bin"], ["state", "data"]] do
+      assert get_in(prod, key) =~ "/atlas/prod/"
+    end
+  end
+
+  # A copy of env/test.json whose tunnel files go to a folder of its own.
+  defp fly_file do
+    dir = Path.join(System.tmp_dir!(), "atlas-fly-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    settings = @root |> Path.join("env/test.json") |> File.read!() |> JSON.decode!()
+    file = Path.join(dir, "test.json")
+    File.write!(file, JSON.encode!(put_in(settings, ["fly", "local"], dir)))
+    on_exit(fn -> File.rm_rf!(dir) end)
+    file
+  end
+
+  # A private test file of an environment that runs on this Mac.
+  defp local_file do
+    dir = Path.join(System.tmp_dir!(), "atlas-local-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    file = Path.join(dir, "test.json")
+
+    settings = %{
+      "env" => "test",
+      "control" => %{"host" => "127.0.0.1", "port" => 1},
+      "rela" => %{
+        "url" => "http://127.0.0.1:2/api/v1",
+        "port" => 2,
+        "data" => Path.join(dir, "rela"),
+        "bin" => Path.join(dir, "bin")
+      },
+      "state" => %{"data" => Path.join(dir, "beam")}
+    }
+
+    File.write!(file, JSON.encode!(settings))
+    on_exit(fn -> File.rm_rf!(dir) end)
+    file
+  end
+
+  test "an environment on Fly runs no core and no rela here, and takes no migration" do
+    on_fly = [{"ATLAS_ENV_FILE", fly_file()}]
+
+    assert {out, 1} = atlas(["up", "--env", "test"], on_fly)
+    assert out =~ "runs on Fly (eyra-atlas-test and eyra-atlas-test-rela)"
+    assert out =~ "no core to run here"
+    assert {out, 1} = atlas(["rela-stop", "--env", "test"], on_fly)
+    assert out =~ "rela keeps running there"
+    assert {out, 1} = atlas(["migrate-assignment", "--dry-run", "--env", "test"], on_fly)
+    assert out =~ "the migrations read rela on this Mac"
+    assert {out, 0} = atlas(["stop", "--env", "test"], on_fly)
+    assert out =~ "closed this Mac's tunnel"
+  end
+
+  test "move-to-fly is only for an environment on Fly, and needs data to move" do
+    local = [{"ATLAS_ENV_FILE", local_file()}]
+    assert {out, 1} = atlas(["move-to-fly", "--dry-run", "--env", "test"], local)
+    assert out =~ "does not run on Fly"
+
+    empty = Path.join(System.tmp_dir!(), "atlas-move-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(empty)
+    on_exit(fn -> File.rm_rf!(empty) end)
+
+    on_fly = [{"ATLAS_ENV_FILE", fly_file()}]
+
+    assert {out, 1} =
+             atlas(["move-to-fly", "--from", empty, "--dry-run", "--env", "test"], on_fly)
+
+    assert out =~ "has no rela data"
+  end
+
+  test "prod has its Fly apps on a tunnel port of its own, and its clients still use this Mac" do
+    [test, prod] =
+      for env <- ["test", "prod"],
+          do: @root |> Path.join("env/#{env}.json") |> File.read!() |> JSON.decode!()
+
+    assert %{"app" => "eyra-atlas", "rela_app" => "eyra-atlas-rela", "in_use" => false} =
+             prod["fly"]
+
+    ports = [prod["rela"]["port"], prod["control"]["port"], test["control"]["port"], 7612]
+    refute prod["fly"]["tunnel_port"] in ports
+    assert prod["fly"]["move_from"] =~ "/atlas/prod"
+    refute prod["fly"]["local"] == test["fly"]["local"]
+  end
+
+  # A copy of env/prod.json on ports and folders of its own, so nothing reaches prod.
+  defp prod_file(in_use) do
+    dir = Path.join(System.tmp_dir!(), "atlas-prod-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    settings = @root |> Path.join("env/prod.json") |> File.read!() |> JSON.decode!()
+
+    settings =
+      settings
+      |> put_in(["fly", "in_use"], in_use)
+      |> put_in(["fly", "local"], Path.join(dir, "on-fly"))
+      |> put_in(["control", "port"], 3)
+      |> Map.put("rela", %{
+        "url" => "http://127.0.0.1:4/api/v1",
+        "port" => 4,
+        "data" => Path.join(dir, "rela"),
+        "bin" => Path.join(dir, "bin")
+      })
+
+    file = Path.join(dir, "prod.json")
+    File.write!(file, JSON.encode!(settings))
+    on_exit(fn -> File.rm_rf!(dir) end)
+    file
+  end
+
+  test "until \"in_use\" is true, prod's core runs on this Mac; then on Fly" do
+    assert {out, 0} = atlas(["stop", "--env", "prod"], [{"ATLAS_ENV_FILE", prod_file(false)}])
+    assert out =~ "core stopped (rela keeps running)"
+
+    assert {out, 0} = atlas(["stop", "--env", "prod"], [{"ATLAS_ENV_FILE", prod_file(true)}])
+    assert out =~ "closed this Mac's tunnel to eyra-atlas"
+    assert out =~ "a merge to master deploys it"
+  end
+
+  test "moving onto the data clients use on Fly needs --replace-live" do
+    on_fly = [{"ATLAS_ENV_FILE", fly_file()}]
+    assert {out, 1} = atlas(["move-to-fly", "--from", "/", "--env", "test"], on_fly)
+    assert out =~ "its data there is the live one"
+    assert out =~ "add --replace-live"
+  end
+
+  test "fetch-from-fly needs a folder, and an environment on Fly" do
+    on_fly = [{"ATLAS_ENV_FILE", fly_file()}]
+    assert {out, 1} = atlas(["fetch-from-fly", "--env", "test"], on_fly)
+    assert out =~ "--to <folder>"
+    assert {out, 1} = atlas(["fetch-from-fly", "--to", "/", "--env", "test"], on_fly)
+    assert out =~ "is not empty"
+
+    local = [{"ATLAS_ENV_FILE", local_file()}]
+    assert {out, 1} = atlas(["fetch-from-fly", "--to", "/tmp/x", "--env", "test"], local)
+    assert out =~ "does not run on Fly"
+  end
+end

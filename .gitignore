@@ -1,0 +1,3 @@
+# Python configuration tools
+__pycache__/
+*.pyc
