@@ -353,7 +353,7 @@ defmodule AtlasRuntime.Agent.Claude do
   defp event(line) do
     case JSON.decode(line) do
       {:ok, %{"type" => "result"} = event} ->
-        result = first_line(event["result"] || event["subtype"] || "done")
+        result = first_line(event["result"] || event["subtype"] || "done") <> cost(event)
         {"result: #{result}", result}
 
       {:ok, %{"type" => "assistant", "message" => %{"content" => content}}}
@@ -375,6 +375,12 @@ defmodule AtlasRuntime.Agent.Claude do
   defp part(%{"type" => "text"}), do: "text"
   defp part(%{"type" => type}), do: type
   defp part(_), do: "output"
+
+  # What Claude Code says the turn cost, kept with its result.
+  defp cost(%{"total_cost_usd" => usd}) when is_number(usd),
+    do: " (cost $#{:erlang.float_to_binary(usd / 1, decimals: 4)})"
+
+  defp cost(_event), do: ""
 
   defp first_line(text), do: text |> to_string() |> String.split("\n") |> hd() |> short()
   defp short(text), do: text |> to_string() |> String.slice(0, 120)

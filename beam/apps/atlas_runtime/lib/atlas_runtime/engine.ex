@@ -10,7 +10,8 @@ defmodule AtlasRuntime.Engine do
   1. A turn State has running on this machine with no process here (Runtime restarted, or
      its process died): ended, with why. It keeps nothing State does not hold (C1).
   2. A turn whose item is no longer its agent's, or no longer open: ended (W1: only the
-     owner works on an item).
+     owner works on an item). It may still end by itself for a grace (`leave_grace`, 10 s),
+     so the result of an agent that handed its item on itself is kept (IS-Atlas-93).
   3. An open fact owned by one of its agents, without a turn here: a turn is started,
      unless that agent is in a turn already (it then waits behind it, W1), or crashed a
      moment ago (it waits a pause that doubles with each crash in a row), or crashed 3 times
@@ -119,7 +120,7 @@ defmodule AtlasRuntime.Engine do
         for {key, {agent, item}} <- local,
             {agent, item} not in Enum.map(owned, &{&1.agent, &1.item}) do
           [{pid, _}] = Registry.lookup(AtlasRuntime.Turns, key)
-          Turn.finish(pid, "#{item} is no longer #{agent}'s to work on")
+          Turn.leave(pid, "#{item} is no longer #{agent}'s to work on")
         end
 
         # 3. An owned open fact without a turn: one, unless its agent is in one already.
@@ -227,6 +228,11 @@ defmodule AtlasRuntime.Engine do
           silence:
             seconds(agents[owned.agent]["silence_seconds"], Keyword.fetch!(opts, :silence)),
           max: seconds(agents[owned.agent]["max_seconds"], Keyword.fetch!(opts, :max)),
+          leave_grace:
+            seconds(
+              agents[owned.agent]["leave_grace_seconds"],
+              Keyword.get(opts, :leave_grace, 10_000)
+            ),
           lease: Keyword.fetch!(opts, :lease),
           cause: "#{owned.agent} owns #{owned.item}, and no turn of it runs: a turn (#{n})"
         }

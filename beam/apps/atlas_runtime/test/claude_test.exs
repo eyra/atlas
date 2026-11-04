@@ -58,8 +58,8 @@ defmodule AtlasRuntime.ClaudeTest do
     assert [
              {:activity, "system"},
              {:activity, "Bash: atlas get AS-1"},
-             {:activity, "result: Handed it back."},
-             {:ended, "Handed it back."}
+             {:activity, "result: Handed it back. (cost $0.0100)"},
+             {:ended, "Handed it back. (cost $0.0100)"}
            ] = messages(pid)
 
     stream = File.read!(Path.join([dir, "turns", "TU-1", "stream.jsonl"]))

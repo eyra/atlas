@@ -85,6 +85,15 @@ Claude Code's allowlist let `atlas set --help 2>&1 | head -50` run in IS-Atlas-1
 - **Claude Code itself** keeps `bin` and `sys` on its own PATH, for its keychain login.
 - **Not stopped by a PATH:** a full path such as `/usr/bin/head`, or bash's own redirects. IS-Atlas-94's sandbox stops those.
 
+## IS-Atlas-93: a turn whose item left its agent may still end by itself
+
+In IS-Atlas-18's second real turn the agent handed its item back, and Runtime stopped Claude Code at once, before it wrote its result: the cost was lost.
+
+- **The grace:** when a turn's item is no longer its agent's, Runtime lets the turn run on for `leave_grace_seconds` (10; per agent too, like `silence_seconds`), then stops it as before (`… is no longer <agent>'s to work on`).
+- **Ending within it:** the turn ends with both reasons, `AS-… is no longer runner's to work on, and the agent ended its turn by itself: <its result>`. The result is kept, whoever moved the item.
+- **The claude port's result** carries what Claude Code says the turn cost: `Handed it back. (cost $0.0123)`.
+- **Melle can test:** UC-Atlas-07's e2e scenario (grace 4 s). The stand-in's use case is handed to the bystander, and the stand-in ends its turn 1.5 s later: the turn's Why shows both. Handed on again while the stand-in stays active, its turn ends after the grace with `no longer runner's to work on`.
+
 ## IS-Atlas-94: the agent's own commands run in an OS sandbox
 
 A PATH stops command names, not full paths (`/usr/bin/security`, `/bin/ls`) or bash's own reads and writes (`< file`, `> file`).
