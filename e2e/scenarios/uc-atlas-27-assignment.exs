@@ -23,7 +23,8 @@ scenario "UC-Atlas-27: Every assignable thing has an Assignment", fn %{
     part["title"] == "Assignment AS-#{key}: #{key}" || raise inspect(part)
 
     {listed, _} = atlas_json(i, ["list", "assignment"])
-    Enum.any?(listed, &(&1["key"] == "AS-" <> key)) || raise inspect(listed)
+    # Since IS-Atlas-85 the list of Assignments is Open work: one row per open fact.
+    Enum.any?(listed, &(&1["key"] == key)) || raise inspect(listed)
   end
 
   step "Its page shows the Assignment's owner as its own, set on the fact; both TUIs by hint",

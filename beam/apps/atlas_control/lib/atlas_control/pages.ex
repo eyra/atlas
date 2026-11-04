@@ -298,7 +298,8 @@ defmodule AtlasControl.Pages do
 
   def shows?({:list, of} = route, description, kind),
     do:
-      kind == kind_of(route) or kind in progress_from(description, of) or
+      open_work?(description, of) or kind == kind_of(route) or
+        kind in progress_from(description, of) or
         kind in for({_relation, from, _text} <- counts(description, of), do: from)
 
   def shows?(route, _description, kind), do: kind == kind_of(route)
@@ -387,16 +388,20 @@ defmodule AtlasControl.Pages do
           do: {owner, %{"linked" => %{component => %{relation => by}}}}
   end
 
-  # A kind whose rows count what points at it (`counts`) also reads, plainly, every fact of
-  # each kind those relations start at.
-  def reads({:list, kind}, description),
-    do: [
-      {kind, %{}}
-      | for(
-          {_relation, from, _text} <- counts(description, kind),
-          do: {from, %{"linked" => %{}, "plain" => true}}
-        )
-    ]
+  # Open work (`start.open`): every fact of the kinds the start's relation starts at (the
+  # Assignments) and of the kinds they are components of, so the same rows as what is
+  # assigned to one client, for everyone.
+  def reads({:list, kind}, description) when is_map(description) and is_binary(kind) do
+    if open_work?(description, kind) do
+      relation = assigned_rule(description)["relation"]
+      froms = get_in(description, ["relations", relation, "from"]) || []
+
+      for(from <- froms, do: {from, %{}}) ++
+        for {_component, owner} <- owner_kinds(description, froms), do: {owner, %{}}
+    else
+      list_reads(kind, description)
+    end
+  end
 
   def reads({:unavailable, _path, _failed}, _), do: []
   def reads({:new, _}, _), do: []
@@ -441,6 +446,17 @@ defmodule AtlasControl.Pages do
 
   def reads(:unknown, _), do: []
   def reads(:kinds, _), do: []
+
+  # A kind whose rows count what points at it (`counts`) also reads, plainly, every fact of
+  # each kind those relations start at.
+  defp list_reads(kind, description),
+    do: [
+      {kind, %{}}
+      | for(
+          {_relation, from, _text} <- counts(description, kind),
+          do: {from, %{"linked" => %{}, "plain" => true}}
+        )
+    ]
 
   # What a list row of `kind` counts (`counts` in the description: relation, text with
   # {count}): `[{relation, from, text}]`, one per kind the relation starts at.
@@ -599,6 +615,45 @@ defmodule AtlasControl.Pages do
 
   defp completed?(fact), do: get_in(fact, ["completion", "done"]) == true
 
+  @doc """
+  Open work (`start.open` in the description: `title`, `empty`): the list of a kind the
+  start's relation starts at shows every open fact with whoever it is assigned to, what is
+  expected and its deadline; what is assigned to one client is the same list, filtered on
+  it. Nil when the description has none.
+  """
+  def open_rule(description) do
+    case {get_in(description, ["start", "open"]), assigned_rule(description)} do
+      {%{} = rule, %{}} -> rule
+      _ -> nil
+    end
+  end
+
+  @doc "Whether the list of `kind` is Open work: a kind the start's relation starts at."
+  def open_work?(description, kind) do
+    open_rule(description) != nil and
+      kind in (get_in(description, ["relations", assigned_rule(description)["relation"], "from"]) ||
+                 [])
+  end
+
+  @doc """
+  Open work among the answers to `reads({:list, kind})` of such a kind: as
+  `assigned_facts/2`, for everyone, of the facts someone is assigned to or something is
+  expected of; late first, then the newest link.
+  """
+  def open_facts(description, answers) do
+    relation = assigned_rule(description)["relation"]
+
+    description
+    |> assigned_facts(answers)
+    |> Enum.filter(fn {_kind, _fact, link} ->
+      (get_in(link, ["links", relation]) || []) != [] or
+        Enum.any?(description["flows"] || %{}, fn {_, flow} ->
+          to_text(get_in(link, ["values", flow["field"]])) != ""
+        end)
+    end)
+    |> Enum.sort_by(fn {_, _, link} -> if link["late"] == true, do: 0, else: 1 end)
+  end
+
   # Each row: the fact, what its owner is expected to do (the field its flow writes), and
   # since when and why it is theirs (the fact that set the link).
   defp assigned(description, _by, answers) do
@@ -606,26 +661,8 @@ defmodule AtlasControl.Pages do
     relation = rule["relation"]
 
     rows =
-      for {from, fact, link} <- assigned_facts(description, answers) do
-        spec = description["entities"][from] || %{}
-        origin = get_in(link, ["origins", relation]) || %{}
-
-        detail =
-          [
-            expected(description, from, fact, link),
-            origin["since"] && "since " <> short_moment(origin["since"]),
-            origin["cause"]
-          ]
-          |> Enum.reject(&(&1 in [nil, ""]))
-          |> Enum.join(" · ")
-
-        Blocks.row(
-          id: fact["key"],
-          label: label(spec, fact),
-          detail: detail,
-          to: path({:item, from, fact["key"]})
-        )
-      end
+      for item <- assigned_facts(description, answers),
+          do: work_row(description, relation, item, false)
 
     list =
       Blocks.list(
@@ -636,6 +673,68 @@ defmodule AtlasControl.Pages do
       )
 
     page(rule["title"] || "", nil, [list])
+  end
+
+  # One row of what is assigned: the fact, whoever it is assigned to (`owner?`, in Open
+  # work), what is expected, its deadline (late first), and since when and why.
+  defp work_row(description, relation, {from, fact, link}, owner?) do
+    spec = description["entities"][from] || %{}
+    origin = get_in(link, ["origins", relation]) || %{}
+    link_spec = description["entities"][link_kind(description, relation)] || %{}
+
+    owner =
+      if owner? do
+        case get_in(link, ["links", relation]) || [] do
+          [] -> "—"
+          keys -> Enum.join(keys, ", ")
+        end
+      end
+
+    detail =
+      [
+        owner,
+        expected(description, from, fact, link),
+        late_detail(link_spec, link),
+        origin["since"] && "since " <> short_moment(origin["since"]),
+        not owner? && origin["cause"]
+      ]
+      |> Enum.reject(&(&1 in [nil, "", false]))
+      |> Enum.join(" · ")
+
+    Blocks.row(
+      id: fact["key"],
+      label: label(spec, fact),
+      detail: detail,
+      to: path({:item, from, fact["key"]})
+    )
+  end
+
+  # The kind the start's relation starts at (the Assignment), when it is one.
+  defp link_kind(description, relation) do
+    case get_in(description, ["relations", relation, "from"]) do
+      [kind] -> kind
+      _ -> nil
+    end
+  end
+
+  # Open work: the list of a kind the start's relation starts at, for everyone.
+  defp open_work(description, kind, answers) do
+    rule = open_rule(description)
+    relation = assigned_rule(description)["relation"]
+
+    rows =
+      for item <- open_facts(description, answers),
+          do: work_row(description, relation, item, true)
+
+    list =
+      Blocks.list(
+        title: rule["title"] || plural(description["entities"][kind] || %{}, kind),
+        rows: rows,
+        empty: rule["empty"],
+        actions: []
+      )
+
+    page(rule["title"] || "", "/", [list])
   end
 
   # What the fact's owner is expected to do: the value of the field a flow on its kind
@@ -843,54 +942,10 @@ defmodule AtlasControl.Pages do
     ])
   end
 
-  defp page({:list, kind}, kind, spec, description, [answer | count_answers], form) do
-    # The only top kind's list is the start page; there is nothing to go back to.
-    start? = top_kinds(description) == [kind]
-    # With a start page of assignments, the plan is one key away from it, and back.
-    first? = start? and not assigned_start?(description, form[:by_kind])
-
-    case answer do
-      %{"facts" => facts} ->
-        counted = counted(description, kind, count_answers)
-
-        rows =
-          facts
-          |> sort_facts(spec)
-          |> Enum.map(fn fact ->
-            Blocks.row(
-              id: fact["key"],
-              label: label(spec, fact),
-              detail: join_detail(detail(description, spec, fact), counted.(fact["key"])),
-              to: path({:item, kind, fact["key"]}),
-              links: links(description, spec, fact)
-            )
-          end)
-
-        list =
-          Blocks.list(
-            title: plural(spec, kind),
-            rows: rows,
-            empty:
-              if(by_hand?(spec, :create),
-                do:
-                  "No #{String.downcase(plural(spec, kind))} yet. " <>
-                    "Press #{key_of(:create)} to create one.",
-                else: "No #{String.downcase(plural(spec, kind))} yet."
-              ),
-            actions:
-              if(by_hand?(spec, :create),
-                do: [action(:create, spec, kind, path({:new, kind}))],
-                else: []
-              ) ++
-                if(start?, do: start_actions(description, kind), else: [])
-          )
-
-        back = if first?, do: nil, else: "/"
-        page(plural(spec, kind), back, [list])
-
-      %{"error" => _} = failed ->
-        unavailable(failed, "/")
-    end
+  defp page({:list, kind}, kind, spec, description, answers, form) do
+    if open_work?(description, kind),
+      do: open_work(description, kind, answers),
+      else: list_page(kind, spec, description, answers, form)
   end
 
   defp page({:item, kind, key}, kind, spec, description, [answer | child_answers], form) do
@@ -1349,6 +1404,56 @@ defmodule AtlasControl.Pages do
 
   defp page(_route, _kind, _spec, _description, _answers, _form),
     do: missing("Nothing here", "This page does not exist.", "/")
+
+  defp list_page(kind, spec, description, [answer | count_answers], form) do
+    # The only top kind's list is the start page; there is nothing to go back to.
+    start? = top_kinds(description) == [kind]
+    # With a start page of assignments, the plan is one key away from it, and back.
+    first? = start? and not assigned_start?(description, form[:by_kind])
+
+    case answer do
+      %{"facts" => facts} ->
+        counted = counted(description, kind, count_answers)
+
+        rows =
+          facts
+          |> sort_facts(spec)
+          |> Enum.map(fn fact ->
+            Blocks.row(
+              id: fact["key"],
+              label: label(spec, fact),
+              detail: join_detail(detail(description, spec, fact), counted.(fact["key"])),
+              to: path({:item, kind, fact["key"]}),
+              links: links(description, spec, fact)
+            )
+          end)
+
+        list =
+          Blocks.list(
+            title: plural(spec, kind),
+            rows: rows,
+            empty:
+              if(by_hand?(spec, :create),
+                do:
+                  "No #{String.downcase(plural(spec, kind))} yet. " <>
+                    "Press #{key_of(:create)} to create one.",
+                else: "No #{String.downcase(plural(spec, kind))} yet."
+              ),
+            actions:
+              if(by_hand?(spec, :create),
+                do: [action(:create, spec, kind, path({:new, kind}))],
+                else: []
+              ) ++
+                if(start?, do: start_actions(description, kind), else: [])
+          )
+
+        back = if first?, do: nil, else: "/"
+        page(plural(spec, kind), back, [list])
+
+      %{"error" => _} = failed ->
+        unavailable(failed, "/")
+    end
+  end
 
   # The view model of a page. A block without an id of its own is named by its type; a
   # page holds at most one such block of each type.

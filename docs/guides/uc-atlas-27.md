@@ -110,7 +110,7 @@ What you can see: every scene, use case, issue and pull request page shows **Ass
 
 | Step | Where | What you should see |
 |---|---|---|
-| A new item has its Assignment | `c` a use case, or `atlas put use_case --in SC-Atlas-01 --title "…" --env test` | `atlas get AS-<key>`: **Assignment AS-UC-Atlas-…: UC-Atlas-…**. `atlas list assignment` lists one per item. |
+| A new item has its Assignment | `c` a use case, or `atlas put use_case --in SC-Atlas-01 --title "…" --env test` | `atlas get AS-<key>`: **Assignment AS-UC-Atlas-…: UC-Atlas-…**. `atlas list assignment` lists one per open item: since IS-Atlas-85 it is Open work. |
 | Its owner, as the item's | `atlas set UC-Atlas-01 assigned_to=melle --cause "ready to test" --env test` | The use case's page and `atlas get UC-Atlas-01`: `Assigned to: melle (since …, by agent: ready to test)`, in every open TUI by hint. The link is the Assignment's: `atlas set` on the item sets it there. |
 | What is expected | the use case's page | `Expected  Build it` (or Test it, Rework): Flow writes it on the Assignment now. |
 | The Assignment's page | `enter` on **Assignment** in the references | **Assignment AS-UC-Atlas-01: UC-Atlas-01**: Of, Expected, Assigned to, and **Assignment of: Use cases** with the use case. `esc` goes back to the use case. |

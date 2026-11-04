@@ -115,3 +115,35 @@ In prod, after the merge, every scene without use cases moves from "Build it" to
 | A use case under it | `c` on the scene | **Expected** `Build it`, **Assigned to** coordinator (Flow test_and_accept: not all under it is completed) |
 
 `e2e/scenarios/uc-atlas-06.exs` follows these steps.
+
+## IS-Atlas-85: Open work, every open fact with its owner, what is expected, its deadline and late
+
+`l Open work` on the start page lists every open fact: one that someone is assigned to, or of which something is expected. Each row shows
+- who it is assigned to (`—` for nobody),
+- what is expected,
+- its deadline, or `Late · deadline …`,
+- since when it is theirs.
+
+Late ones come first, then the newest. `enter` opens the fact. SC-Atlas-02's "Done when" asks for this at every moment.
+
+My work (IS-Atlas-55, the start page "Assigned to you") is the same list, filtered on you: the same reads and the same rows, without the owner. My work now shows the deadline too.
+
+It is description, plus Control's list of the kind the start's relation starts at:
+
+- **`rela/atlas.json`:**
+  - `start.open = {title: "Open work", empty: …}`;
+  - the assignment kind has `start: {key: l, label: Open work}`.
+- **Control:**
+  - the list of the Assignment kind (`/k/assignment`, no new page in the contract) is Open work. It reads every Assignment and every fact they belong to, and shows the open ones.
+  - `atlas list assignment` gives the same rows, one per open fact, by the fact's key.
+
+### Try
+
+| Step | Keys / command | What you should see |
+|---|---|---|
+| Open work | `l` on the start page | **Open work**: `SC-Atlas-NN  A scene handed over at once` with `ada · Break it down into use cases and issues · Deadline 2099-03-04 09:30 · since …`, and the coordinator's open work |
+| A deadline that passes | `atlas set AS-SC-Atlas-NN deadline="2020-05-06 07:08" --env test` | The scene comes first: `ada · Break it down … · Late · deadline 2020-05-06 07:08` |
+| From the command line | `atlas list assignment --env test --json` | the same rows |
+| Done | accept a use case | it leaves Open work: nobody is assigned and nothing is expected |
+
+`e2e/scenarios/uc-atlas-06.exs` follows these steps.
