@@ -151,5 +151,5 @@ fi
 echo "Moved. The earlier data on Fly is in /data/before-move."
 if [ "${ATLAS_FLY_IN_USE:-true}" = false ]; then
   echo "$env's clients still use this Mac's core. Switch them once you have checked the move:"
-  echo "  in env/$env.json set \"fly\": {\"in_use\": true} and \"control\": {\"port\": <fly.tunnel_port>} (docs/guides/prod.md)"
+  echo "  in env/$env.json set \"fly\": {\"in_use\": true} and \"control\": {\"port\": <the tunnel's port on this Mac>} (docs/guides/prod.md)"
 fi
