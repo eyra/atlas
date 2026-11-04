@@ -7,6 +7,7 @@ defmodule AtlasBus.Link.Server do
   def port, do: GenServer.call(__MODULE__, :port)
 
   def init(settings) do
+    Process.flag(:trap_exit, true)
     host = settings["host"] || "127.0.0.1"
     {:ok, ip} = :inet.parse_address(String.to_charlist(host))
     family = if tuple_size(ip) == 8, do: :inet6, else: :inet
@@ -24,7 +25,10 @@ defmodule AtlasBus.Link.Server do
       ])
 
     owner = self()
-    {acceptor, ref} = spawn_monitor(fn -> accept(socket, settings, owner) end)
+
+    {acceptor, ref} =
+      :erlang.spawn_opt(fn -> accept(socket, settings, owner) end, [:link, :monitor])
+
     {:ok, %{socket: socket, acceptor: acceptor, ref: ref, connections: MapSet.new()}}
   end
 
@@ -41,6 +45,8 @@ defmodule AtlasBus.Link.Server do
   def handle_info({:DOWN, _, :process, pid, _}, state),
     do: {:noreply, %{state | connections: MapSet.delete(state.connections, pid)}}
 
+  def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+
   def terminate(_, state) do
     :gen_tcp.close(state.socket)
     Process.exit(state.acceptor, :shutdown)
@@ -51,7 +57,7 @@ defmodule AtlasBus.Link.Server do
     case :gen_tcp.accept(listener) do
       {:ok, socket} ->
         pid =
-          spawn(fn ->
+          spawn_link(fn ->
             receive do
               {:socket, s} -> connection(s, settings)
             end

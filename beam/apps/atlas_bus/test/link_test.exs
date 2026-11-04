@@ -79,6 +79,32 @@ defmodule AtlasBus.LinkTest do
     :gen_tcp.close(s)
   end
 
+  test "stopping or crashing the listener closes its connections and registrations", %{port: port} do
+    for how <- [:stop, :kill] do
+      s = connect(if(how == :stop, do: port, else: Link.Server.port()))
+      recv(s)
+      name = "runtime@laptop/owned-by-listener"
+      :gen_tcp.send(s, Link.encode("attach", %{"endpoint" => name}))
+      eventually(fn -> Registry.lookup(AtlasBus.Endpoints, name) != [] end)
+
+      case how do
+        :stop ->
+          stop_supervised!(Link.Server)
+
+          start_supervised!(
+            {Link.Server, %{"port" => 0, "tokens" => %{"laptop" => "private-test-token"}}}
+          )
+
+        :kill ->
+          Process.exit(Process.whereis(Link.Server), :kill)
+      end
+
+      assert :gen_tcp.recv(s, 0, 1_000) == {:error, :closed}
+      eventually(fn -> Registry.lookup(AtlasBus.Endpoints, name) == [] end)
+      :gen_tcp.close(s)
+    end
+  end
+
   test "envelopes cross both ways with the registered sender; disconnect removes endpoints", %{
     port: port
   } do
