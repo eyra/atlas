@@ -4,12 +4,17 @@ defmodule AtlasBFF.Targets.Protocol do
 
   `payload/3` validates `takes` and returns string-keyed JSON data. Optional nil
   fields are omitted. `message/3` adds `op` for explicitly chosen pathless calls.
-  It does not infer direction, open/submit envelopes, replies or permissions.
+  Optional wire descriptors supply channel/direction, request envelopes and reply
+  selectors to `request/3` and `classify/3`. Sockets, deadlines, adapters and
+  permissions remain the caller's responsibility.
   """
   defmacro __using__(opts) do
     schema = Macro.expand(opts[:contract], __CALLER__).__schema__()
 
+    AtlasBFF.Wire.validate!(schema)
+
     quote do
+      @protocol_wires unquote(Macro.escape(Map.get(schema, :protocol, [])))
       @protocol_models unquote(Macro.escape(Map.new(schema.models, &{&1.name, &1.fields})))
       @protocol_pages unquote(Macro.escape(schema.pages))
       @protocol_endpoints unquote(Macro.escape(schema.endpoints))
@@ -18,6 +23,16 @@ defmodule AtlasBFF.Targets.Protocol do
       def endpoints, do: @protocol_endpoints
       def path(name, params \\ %{}), do: AtlasBFF.Paths.build(@protocol_pages, name, params)
       def match(path), do: AtlasBFF.Paths.match(@protocol_pages, path)
+
+      def wires, do: @protocol_wires
+
+      def request(name, props \\ %{}, channel \\ unquote(opts[:channel])) do
+        wire = AtlasBFF.Wire.descriptor!(@protocol_wires, name, channel)
+        AtlasBFF.Wire.encode!(wire, props)
+      end
+
+      def classify(name, message, channel \\ unquote(opts[:channel])),
+        do: AtlasBFF.Wire.classify(@protocol_wires, name, channel, message)
 
       def endpoint_path(call, name, params \\ %{}) do
         endpoint = AtlasBFF.Targets.Protocol.endpoint!(@protocol_endpoints, call, name)
@@ -32,7 +47,12 @@ defmodule AtlasBFF.Targets.Protocol do
       def message(call, name, props \\ %{}) do
         endpoint = AtlasBFF.Targets.Protocol.endpoint!(@protocol_endpoints, call, name)
         if endpoint.path, do: raise(ArgumentError, "path endpoint requires a transport envelope")
-        Map.put(payload(call, name, props), "op", Atom.to_string(endpoint.call))
+
+        if @protocol_wires == [] do
+          Map.put(payload(call, name, props), "op", Atom.to_string(endpoint.call))
+        else
+          request(endpoint.wire, payload(call, name, props))
+        end
       end
     end
   end

@@ -23,6 +23,7 @@ defmodule AtlasBFF.Targets.Json do
     body =
       %{
         "version" => schema.version,
+        "protocol" => wire_data(Map.get(schema, :protocol, [])),
         "wire" => %{
           "block" => ~s({"id": "<id>", "type": "<block>", "props": {...}}),
           markup =>
@@ -48,6 +49,7 @@ defmodule AtlasBFF.Targets.Json do
             %{
               "name" => Atom.to_string(endpoint.name),
               "call" => Atom.to_string(endpoint.call),
+              "wire" => endpoint[:wire],
               "path" => endpoint.path || "",
               "params" => Enum.map(endpoint.params, &Atom.to_string/1),
               "replies" =>
@@ -68,6 +70,11 @@ defmodule AtlasBFF.Targets.Json do
 
     [{"blocks.json", body}]
   end
+
+  defp wire_data({kind, type}), do: "#{kind} of #{type}"
+  defp wire_data(map) when is_map(map), do: Map.new(map, fn {k, v} -> {k, wire_data(v)} end)
+  defp wire_data(list) when is_list(list), do: Enum.map(list, &wire_data/1)
+  defp wire_data(value), do: value
 
   defp returns(:view_model), do: Names.view_model()
   defp returns(other), do: Atom.to_string(other)

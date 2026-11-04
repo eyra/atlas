@@ -120,7 +120,7 @@ defmodule AtlasBFF.PathsTest do
         spec(~s(defendpoint :a, "/a", call: :submit))
       end
 
-      assert_raise CompileError, ~r/the options are call:, takes: and replies:/, fn ->
+      assert_raise CompileError, ~r/the options are call:, takes:, replies: and wire:/, fn ->
         spec(~s(defendpoint :a, "/a", call: :submit, replies: [ok: :view_model], method: :post))
       end
     end

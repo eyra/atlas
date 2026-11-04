@@ -25,26 +25,36 @@ defmodule AtlasAgent.Client do
     port = settings["control"]["port"]
     options = [:binary, packet: :line, active: false, buffer: 4_194_304]
 
-    with {:ok, socket} <- tcp_connect(host, port, options, env),
-         client = %__MODULE__{socket: socket, env: env},
-         :ok <- send_line(client, hello(env, as)),
-         {:ok, _welcome} <- await(client, @page_wait, &welcome/1),
-         # Control shows its start page after the welcome; it is not what anyone asked.
-         {:ok, _home} <- await(client, @page_wait, &page(&1, ["open"])) do
-      {:ok, client}
+    case tcp_connect(host, port, options, env) do
+      {:ok, socket} ->
+        client = %__MODULE__{socket: socket, env: env}
+
+        case exchange(client, :hello, hello(env, as), @page_wait) do
+          {:ok, _} ->
+            {:ok, client}
+
+          error ->
+            close(client)
+            error
+        end
+
+      error ->
+        error
     end
   end
 
-  @doc "The current turn, or the result of recording its outcome, from Control."
+  @doc "The current turn, or State's acknowledgement of its outcome (not Runtime/Flow completion)."
   def turn(client, message \\ AtlasAgent.Protocol.message(:turn, :turn)) do
-    with :ok <- send_line(client, message) do
-      await(client, @stored_wait, fn
-        %{"op" => "turn", "error" => why} -> {:error, why}
-        %{"op" => "turn"} -> true
-        %{"op" => "page", "reason" => "stored"} -> true
-        %{"op" => "page", "reason" => "refused"} -> {:error, "State refused the outcome"}
-        _ -> false
-      end)
+    operation =
+      case message["op"] do
+        "turn" -> :turn
+        "turn_end" -> :turn_end
+        _ -> raise ArgumentError, "not a turn request"
+      end
+
+    case exchange(client, operation, message, @stored_wait) do
+      {:ok, %{"reason" => "refused"}} -> {:error, "State refused the outcome"}
+      result -> result
     end
   end
 
@@ -70,9 +80,7 @@ defmodule AtlasAgent.Client do
 
   @doc "The page at `path`."
   def open(client, path) do
-    with :ok <- send_line(client, %{"op" => "open", "to" => path}) do
-      await(client, @page_wait, &page(&1, ["open"]))
-    end
+    exchange(client, :open, AtlasAgent.Protocol.request(:open, to: path), @page_wait)
   end
 
   @doc """
@@ -81,17 +89,15 @@ defmodule AtlasAgent.Client do
   `{:stored, page}` with the page Control shows after it was stored, or `{:refused, reasons}`.
   """
   def submit(client, to, values, cause \\ nil) do
-    message = %{
-      "op" => "submit",
-      "endpoint" => to["endpoint"],
-      "params" => to["params"] || %{},
-      "values" => values
-    }
+    message =
+      AtlasAgent.Protocol.request(:submit,
+        endpoint: to["endpoint"],
+        params: to["params"] || %{},
+        values: values,
+        cause: cause
+      )
 
-    message = if cause, do: Map.put(message, "cause", cause), else: message
-
-    with :ok <- send_line(client, message),
-         {:ok, page} <- await(client, @stored_wait, &page(&1, ["stored", "refused"])) do
+    with {:ok, page} <- exchange(client, :submit, message, @stored_wait) do
       case page["reason"] do
         "stored" ->
           {:stored, page}
@@ -123,46 +129,75 @@ defmodule AtlasAgent.Client do
     end
   end
 
-  defp welcome(%{"op" => "welcome"}), do: true
-  defp welcome(%{"op" => "bye", "text" => text}), do: {:error, text}
-  defp welcome(_message), do: false
-
-  defp page(%{"op" => "page", "reason" => reason}, reasons), do: reason in reasons
-  defp page(%{"op" => "bye", "text" => text}, _reasons), do: {:error, text}
-  defp page(_message, _reasons), do: false
-
-  # The first message `wanted` says true for; `{:error, text}` from it ends the wait.
-  defp await(client, timeout, wanted) do
+  @doc false
+  # Serial passive socket: one outstanding exchange. A fixed monotonic deadline
+  # covers the entire handshake/request, including all unsolicited messages.
+  # Exposed for short deterministic transport tests; production uses the constants above.
+  def exchange(client, operation, message, timeout) do
+    # Validate before sending, including channel/direction; never replay a write.
+    encoded = AtlasAgent.Protocol.request(operation, Map.delete(message, "op"))
+    if encoded != message, do: raise(ArgumentError, "request does not match operation")
     deadline = System.monotonic_time(:millisecond) + timeout
-    await_until(client, deadline, wanted)
+
+    with :ok <- send_line(client, message) do
+      await_until(client, operation, deadline, MapSet.new())
+    else
+      error ->
+        close(client)
+        error
+    end
   end
 
-  defp await_until(client, deadline, wanted) do
-    left = max(deadline - System.monotonic_time(:millisecond), 0)
+  defp await_until(client, operation, deadline, seen) do
+    left = deadline - System.monotonic_time(:millisecond)
 
-    case recv(client, left) do
-      {:ok, message} ->
-        case wanted.(message) do
-          true -> {:ok, message}
-          false -> await_until(client, deadline, wanted)
-          {:error, _} = error -> error
+    result =
+      if left <= 0 do
+        {:error, :timeout}
+      else
+        :gen_tcp.recv(client.socket, 0, left)
+      end
+
+    case result do
+      {:ok, line} ->
+        case JSON.decode(line) do
+          {:ok, message} -> dispatch(client, operation, deadline, seen, message)
+          {:error, _} -> fail(client, "Control #{client.env} sent malformed JSON")
         end
 
       {:error, :timeout} ->
-        {:error, "Control #{client.env} did not answer in time"}
+        fail(client, "Control #{client.env} did not answer in time")
 
       {:error, _} ->
-        {:error, "Control #{client.env} closed the connection"}
+        fail(client, "Control #{client.env} closed the connection")
     end
   end
 
-  defp recv(client, timeout) do
-    with {:ok, line} <- :gen_tcp.recv(client.socket, 0, timeout) do
-      case JSON.decode(line) do
-        {:ok, message} -> {:ok, message}
-        {:error, _} -> {:ok, %{}}
-      end
+  defp dispatch(client, operation, deadline, seen, message) do
+    case AtlasAgent.Protocol.classify(operation, message) do
+      :ignore ->
+        await_until(client, operation, deadline, seen)
+
+      {:invalid, why} ->
+        fail(client, "Control #{client.env} sent an invalid reply: #{why}")
+
+      {:reply, reply} ->
+        if Enum.all?(Map.get(reply, :requires, []), &MapSet.member?(seen, &1)) do
+          case reply.effect do
+            :complete -> {:ok, message}
+            :progress -> await_until(client, operation, deadline, MapSet.put(seen, reply.name))
+            :terminal -> fail(client, message["text"])
+            :error -> {:error, message["error"]}
+          end
+        else
+          fail(client, "Control #{client.env} sent replies out of order")
+        end
     end
+  end
+
+  defp fail(client, why) do
+    close(client)
+    {:error, why}
   end
 
   defp send_line(client, message) do

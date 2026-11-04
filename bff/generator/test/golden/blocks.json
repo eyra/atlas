@@ -47,7 +47,8 @@
       "path": "/cards/:id",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -57,7 +58,8 @@
       "path": "/cards/new",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -67,7 +69,8 @@
       "path": "/",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "submit",
@@ -80,7 +83,8 @@
         "refused": "view model",
         "saved": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": null
     },
     {
       "call": "greet",
@@ -91,7 +95,8 @@
         "hi": "greeting",
         "page": "view model"
       },
-      "takes": "greeting"
+      "takes": "greeting",
+      "wire": null
     }
   ],
   "markup": [
@@ -170,6 +175,7 @@
       "returns": "view model"
     }
   ],
+  "protocol": [],
   "version": "1.0.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
