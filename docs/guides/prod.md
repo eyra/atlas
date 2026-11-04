@@ -50,27 +50,36 @@ A merge to master deploys prod (CI job `deploy-prod`, `fly/deploy.sh prod`). It 
 
 ### Secrets
 
-| Where | Secret | What | On this Mac today |
+| Where | Secret | What | Before the client switch |
 |---|---|---|---|
-| eyra/atlas, repository secret | `FLY_API_TOKEN_PROD` | `fly tokens create deploy -a eyra-atlas` | (none: deploys are new) |
-| eyra/atlas, repository secret | `FLY_API_TOKEN_PROD_RELA` | `fly tokens create deploy -a eyra-atlas-rela` | (none) |
-| Fly app `eyra-atlas`, `fly secrets set -a eyra-atlas GITHUB_TOKEN=…` | `GITHUB_TOKEN` | the GitHub connector's token: reads the pull requests of eyra/atlas (private), GET only | `gh auth token`: `connectors.github.token_command` in `env/prod.json`, so Melle's own gh login (account mellelieuwes, keyring) |
+| eyra/atlas, repository secret | `FLY_API_TOKEN_PROD` | `fly tokens create deploy -a eyra-atlas` | CI's per-app deploy token |
+| eyra/atlas, repository secret | `FLY_API_TOKEN_PROD_RELA` | `fly tokens create deploy -a eyra-atlas-rela` | CI's per-app deploy token |
+| Fly app `eyra-atlas`, `fly secrets set -a eyra-atlas GITHUB_TOKEN=…` | `GITHUB_TOKEN` | the GitHub connector's token: reads the pull requests of eyra/atlas (private), GET only | `gh auth token`: `connectors.github.token_command` in `env/prod.json`, the local gh keyring |
 
-On Fly the connector reads its token from that secret (`connectors.github.token_env` in `fly/prod/core.json`). A token that can only read pull requests of eyra/atlas is enough, for example a fine-grained token with "Pull requests: read" on that one repository. Until it is set, each round logs `no token: GITHUB_TOKEN is not set` and keeps the stored values.
+On Fly the connector reads its token from that secret (`connectors.github.token_env` in `fly/prod/core.json`). A token that can only read pull requests of eyra/atlas is enough, for example a fine-grained token with "Pull requests: read" on that one repository. The installed token is verified through an actual private PR refresh; presence or activation metadata alone does not prove authentication. If a token is missing, each round logs `no token: GITHUB_TOKEN is not set` and keeps the stored values.
 
 There is no Flux connector yet: `flux_id` and `flux_ref` are described as set by a connector, but no code reads Flux, so nothing needs a Flux secret. When one is built, its secret goes on `eyra-atlas` the same way.
 
 ### Move prod's data, and switch (IS-Atlas-90)
 
-**Preparation only until a-0003, d-0023 and explicit live-move authorization are resolved.**
-Keep #61 draft until the authorized move is verified. This procedure is for that
-later maintenance window; it does not authorize deployments, secrets or live copies.
+**The coordinator authorizes the maintenance window; keep #61 draft until data checks pass.**
+The earlier a-0003 and d-0023 gates are complete. The restricted GitHub token is
+deployed and authenticated against a private PR. Under d-0023, the coordinator may
+release the exact tested develop build after successful Fly test deployment/smoke.
+First release #85 is master 92fbc2692cf5591d6ce315c78d804de59d36e45d, with the same
+tree as tested source 46dea5f0092726eb063e477a37d2ba81053f695c. Its actual prod pair,
+closure, health and Control were verified. The IS-90 source-transfer window is
+separately authorized; the ordinary client switch still requires coordinator review
+after the data checks. This guide grants no Runtime/listener/model activation.
 Preserve both `rela/` and `beam/`, including State's provenance and answered-fact records.
 
-0. **Choose and verify the build.** Resolve the prod GitHub token (a-0003) and release
-   policy (d-0023), record the approved commit and successful deploy, and verify BOTH
+0. **Choose and verify the build.** Use the approved release policy (d-0023), confirm
+   private GitHub authentication (a-0003), record the source/master commits and
+   successful deploy, and verify BOTH
    apps' image labels (`fly status -a eyra-atlas` and `fly status -a eyra-atlas-rela`).
-   Check source data with that build's description. Before pulling an operational Mac
+   Compare the code/configuration trees: source and master can have different commit
+   IDs because the release preserves merge history. Check source data with that
+   build's description. Before pulling an operational Mac
    checkout, inspect `rela/` changes and follow backup-before-pull: stop the old rela,
    copy the complete environment to a new timestamped backup, then restart the old
    build. Never start new-schema rela over data that still needs a migration.
@@ -193,4 +202,15 @@ and keeps synthetic stores, logs and transport calls in the output folder.
 
 This is a local process/transfer rehearsal, not validation of Fly networking,
 VM boot, deployed health checks, GitHub credentials or real model work. Those live
-checks remain gated by a-0003, d-0023 and live-move authorization.
+checks belong to the authorized live release/move window. Completed token/release
+policy gates do not authorize independent Runtime or real model activation.
+
+### Storage backend and future backups
+
+This transfer copies the current rela file backend, including any attachments and
+selected configuration closure, plus separate durable BEAM State data. File manifests
+are not a general database backup contract. Managed PostgreSQL is the intended later
+destination; conversion and routine backup infrastructure remain planned under
+SC-Atlas-09 / UC-Atlas-40 / IS-Atlas-115, outside the current release/transfer path.
+A PostgreSQL deployment still needs filesystem configuration closure and its own
+supported database backup/export, restore/import and isolated restore verification.
