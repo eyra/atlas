@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # atlas: try Atlas from any folder.
 #
-#   atlas              open a TUI on prod; starts rela and the core in the background when
-#                      they are not answering, and restarts a core from an older build
+#   atlas              open a TUI on prod; prod runs on Fly, so it opens the tunnel to its
+#                      Control first (see "On Fly" below). For an environment on this Mac:
+#                      starts rela and the core in the background when they are not
+#                      answering, and restarts a core from an older build
 #   atlas tui          the same; open as many as you like, each in its own terminal
 #   atlas stop         stop the core (rela keeps running)
 #   atlas restart      stop the core and start this build in the background; rela too, when
@@ -46,9 +48,9 @@
 # its core and rela on Fly, each environment on its own private network; a merge deploys
 # them (develop: test, master: prod). The commands above reach its Control through a
 # WireGuard tunnel (`fly proxy`) that they open in the background; `atlas status` and
-# `atlas logs` show Fly's machines and logs. With "in_use": false in that section (prod,
-# until its data has moved and been checked) the clients still use this Mac's core, and
-# only the two commands below go to Fly.
+# `atlas logs` show Fly's machines and logs. With "in_use": false in that section (an
+# environment whose data has not moved and been checked yet) the clients still use this
+# Mac's core, and only the two commands below go to Fly.
 #   atlas move-to-fly [--from <folder>] [--dry-run]   copy this Mac's data (rela/ and beam/
 #                      in <folder>, by default the environment's folder on this Mac) to the
 #                      Fly apps, replacing theirs (kept there in /data/before-move), and

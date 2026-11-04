@@ -92,16 +92,24 @@ defmodule AtlasE2E.AtlasCommandTest do
 
     assert {test["env"], prod["env"]} == {"test", "prod"}
 
-    # test runs on Fly (IS-Atlas-26): this Mac has only the tunnel's end and its files.
+    # Both run on Fly (IS-Atlas-26, IS-Atlas-79), each its own pair of apps: this Mac has
+    # only the tunnels' ends and their files.
     assert test["fly"]["app"] == "eyra-atlas-test"
-    refute Map.has_key?(test, "rela")
-    refute test["control"]["port"] in [prod["rela"]["port"], prod["control"]["port"], 7612]
-    refute 7612 in [prod["rela"]["port"], prod["control"]["port"]]
-    refute test["fly"]["local"] =~ "/atlas/prod"
+    assert prod["fly"]["app"] == "eyra-atlas"
+    refute test["fly"]["rela_app"] == prod["fly"]["rela_app"]
 
-    for key <- [["rela", "data"], ["rela", "bin"], ["state", "data"]] do
-      assert get_in(prod, key) =~ "/atlas/prod/"
+    for settings <- [test, prod] do
+      refute Map.has_key?(settings, "rela")
+      refute Map.has_key?(settings, "state")
     end
+
+    ports = [test["control"]["port"], prod["control"]["port"]]
+    assert Enum.uniq(ports) == ports
+    refute 7612 in ports
+    # Not the ports the Mac's own cores used, which may still be listening.
+    refute Enum.any?(ports, &(&1 in [7590, 7591, 7690, 7691]))
+    refute test["fly"]["local"] == prod["fly"]["local"]
+    refute test["fly"]["local"] =~ "/atlas/prod"
   end
 
   # A copy of env/test.json whose tunnel files go to a folder of its own.
@@ -169,18 +177,14 @@ defmodule AtlasE2E.AtlasCommandTest do
     assert out =~ "has no rela data"
   end
 
-  test "prod has its Fly apps on a tunnel port of its own, and its clients still use this Mac" do
-    [test, prod] =
-      for env <- ["test", "prod"],
-          do: @root |> Path.join("env/#{env}.json") |> File.read!() |> JSON.decode!()
+  test "prod's clients use Fly; a move takes the folder the Mac kept prod's data in" do
+    prod = @root |> Path.join("env/prod.json") |> File.read!() |> JSON.decode!()
 
-    assert %{"app" => "eyra-atlas", "rela_app" => "eyra-atlas-rela", "in_use" => false} =
+    assert %{"app" => "eyra-atlas", "rela_app" => "eyra-atlas-rela", "in_use" => true} =
              prod["fly"]
 
-    ports = [prod["rela"]["port"], prod["control"]["port"], test["control"]["port"], 7612]
-    refute prod["fly"]["tunnel_port"] in ports
     assert prod["fly"]["move_from"] =~ "/atlas/prod"
-    refute prod["fly"]["local"] == test["fly"]["local"]
+    refute prod["fly"]["local"] == prod["fly"]["move_from"]
   end
 
   # A copy of env/prod.json on ports and folders of its own, so nothing reaches prod.
