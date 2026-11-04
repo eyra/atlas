@@ -16,6 +16,6 @@ defmodule AtlasBus.MixProject do
   end
 
   def application do
-    [extra_applications: [:logger], mod: {AtlasBus.Application, []}]
+    [extra_applications: [:logger, :crypto], mod: {AtlasBus.Application, []}]
   end
 end

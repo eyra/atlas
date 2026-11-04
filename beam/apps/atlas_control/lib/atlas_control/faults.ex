@@ -48,8 +48,16 @@ defmodule AtlasControl.Faults do
   def offers(on) do
     layers =
       case on do
-        {_kind, key} -> ask("runtime", key) ++ ask("flow", key)
-        nil -> []
+        {_kind, key} ->
+          (AtlasBus.endpoints()
+           |> Enum.filter(
+             &(String.starts_with?(&1, "runtime@") and not String.contains?(&1, "/"))
+           )
+           |> Enum.sort()
+           |> Enum.flat_map(&ask(&1, key))) ++ ask("flow", key)
+
+        nil ->
+          []
       end
 
     own = for {fault, label, text} <- @own, do: offer(fault, label, text, "control")
@@ -242,7 +250,7 @@ defmodule AtlasControl.Faults do
   defp label_of({_kind, key}), do: key
   defp label_of(nil), do: "this node"
 
-  defp by("runtime"), do: "Runtime"
+  defp by("runtime@" <> machine), do: "Runtime on #{machine}"
   defp by("flow"), do: "Flow"
   defp by(_), do: "Control"
 end

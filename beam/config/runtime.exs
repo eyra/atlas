@@ -25,23 +25,39 @@ if config_env() != :test do
 
   config :atlas_bus, environment: env
 
-  config :atlas_state,
-    rela_url: settings["rela"]["url"],
-    # On Fly rela has an IPv6 address on the private network only.
-    rela_ipv6: settings["rela"]["ipv6"] == true,
-    description_extra: settings["rela"]["extra"] && Path.join(root, settings["rela"]["extra"]),
-    data_dir: expand.(settings["state"]["data"]),
-    # The connectors at State's edge: only those this environment has settings for.
-    connectors: settings["connectors"] || %{}
+  role = System.get_env("ATLAS_ROLE") || "core"
+  if role not in ["core", "runtime"], do: raise("unknown ATLAS_ROLE")
+  link = settings["bus_link"]
 
-  config :atlas_control,
-    host: settings["control"]["host"],
-    port: settings["control"]["port"],
-    # Who uses a TUI of this environment (a key), until Control has sign-in.
-    tui_user: settings["tui_user"]
+  if role == "runtime" do
+    unless match?(%{"mode" => "client"}, link), do: raise("Runtime needs a client bus_link")
+    config :atlas_bus, link: Map.put(link, "token", System.fetch_env!("ATLAS_BUS_LINK_TOKEN"))
+  else
+    if link do
+      tokens = System.fetch_env!("ATLAS_BUS_LINK_TOKEN") |> JSON.decode!()
+      config :atlas_bus, link: Map.merge(link, %{"mode" => "server", "tokens" => tokens})
+    end
 
-  # Flow looks at each open fact again this often, and at once on a hint.
-  config :atlas_flow, tick_seconds: get_in(settings, ["flow", "tick_seconds"]) || 60
+    config :atlas_state,
+      rela_url: settings["rela"]["url"],
+      # On Fly rela has an IPv6 address on the private network only.
+      rela_ipv6: settings["rela"]["ipv6"] == true,
+      description_extra: settings["rela"]["extra"] && Path.join(root, settings["rela"]["extra"]),
+      data_dir: expand.(settings["state"]["data"]),
+      # The connectors at State's edge: only those this environment has settings for.
+      connectors: settings["connectors"] || %{}
+
+    config :atlas_control,
+      host: settings["control"]["host"],
+      port: settings["control"]["port"],
+      # Who uses a TUI of this environment (a key), until Control has sign-in.
+      tui_user: settings["tui_user"]
+
+    # Flow looks at each open fact again this often, and at once on a hint.
+    config :atlas_flow, tick_seconds: get_in(settings, ["flow", "tick_seconds"]) || 60
+  end
+
+  if role == "runtime", do: System.delete_env("ATLAS_BUS_LINK_TOKEN")
 
   # Runtime runs the turns of this machine's agents (IS-Atlas-15); without `runtime`, none.
   runtime = settings["runtime"] || %{}
