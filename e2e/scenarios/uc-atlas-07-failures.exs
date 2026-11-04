@@ -86,7 +86,9 @@ scenario "UC-Atlas-07: failure actions in the test TUI, each seen as it recovers
     open_row(t1, "A scene that fails")
     open_row(t1, "A use case for tester")
     open_row(t1, "AS-#{use_case}")
+    see(t1, "Assignment AS-#{use_case}")
     open_row(t1, turn)
+    see(t1, "Turn #{turn}")
     fail.(t1, "Kill its agent")
     see(t1, "Killed tester's process for #{turn}")
     field.(i, turn, "Why", &(&1 =~ "the agent crashed: :killed"))
@@ -99,6 +101,7 @@ scenario "UC-Atlas-07: failure actions in the test TUI, each seen as it recovers
     home(t1)
     open_row(t1, "A scene that fails")
     open_row(t1, "A use case for tester")
+    see(t1, "Use case #{use_case}: A use case for tester")
     fail.(t1, "Kill its process")
     see(t1, ~r/Killed Flow's process for #{use_case}; back as a new one/)
     see(t1, "Use case #{use_case}")
@@ -110,6 +113,7 @@ scenario "UC-Atlas-07: failure actions in the test TUI, each seen as it recovers
          home(t1)
          press(t1, "g")
          open_row(t1, "Tester")
+         see(t1, "Agent tester")
 
          # Idle: it shows it is there, and its turn runs to its maximum (15 s here).
          fail.(t1, "Make it idle")
