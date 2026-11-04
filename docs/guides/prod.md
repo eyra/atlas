@@ -62,18 +62,135 @@ There is no Flux connector yet: `flux_id` and `flux_ref` are described as set by
 
 ### Move prod's data, and switch (IS-Atlas-90)
 
-Prod's data is real. Its move is checked item by item, and the Mac's prod keeps its data until the check passes. These steps run before the switch pull request is merged, while `env/prod.json` still says `"in_use": false`.
+**Preparation only until a-0003, d-0023 and explicit live-move authorization are resolved.**
+Keep #61 draft until the authorized move is verified. This procedure is for that
+later maintenance window; it does not authorize deployments, secrets or live copies.
+Preserve both `rela/` and `beam/`, including State's provenance and answered-fact records.
 
-0. **Prod on Fly runs the build the Mac's prod runs.** The move checks the data against this build's description, and Fly's rela checks it again at boot against its own. Merge develop into master first; `deploy-prod` then deploys that build, and `atlas status` (`fly status -a eyra-atlas`) shows `master-<commit>`.
-1. **Stop writes on the Mac and back up.** Stop the Mac's prod core and rela, so nothing changes after the copy (`atlas stop`, then `atlas rela-stop`). Then copy the folder: `cp -Rp ~/.local/share/atlas/prod ~/.local/share/atlas/prod-backup-$(date -u +%Y%m%dT%H%M%SZ)`.
-2. **Dry run:**
+0. **Choose and verify the build.** Resolve the prod GitHub token (a-0003) and release
+   policy (d-0023), record the approved commit and successful deploy, and verify BOTH
+   apps' image labels (`fly status -a eyra-atlas` and `fly status -a eyra-atlas-rela`).
+   Check source data with that build's description. Before pulling an operational Mac
+   checkout, inspect `rela/` changes and follow backup-before-pull: stop the old rela,
+   copy the complete environment to a new timestamped backup, then restart the old
+   build. Never start new-schema rela over data that still needs a migration.
+1. **Freeze every source writer using the OLD client settings.** Keep the operational
+   checkout on `fly.in_use=false` through verification. Stop independent Runtime nodes
+   on every agent machine (`atlas runtime-stop --env prod`, when IS-91 is installed),
+   close ordinary clients and stop other automated writers. Core stop alone does not
+   stop Runtime. Run `atlas stop --env prod`, then `atlas rela-stop --env prod` on the
+   source. Prevent clients, supervisors and unattended deploys from restarting either
+   authority during the maintenance window. After #61, `atlas stop` closes a Control
+   tunnel and `atlas rela-stop` refuses to stop Fly rela; use the old settings here.
+2. **Preserve the stopped source and destination.** Copy the complete stopped Mac
+   environment to a new timestamped folder; keep it immutable:
    ```sh
-   atlas move-to-fly --env prod --from ~/.local/share/atlas/prod-backup-<time> --dry-run
+   cp -Rp ~/.local/share/atlas/prod ~/.local/share/atlas/prod-backup-<UTC-time>
    ```
-   It checks that this build's description describes all of that data. It counts the items per kind (`assignments` among them) and the links per relation (`links assignment` and `links accepted_by` among them).
-3. **The move:** the same without `--dry-run`. It checks every file of `rela/` and `beam/` on Fly against what it sent, by SHA-256: every item, every Assignment, every link (accepted_by too), and State's own record of who set each link. Then it compares the counts. What Fly held before stays in `/data/before-move/`.
-4. **Check through Control on Fly:** `fly/smoke.sh prod` counts every kind as Control on Fly reads it.
-5. **Switch prod's clients** with the switch pull request (IS-Atlas-90): `env/prod.json` gets `"fly": {"in_use": true}` and `"control": {"port": 7593}`, the tunnel's end on this Mac, and loses the Mac-only settings (`rela`, `state`, `connectors`). From then on `atlas` opens the tunnel to `eyra-atlas` like `atlas tui --env test` does.
-6. **If anything is wrong before the switch:** `atlas restart` starts the Mac's prod again on its own data, which nothing changed. After the switch, going back is reverting that pull request, then `atlas restart`: the Mac's prod data is still the one from before the move.
+   Quiesce destination core writers BEFORE replacing destination rela. With old
+   settings still in use, hold both destination services and preserve their data:
+   ```sh
+   atlas fetch-from-fly --env prod --to <new-destination-backup> --hold
+   ```
+   This holds/restarts the destination core first, then rela. Verify both holds and
+   successful backup output before continuing. A failure can leave services held;
+   do not reopen either authority until its data and hold state are understood.
+   Keep Runtime stopped. During the move rela starts first while the core stays held
+   until its own `beam/` archive is applied. Applying an archive removes that app's
+   hold. `/data/before-move/` is additional preservation, not a substitute for this
+   backup and writer exclusion.
+3. **Dry run against the exact stopped source backup:**
+   ```sh
+   atlas move-to-fly --env prod --from <source-backup> --dry-run
+   ```
+   Save the schema-fit result and counts per kind and relation, including Assignment,
+   `assignment`, `accepted_by` and ownership links. Held destination files remain
+   readable over SSH; services need not accept writes for this check.
+4. **Transfer that same backup**, using the same command without `--dry-run`, only
+   under live-move authorization. Save the output. A partial failure may leave incoming
+   archives or one replaced store; inspect both apps and preserve their data before
+   restarting or retrying. Do not simply restart both sides.
+5. **Separate arrival integrity from reconciliation.** SHA-256 manifests compare
+   the sent archives with the manifests recorded by `apply-move.sh` BEFORE service
+   boot. This proves byte-for-byte arrival of `rela/` and `beam/`, not that the stores
+   remain unchanged after startup. The subsequent counts are read after boot, when
+   Flow and connectors may already have reconciled. Investigate mismatches against
+   arrival evidence and later facts; save a fresh consistent snapshot if needed.
+   Do not start Runtime during these checks.
+6. **Verify through Control on Fly:** `fly/smoke.sh prod` lists kinds and counts;
+   it is not a semantic comparison of every item. Also compare known scene/use-case/
+   issue/PR records, Assignment/ownership and acceptance links, including provenance.
+   Account for expected Flow and GitHub changes from the baseline. Confirm the build,
+   token-backed GitHub refresh and environment separation. Clients use Control;
+   layers use Bus.
+7. **Switch ordinary clients only after data checks and delivery approval.** Under
+   the agreed policy, #61 sets `fly.in_use=true` and `control.port=7593`, removing
+   local core settings. Validate the prod TUI and CLI against Fly Control. Keep all
+   backups and the source dataset. Keep Runtime stopped and deployed Bus listeners
+   disabled until separate IS-91 activation approval; changing client settings
+   activates neither.
 
-After the switch, keep `~/.local/share/atlas/prod` and the backup as they are. `atlas fetch-from-fly --env prod --to <folder>` makes a fresh backup from Fly at any time (about a minute in which prod serves nothing). A migration on prod runs as on test: `docs/guides/test-on-fly.md`, "A migration".
+### Runtime after the client switch (IS-Atlas-91)
+
+Coordinate with #78 and `docs/guides/runtime-node.md` when available. Runtime is an
+independent process with its own PID, log and optional Bus proxy. Core stop/restart
+does not stop it. A disconnected node retries its configured endpoint; it does not
+retarget automatically from the Mac to Fly. Settings are read when the node starts.
+
+Only after separate activation approval, configure the approved core's private Bus
+listener and distinct per-machine credentials, configure each machine's local
+`runtime.json` for Fly, then explicitly start Runtime. Prod's conventional Bus tunnel
+is `7595:7594`, independent of Control's `7593:7591`. Agents' CLI calls use the ordinary
+client environment file and therefore the switched Control. Keep test/prod settings
+and credentials separate. No public Fly service is needed.
+
+Verify Bus registration and stub-turn leases/logs before separately approved real
+agent work. A Runtime PID alone does not prove a connected Bus. IS-91 retries dropped
+Bus connections; it does not promise indefinite recovery of a dead flyctl proxy,
+cross-machine failover or a durable outbox. This procedure authorizes no activation.
+
+### Rollback preserves the latest authority
+
+Before the switch, restarting the Mac on its stopped source dataset is safe ONLY
+when destination writers are stopped and no destination changes need keeping. Fly's
+Flow and connectors may write even before clients switch. Establish which dataset
+is authoritative from the facts, not the client settings.
+
+After Fly accepts changes, reverting #61 and restarting the pre-move Mac dataset
+can discard them. First stop Runtime and every other writer, hold Fly and preserve a
+current consistent copy of BOTH `rela/` and `beam/` in a NEW folder:
+`atlas fetch-from-fly --env prod --to <new-latest-backup> --hold`. Check compatibility
+with the intended rollback build, restore that latest copy to a separate local
+instance and verify through its Control, including ownership, acceptance and
+provenance. Only then, under rollback authorization, switch clients to that validated
+dataset. Keep Fly held until a single writable authority is established. Preserve
+pre-move backups; reverting settings reverses neither data nor external actions.
+
+`atlas fetch-from-fly --env prod --to <new-folder>` makes a consistent backup with a
+brief hold; `--hold` keeps both services held. A migration follows
+`docs/guides/test-on-fly.md`, "A migration", with its own authorization. Preserve
+previous worktrees, branches and backups; cleanup needs separate authorization.
+
+### Private transfer rehearsal
+
+Run from this worktree, with a NEW output folder and the pinned rela executables:
+
+```sh
+python3 fly/rehearse-transfer.py --output <new-private-folder> --rela-bin <pinned-rela-bin-folder>
+```
+
+The harness copies only the executables, starts real Atlas/rela instances on free
+loopback ports with synthetic data, no external connectors and no Runtime agents,
+and substitutes a local transport accepting only `rehearsal-core` and
+`rehearsal-rela`. It never invokes flyctl. It runs the actual fetch/move/count/
+manifest helpers; the boot-time apply helper runs with private mount paths.
+
+Checks cover live-replacement refusal before transport, dry-run without upload or
+restart, core-first destination holds, rela-first application, arrival manifests,
+linked records through Control, and preservation of a later write when restoring
+the latest snapshot to a third private instance. It stops only its own services
+and keeps synthetic stores, logs and transport calls in the output folder.
+
+This is a local process/transfer rehearsal, not validation of Fly networking,
+VM boot, deployed health checks, GitHub credentials or real model work. Those live
+checks remain gated by a-0003, d-0023 and live-move authorization.

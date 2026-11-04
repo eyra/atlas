@@ -10,7 +10,7 @@ This repository holds everything during development: the BEAM application, the r
 
 `atlas` opens **prod**, where the plan lives (real data; the header shows `Atlas · prod` in white on red). Prod and test run on Fly; `atlas` reaches them through a tunnel it opens itself. Try use cases in **test**: `atlas tui --env test`. Scripts, tests and agents always pass `--env test` or a private `ATLAS_ENV_FILE`.
 
-- `docs/guides/prod.md`: the prod environment: start, stop, where its data is; prod on Fly, its secrets, and the move and switch (IS-Atlas-79).
+- `docs/guides/prod.md`: the prod environment: start, stop, where its data is; prod on Fly, its secrets, and the move and switch (IS-Atlas-90).
 - `docs/guides/test-on-fly.md`: test runs on Fly (`eyra-atlas-test`, `eyra-atlas-test-rela`), deployed on every merge to develop; the tunnel, the CI secrets, and `atlas move-to-fly` (IS-Atlas-26).
 - `docs/guides/uc-atlas-01.md`: start the test environment and two TUIs, and manage scenes (UC-Atlas-01).
 - `docs/guides/uc-atlas-02.md`: manage the use cases of a scene (UC-Atlas-02).
