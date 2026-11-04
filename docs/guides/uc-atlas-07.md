@@ -83,7 +83,7 @@ Claude Code's allowlist let `atlas set --help 2>&1 | head -50` run in IS-Atlas-1
 - **The shell prefix:** the turn's environment sets `CLAUDE_CODE_SHELL_PREFIX` to `turns_dir/<turn key>.shell`, beside the turn's folder, not in it. Claude Code runs each of the agent's Bash commands through it as `<prefix> '<its command string>'`.
 - **What it does:** it keeps the command string in `turns_dir/<turn key>.commands`, sets PATH to the turn's `bin` alone, makes PATH readonly, and runs the command. PATH has to be readonly: Claude Code first sources its shell snapshot, whose last line sets PATH back to its own (with `sys`). The agent cannot widen PATH either (`PATH=/usr/bin:$PATH head …` fails).
 - **Claude Code itself** keeps `bin` and `sys` on its own PATH, for its keychain login.
-- **Not stopped by a PATH:** a full path such as `/usr/bin/head` still runs. Only Claude Code's permissions stand in its way there.
+- **Not stopped by a PATH:** a full path such as `/usr/bin/head`, or bash's own redirects. IS-Atlas-94's sandbox stops those.
 
 ## IS-Atlas-93: a turn whose item left its agent may still end by itself
 
@@ -93,3 +93,16 @@ In IS-Atlas-18's second real turn the agent handed its item back, and Runtime st
 - **Ending within it:** the turn ends with both reasons, `AS-… is no longer runner's to work on, and the agent ended its turn by itself: <its result>`. The result is kept, whoever moved the item.
 - **The claude port's result** carries what Claude Code says the turn cost: `Handed it back. (cost $0.0123)`.
 - **Melle can test:** UC-Atlas-07's e2e scenario (grace 4 s). The stand-in's use case is handed to the bystander, and the stand-in ends its turn 1.5 s later: the turn's Why shows both. Handed on again while the stand-in stays active, its turn ends after the grace with `no longer runner's to work on`.
+
+## IS-Atlas-94: the agent's own commands run in an OS sandbox
+
+A PATH stops command names, not full paths (`/usr/bin/security`, `/bin/ls`) or bash's own reads and writes (`< file`, `> file`).
+
+- **The sandbox:** the shell prefix runs each of the agent's commands under macOS's `sandbox-exec`, with a profile written per turn beside its folder (`turns_dir/<turn key>.sb`). It denies by default, and allows only:
+  - running `/bin/bash` and the turn's `atlas`;
+  - reading what bash needs to start (`/usr/lib`, `/System`, the dyld cache, `/`, `/dev/null`), and metadata along the turn folder's own path (for `pwd`); nothing else shows, not even whether it exists;
+  - one write: Claude Code's `claude-*-cwd` file, in its own `CLAUDE_CODE_TMPDIR` (`turns_dir/<turn key>.tmp`);
+  - one connection: the turn's broker, on 127.0.0.1.
+- **The broker:** the turn's `atlas` is now a few lines of bash that send their arguments over bash's `/dev/tcp` to a broker in the claude port, outside the sandbox. The broker refuses `--env` and any command but get, list and set, and runs the build's `atlas` on the instance as the turn's agent. What the agent sets in its environment (`ATLAS_AS`, `ATLAS_ENV_FILE`) no longer reaches the command.
+- **No sandbox, no commands:** where there is no `sandbox-exec` (Linux), the prefix runs none of the agent's commands (exit 126).
+- **Tests:** the sandbox's own test runs on macOS only. Linux CI runs the broker's test and the test that nothing runs without a sandbox.
