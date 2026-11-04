@@ -9,7 +9,9 @@ defmodule AtlasRuntime.Turn do
     silence limit, at most every `lease` (W2);
   - its end, `ended`, with why: the agent ended it, it was silent for the silence limit
     (W2), it ran longer than the maximum (W4), the agent crashed, or the item is no longer
-    the agent's (the engine says so).
+    the agent's (the engine says so). Then the agent may still end its turn by itself for
+    the grace (`leave_grace`), so its result is kept, as when it handed the item on itself
+    (IS-Atlas-93); after it, the turn is stopped.
 
   It keeps nothing State does not hold, but the agent itself: when its process dies, the
   engine finds the turn running without a process and ends it (C1). Whether the turn moved
@@ -30,6 +32,9 @@ defmodule AtlasRuntime.Turn do
 
   @doc "End the turn, with why (from the engine)."
   def finish(pid, why), do: GenServer.cast(pid, {:finish, why})
+
+  @doc "Its item left its agent (from the engine): it ends by itself, or after the grace."
+  def leave(pid, why), do: GenServer.cast(pid, {:leave, why})
 
   @impl true
   def init(turn) do
@@ -54,7 +59,8 @@ defmodule AtlasRuntime.Turn do
             since: now,
             active: now,
             written: now,
-            what: nil
+            what: nil,
+            leaving: nil
           })
 
         n = turn.names
@@ -92,8 +98,16 @@ defmodule AtlasRuntime.Turn do
 
   def handle_info({:agent, pid, {:ended, why}}, %{agent_pid: pid} = state) do
     Process.demonitor(state.ref, [:flush])
-    finish_turn(%{state | agent_pid: nil}, "the agent ended its turn: #{why}")
+
+    ended =
+      if state.leaving,
+        do: "#{state.leaving}, and the agent ended its turn by itself: #{why}",
+        else: "the agent ended its turn: #{why}"
+
+    finish_turn(%{state | agent_pid: nil}, ended)
   end
+
+  def handle_info({:left, why}, state), do: finish_turn(state, why)
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{ref: ref} = state) do
     why =
@@ -147,6 +161,13 @@ defmodule AtlasRuntime.Turn do
 
   @impl true
   def handle_cast({:finish, why}, state), do: finish_turn(state, why)
+
+  def handle_cast({:leave, why}, %{leaving: nil} = state) do
+    Process.send_after(self(), {:left, why}, state.leave_grace)
+    {:noreply, %{state | leaving: why}}
+  end
+
+  def handle_cast({:leave, _why}, state), do: {:noreply, state}
 
   defp finish_turn(state, why) do
     if state.agent_pid, do: state.port.stop(state.agent_pid)

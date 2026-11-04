@@ -41,6 +41,7 @@ defmodule AtlasRuntimeTest do
         every: 200,
         stub_dir: dir,
         crash_pause: 50,
+        leave_grace: 300,
         name: Engine
       ]
       |> Keyword.merge(more)
@@ -129,6 +130,24 @@ defmodule AtlasRuntimeTest do
     assert run("R-C-B-1-1")["values"]["reason"] == "C-B-1 is no longer ada's to work on"
     Process.sleep(500)
     assert FakeState.all("run") |> length() == 1
+  end
+
+  test "a turn whose item left its agent may still end by itself, for the grace", %{dir: dir} do
+    box()
+    engine(dir, leave_grace: 5_000)
+    eventually(fn -> run("R-C-B-1-1")["values"]["status"] == "going" end)
+
+    # As when ada hands it on itself: the item moves, then ada ends its turn.
+    box("bob")
+    Process.sleep(500)
+    assert run("R-C-B-1-1")["values"]["status"] == "going"
+    mode(dir, "ada", "end")
+
+    eventually(fn ->
+      run("R-C-B-1-1")["values"]["reason"] ==
+        "C-B-1 is no longer ada's to work on, and the agent ended its turn by itself: " <>
+          "the stub ended its turn"
+    end)
   end
 
   test "a fact Flow has no state for (done) gets no turn", %{dir: dir} do

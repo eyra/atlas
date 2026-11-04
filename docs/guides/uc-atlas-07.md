@@ -75,3 +75,12 @@ Runtime's second port, `claude`, runs one Claude Code process per turn, headless
   - after 3 crashes in 10 minutes on a machine, the agent gets no more turns there, and Runtime puts `cannot_run` on the agent ("on macbook since …: 3 crashes in 10 minutes"), cleared once that is no longer so.
 - **`turn_limit`:** no more turns for that agent on that machine than that, ever. A trial's one.
 - **Tests and CI** use a fake `claude` that prints the same stream. The e2e keeps the stub.
+
+## IS-Atlas-93: a turn whose item left its agent may still end by itself
+
+In IS-Atlas-18's second real turn the agent handed its item back, and Runtime stopped Claude Code at once, before it wrote its result: the cost was lost.
+
+- **The grace:** when a turn's item is no longer its agent's, Runtime lets the turn run on for `leave_grace_seconds` (10; per agent too, like `silence_seconds`), then stops it as before (`… is no longer <agent>'s to work on`).
+- **Ending within it:** the turn ends with both reasons, `AS-… is no longer runner's to work on, and the agent ended its turn by itself: <its result>`. The result is kept, whoever moved the item.
+- **The claude port's result** carries what Claude Code says the turn cost: `Handed it back. (cost $0.0123)`.
+- **Melle can test:** UC-Atlas-07's e2e scenario (grace 4 s). The stand-in's use case is handed to the bystander, and the stand-in ends its turn 1.5 s later: the turn's Why shows both. Handed on again while the stand-in stays active, its turn ends after the grace with `no longer runner's to work on`.
