@@ -4,6 +4,7 @@ defmodule AtlasRuntime.ClaudeTest do
   use ExUnit.Case, async: true
 
   alias AtlasRuntime.Agent.Claude
+  alias AtlasRuntime.Agent.Claude.Broker
 
   @moduletag :tmp_dir
 
@@ -19,7 +20,7 @@ defmodule AtlasRuntime.ClaudeTest do
     bin = Path.join(dir, "build-bin")
     File.mkdir_p!(bin)
     path = Path.join(bin, "atlas")
-    File.write!(path, "#!/bin/sh\necho \"build atlas: $* (file=$ATLAS_ENV_FILE)\"\n")
+    File.write!(path, "#!/bin/sh\necho \"build atlas: $* (file=$ATLAS_ENV_FILE as=$ATLAS_AS)\"\n")
     File.chmod!(path, 0o755)
     bin
   end
@@ -83,24 +84,55 @@ defmodule AtlasRuntime.ClaudeTest do
              Claude.start(@turn, Keyword.put(opts(dir, nil), :agent, %{}))
   end
 
-  test "the turn's atlas is its instance's alone; its environment carries nothing else",
-       %{tmp_dir: dir} do
+  # The turn's files, with its broker (owned by the test process, as by the port).
+  defp turn_files(dir) do
     folder = Path.join(dir, "turn")
+    File.mkdir_p!(folder)
     o = opts(dir, "unused")
-    :ok = Claude.wrapper(folder, o)
-    env = Claude.environment(@turn, o, folder)
+    atlas = Path.join(o[:atlas_bin], "atlas")
+
+    {:ok, %{port: port}} =
+      Broker.open(%{atlas: atlas, env_file: o[:env_file], agent: "trial", folder: folder})
+
+    :ok = Claude.wrapper(folder, o, port)
+    {folder, o, Claude.environment(@turn, o, folder)}
+  end
+
+  # As Claude Code runs a command: its snapshot first, which sets PATH back to its own
+  # (Claude Code 2.1.280 builds `source <snapshot> 2>/dev/null || true && … && eval …`).
+  defp through_prefix(dir, folder, env) do
+    snapshot = Path.join(dir, "snapshot.sh")
+    File.write!(snapshot, "export PATH=#{env["PATH"]}:/usr/bin:/bin\n")
+
+    fn command ->
+      System.cmd(
+        env["CLAUDE_CODE_SHELL_PREFIX"],
+        ["source \"#{snapshot}\" 2>/dev/null || true && eval #{inspect(command)}"],
+        env: Enum.to_list(env),
+        stderr_to_stdout: true,
+        cd: folder
+      )
+    end
+  end
+
+  test "the turn's atlas asks its broker: the instance and the agent are the broker's",
+       %{tmp_dir: dir} do
+    {folder, o, env} = turn_files(dir)
 
     assert env["PATH"] == Path.join(folder, "bin") <> ":" <> Path.join(folder, "sys")
     # Its sys folder holds what Claude Code needs for itself (macOS: security) and no more.
     assert File.ls!(Path.join(folder, "sys")) -- ["security"] == []
     assert env["ATLAS_AS"] == "trial" and env["ATLAS_ENV_FILE"] == o[:env_file]
+    assert env["CLAUDE_CODE_TMPDIR"] == Claude.tmp(folder)
     refute Map.has_key?(env, "GITHUB_TOKEN") or Map.has_key?(env, "MIX_ENV")
 
-    run = fn command, extra ->
-      System.cmd("/bin/sh", ["-c", command],
-        env: Enum.to_list(Map.merge(env, extra)),
-        stderr_to_stdout: true
-      )
+    # Beside the folder, not in it: what the agent's commands may not write.
+    for file <- [Claude.shell(folder), Claude.profile(folder), Claude.tmp(folder)],
+        do: refute(String.starts_with?(file, folder <> "/"))
+
+    # The client alone, without the sandbox: what the broker answers.
+    run = fn command ->
+      System.cmd("/bin/bash", ["-c", command], env: Enum.to_list(env), stderr_to_stdout: true)
     end
 
     for command <- [
@@ -108,48 +140,31 @@ defmodule AtlasRuntime.ClaudeTest do
           "atlas list widget --env test",
           "atlas set IS-Atlas-01 title=x --env=prod",
           "atlas put widget --title x",
-          "atlas help"
+          "atlas help",
+          "atlas"
         ] do
-      {out, status} = run.(command, %{})
+      {out, status} = run.(command)
       assert status == 2 and out =~ "atlas (turn): refused", "#{command}: #{out}"
     end
 
-    {out, 2} = run.("atlas get X", %{"ATLAS_ENV_FILE" => "/elsewhere.json"})
-    assert out =~ "ATLAS_ENV_FILE is not this turn's instance"
+    {out, 0} = run.("atlas get X")
+    assert out == "build atlas: get X (file=#{o[:env_file]} as=trial)\n"
 
-    {out, 0} = run.("atlas get X", %{})
-    assert out =~ "build atlas: get X (file=#{o[:env_file]})"
+    # What the agent sets in its environment does not reach the command.
+    {out, 0} = run.("ATLAS_ENV_FILE=/elsewhere.json ATLAS_AS=coordinator atlas get X")
+    assert out == "build atlas: get X (file=#{o[:env_file]} as=trial)\n"
 
-    # Nothing but atlas is on its PATH.
-    {out, status} = run.("atlas get X; ls ~", %{})
-    assert out =~ "build atlas: get X" and out =~ ~r/ls: (command )?not found/ and status != 0
+    {out, 0} = run.(~s(atlas set X "title=two words" --cause "a\nb"))
+    assert out =~ "build atlas: set X title=two words --cause a\nb (file="
   end
 
-  test "the agent's own commands run through the prefix, with only the turn's atlas",
+  @tag :sandbox
+  test "in the sandbox the agent's commands run bash and the turn's atlas, and no more",
        %{tmp_dir: dir} do
-    folder = Path.join(dir, "turn")
-    o = opts(dir, "unused")
-    :ok = Claude.wrapper(folder, o)
-    env = Claude.environment(@turn, o, folder)
-    prefix = env["CLAUDE_CODE_SHELL_PREFIX"]
+    {folder, o, env} = turn_files(dir)
+    run = through_prefix(dir, folder, env)
 
-    assert prefix == Claude.shell(folder)
-    refute String.starts_with?(prefix, folder <> "/")
-
-    # As Claude Code runs a command: its snapshot first, which sets PATH back to its own
-    # (Claude Code 2.1.280 builds `source <snapshot> 2>/dev/null || true && … && eval …`).
-    snapshot = Path.join(dir, "snapshot.sh")
-    File.write!(snapshot, "export PATH=#{env["PATH"]}:/usr/bin:/bin\n")
-
-    run = fn command ->
-      System.cmd(
-        prefix,
-        ["source \"#{snapshot}\" 2>/dev/null || true && eval #{inspect(command)}"],
-        env: Enum.to_list(env),
-        stderr_to_stdout: true
-      )
-    end
-
+    # Names: only atlas is on PATH, and PATH stays so.
     for tool <- ~w(security head ls git) do
       {out, status} = run.("#{tool} --version")
       assert status == 127 and out =~ "#{tool}: command not found", "#{tool}: #{out}"
@@ -158,12 +173,45 @@ defmodule AtlasRuntime.ClaudeTest do
     {out, 127} = run.("PATH=/usr/bin:$PATH head -1 /etc/hosts")
     assert out =~ "PATH: readonly variable"
 
+    # Full paths: the sandbox runs nothing but bash and the turn's atlas.
+    for command <- ["/usr/bin/security help", "/usr/bin/head -1 /etc/hosts", "/bin/ls ~"] do
+      {out, status} = run.(command)
+      assert status == 126 and out =~ "Operation not permitted", "#{command}: #{out}"
+    end
+
+    # Bash's own reads and writes reach nothing.
+    {out, _} = run.(~s(echo x > "#{Path.join(dir, "f")}"))
+    assert out =~ "Operation not permitted" and not File.exists?(Path.join(dir, "f"))
+    {out, _} = run.(~s(echo x > "#{Path.join(Claude.tmp(folder), "other")}"))
+    assert out =~ "Operation not permitted"
+    {out, _} = run.("while read l; do echo \"$l\"; done < /etc/hosts")
+    assert out =~ "Operation not permitted"
+
+    # The network: the broker alone, not another port, even on 127.0.0.1.
+    {:ok, other} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, other_port} = :inet.port(other)
+    {out, _} = run.("exec 3<>/dev/tcp/127.0.0.1/#{other_port}")
+    assert out =~ "Operation not permitted"
+
+    # What it may: the turn's atlas, and Claude Code's cwd file after each command.
     {out, 0} = run.("atlas get X")
-    assert out =~ "build atlas: get X (file=#{o[:env_file]})"
+    assert out == "build atlas: get X (file=#{o[:env_file]} as=trial)\n"
+    cwd = Path.join(Claude.tmp(folder), "claude-ab12-cwd")
+    {_, 0} = run.(~s(pwd -P >| "#{cwd}"))
+    assert File.read!(cwd) =~ "turn"
 
     # Every command it ran is kept beside the folder, one line each.
     kept = File.read!(Claude.commands(folder)) |> String.split("\n", trim: true)
-    assert length(kept) == 6 and List.last(kept) =~ "atlas\\ get\\ X"
+    assert List.last(kept) =~ "pwd\\ -P"
+  end
+
+  @tag :no_sandbox
+  test "where there is no sandbox, none of the agent's commands runs", %{tmp_dir: dir} do
+    {folder, _o, env} = turn_files(dir)
+    {out, 126} = through_prefix(dir, folder, env).("atlas get X")
+    assert out =~ "no sandbox on this machine, so no command runs"
+    refute out =~ "build atlas"
+    assert File.read!(Claude.commands(folder)) =~ "atlas\\ get\\ X"
   end
 
   test "its command: confined, headless, with the agent's model and budget" do
