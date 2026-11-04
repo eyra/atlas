@@ -44,6 +44,9 @@ defmodule AtlasBFF.Schema do
     literal segment first wins (`/k/:kind/new` over `/k/:kind/:key`), so the order they are
     written in does not matter (`AtlasBFF.Paths`). Each page is also an endpoint: the call
     that fetches it, so a client has one list of what it can call.
+  - `protocol`: explicit channel, direction, envelopes and reply selectors as plain data
+    (`AtlasBFF.Wire`). When present, every endpoint must name its `wire:` descriptor;
+    pages use `:open`.
   - `defendpoint`: any other call, by name, an optional path and options: `call:` (the
     message it travels in, such as `:submit`; required), `takes:` (what it is sent: a
     model, or `:values`, a form's inputs by name) and `replies:` (`[reply: what it
@@ -65,7 +68,8 @@ defmodule AtlasBFF.Schema do
         blocks: [entry],
         markup: [entry],
         pages: [%{name: atom, path: "/k/:kind/:key", params: [:kind, :key]}],
-        endpoints: [%{name: atom, call: atom, page: atom | nil, path: path, params: [atom],
+        protocol: [wire_descriptor],
+        endpoints: [%{wire: atom | nil, name: atom, call: atom, page: atom | nil, path: path, params: [atom],
                       takes: atom | nil, replies: [%{name: atom, returns: atom}]}]
       }
 
@@ -83,6 +87,7 @@ defmodule AtlasBFF.Schema do
       import AtlasBFF.Schema,
         only: [
           version: 1,
+          protocol: 1,
           defblock: 2,
           defmodel: 2,
           defmarkup: 2,
@@ -100,6 +105,11 @@ defmodule AtlasBFF.Schema do
 
   defmacro version(version) do
     quote do: @spec_version(unquote(version))
+  end
+
+  @doc "Explicit wire descriptors as plain data; see `AtlasBFF.Wire`."
+  defmacro protocol(descriptors) do
+    quote do: @spec_protocol(unquote(descriptors))
   end
 
   defmacro defblock(name, do: body), do: entry(:block, name, body, __CALLER__.line)
@@ -230,8 +240,11 @@ defmodule AtlasBFF.Schema do
       %{name: entry.name, fields: Enum.map(entry.fields, &Map.delete(&1, :line))}
     end
 
+    wires = Module.get_attribute(env.module, :spec_protocol) || []
+
     spec = %{
       version: version,
+      protocol: wires,
       file: env.file,
       models: for(%{type: :model} = e <- entries, do: strip.(e)),
       blocks: for(%{type: :block} = e <- entries, do: strip.(e)),
@@ -247,10 +260,13 @@ defmodule AtlasBFF.Schema do
             path: page.path,
             params: page.params,
             takes: nil,
+            wire: :open,
             replies: [%{name: :page, returns: :view_model}]
           }
         ) ++ endpoints
     }
+
+    AtlasBFF.Wire.validate!(spec)
 
     quote do
       @doc "The schema as plain data, for the targets (see `AtlasBFF.Schema`)."
@@ -298,8 +314,12 @@ defmodule AtlasBFF.Schema do
 
         unless snake?(name), do: fail.("endpoint #{inspect(name)} is not a snake_case atom")
 
-        unless Keyword.keyword?(opts) and Keyword.keys(opts) -- [:call, :takes, :replies] == [],
-          do: fail.("endpoint #{inspect(name)}: the options are call:, takes: and replies:")
+        unless Keyword.keyword?(opts) and
+                 Keyword.keys(opts) -- [:call, :takes, :replies, :wire] == [],
+               do:
+                 fail.(
+                   "endpoint #{inspect(name)}: the options are call:, takes:, replies: and wire:"
+                 )
 
         call = opts[:call]
 
@@ -364,6 +384,7 @@ defmodule AtlasBFF.Schema do
           path: endpoint.path,
           params: for({:param, p} <- segments, do: p),
           takes: opts[:takes],
+          wire: opts[:wire],
           replies: for({reply, returns} <- replies, do: %{name: reply, returns: returns})
         }
 

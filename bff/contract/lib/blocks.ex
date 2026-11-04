@@ -25,6 +25,210 @@ defmodule AtlasBFFContract.Blocks do
   # 0.14.0: the current turn and its outcome, through Control (IS-Atlas-19).
   version "0.14.0"
 
+  # IS-101 describes existing 0.14.0 bytes; no server-version bump or rollout gate.
+  # A stored outcome acknowledges State only; Runtime/Flow still reconcile separately.
+  @page_required %{"path" => :string, "title" => :string, "blocks" => :list, "markup" => :list}
+  @page_optional %{
+    "back" => :string,
+    "position" => :integer,
+    "at" => :string,
+    "count" => :string,
+    "refused" => :list
+  }
+  @open %{
+    name: :page,
+    select: %{"op" => "page", "reason" => "open"},
+    effect: :complete,
+    required: @page_required,
+    optional: @page_optional
+  }
+  @stored %{
+    name: :stored,
+    select: %{"op" => "page", "reason" => "stored"},
+    effect: :complete,
+    required: @page_required,
+    optional: @page_optional
+  }
+  @refused %{
+    name: :refused,
+    select: %{"op" => "page", "reason" => "refused"},
+    effect: :complete,
+    required: @page_required,
+    optional: @page_optional
+  }
+  @turn_error %{
+    name: :error,
+    select: %{"op" => "turn"},
+    present: ["error"],
+    effect: :error,
+    required: %{"error" => :string}
+  }
+  @notice %{
+    name: :notice,
+    select: %{"op" => "notice"},
+    effect: :progress,
+    required: %{"tone" => :string, "text" => :string},
+    optional: %{"at" => :string}
+  }
+  @plan %{name: :plan, select: %{"op" => "plan"}, effect: :progress, required: %{"block" => :map}}
+
+  protocol([
+    %{
+      name: :open,
+      channel: :control,
+      direction: :request,
+      request: %{select: %{"op" => "open"}, required: %{"to" => :string}},
+      replies: [@open]
+    },
+    %{
+      name: :submit,
+      channel: :control,
+      direction: :request,
+      request: %{
+        select: %{"op" => "submit"},
+        required: %{
+          "endpoint" => :string,
+          "params" => {:map, :string},
+          "values" => {:map, :string}
+        },
+        optional: %{"cause" => :string}
+      },
+      # Some server-side validation/fault operations redraw without storing. This is
+      # not a stored acknowledgement; the existing submit adapter keeps waiting.
+      replies: [@stored, @refused, %{@open | effect: :progress}]
+    },
+    %{
+      name: :hello,
+      channel: :control,
+      direction: :request,
+      request: %{
+        select: %{"op" => "hello"},
+        required: %{"env" => :string, "client" => :string, "spec" => :string},
+        optional: %{"as" => :string}
+      },
+      replies: [
+        %{
+          name: :welcome,
+          select: %{"op" => "welcome"},
+          effect: :progress,
+          required: %{"env" => :string, "spec" => :string}
+        },
+        Map.put(@open, :requires, [:welcome])
+      ]
+    },
+    %{
+      name: :turn,
+      channel: :control,
+      direction: :request,
+      request: %{select: %{"op" => "turn"}},
+      replies: [
+        %{
+          name: :turn,
+          select: %{"op" => "turn"},
+          absent: ["error"],
+          effect: :complete,
+          required: %{"key" => :string, "on" => :string}
+        },
+        @turn_error
+      ]
+    },
+    %{
+      name: :turn_end,
+      channel: :control,
+      direction: :request,
+      request: %{
+        select: %{"op" => "turn_end"},
+        required: %{"key" => :string, "outcome" => :string}
+      },
+      replies: [@stored, @refused, @turn_error]
+    },
+    # Refresh does not answer while editing a form; callers need a form-aware adapter.
+    %{
+      name: :refresh,
+      channel: :control,
+      direction: :stream,
+      request: %{select: %{"op" => "refresh"}},
+      replies: [
+        %{
+          name: :page,
+          select: %{"op" => "page", "reason" => "reconcile"},
+          effect: :progress,
+          required: @page_required,
+          optional: @page_optional
+        }
+      ]
+    },
+    %{
+      name: :hint,
+      channel: :control,
+      direction: :push,
+      replies: [
+        %{
+          name: :page,
+          select: %{"op" => "page", "reason" => "hint"},
+          effect: :progress,
+          required: @page_required,
+          optional: @page_optional
+        }
+      ]
+    },
+    %{
+      name: :reconcile,
+      channel: :control,
+      direction: :push,
+      replies: [
+        %{
+          name: :page,
+          select: %{"op" => "page", "reason" => "reconcile"},
+          effect: :progress,
+          required: @page_required,
+          optional: @page_optional
+        }
+      ]
+    },
+    %{name: :notice, channel: :control, direction: :push, replies: [@notice]},
+    %{
+      name: :bye,
+      channel: :control,
+      direction: :push,
+      replies: [
+        %{name: :bye, select: %{"op" => "bye"}, effect: :terminal, required: %{"text" => :string}}
+      ]
+    },
+    %{
+      name: :ask,
+      channel: :steer,
+      direction: :stream,
+      request: %{
+        select: %{"op" => "ask"},
+        required: %{"request" => :string, "on" => :string},
+        optional: %{"intent" => :string}
+      },
+      replies: [@plan, @notice]
+    },
+    %{
+      name: :run,
+      channel: :steer,
+      direction: :stream,
+      request: %{select: %{"op" => "run"}, required: %{"steps" => :list}},
+      replies: [@plan, @notice]
+    },
+    %{
+      name: :cancel,
+      channel: :steer,
+      direction: :stream,
+      request: %{select: %{"op" => "cancel"}},
+      replies: [@plan]
+    },
+    %{
+      name: :stop,
+      channel: :steer,
+      direction: :stream,
+      request: %{select: %{"op" => "stop"}},
+      replies: [@plan, @notice]
+    }
+  ])
+
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
   defmodel :action do
@@ -207,7 +411,12 @@ defmodule AtlasBFFContract.Blocks do
   # name; what they hold comes from rela's description, at run time, so no kind is named
   # here. stored: the page to go to next (reason "stored"); refused: the form again, with
   # its errors (reason "refused"). Notices come with either.
-  @submit [call: :submit, takes: :values, replies: [stored: :view_model, refused: :view_model]]
+  @submit [
+    wire: :submit,
+    call: :submit,
+    takes: :values,
+    replies: [stored: :view_model, refused: :view_model]
+  ]
 
   defendpoint :create, "/k/:kind/new", @submit
   defendpoint :create_under, "/k/:kind/new/:relation/:parent", @submit
@@ -260,23 +469,31 @@ defmodule AtlasBFFContract.Blocks do
     field :outcome, :string, required: true
   end
 
-  defendpoint :turn, call: :turn, replies: [turn: :turn_context]
+  defendpoint :turn,
+    wire: :turn,
+    call: :turn,
+    replies: [turn: :turn_context, error: :turn_context]
 
   defendpoint :turn_end,
     call: :turn_end,
     takes: :turn_outcome,
-    replies: [stored: :view_model, refused: :turn_context]
+    wire: :turn_end,
+    replies: [stored: :view_model, error: :turn_context, refused: :view_model]
 
-  defendpoint :hello, call: :hello, takes: :hello, replies: [welcome: :welcome, bye: :bye]
+  defendpoint :hello,
+    wire: :hello,
+    call: :hello,
+    takes: :hello,
+    replies: [welcome: :welcome, page: :view_model, bye: :bye]
 
   # Read the page shown again, from State: what a client does on an interval.
-  defendpoint :refresh, call: :refresh, replies: [page: :view_model]
+  defendpoint :refresh, wire: :refresh, call: :refresh, replies: [page: :view_model]
 
   # What Control sends unasked: a page again when a change it shows was stored by anyone
   # (reason "hint"), a notice, or bye before it closes.
-  defendpoint :hint, call: :page, replies: [page: :view_model]
-  defendpoint :notice, call: :notice, replies: [notice: :notice]
-  defendpoint :bye, call: :bye, replies: [bye: :bye]
+  defendpoint :hint, wire: :hint, call: :page, replies: [page: :view_model]
+  defendpoint :notice, wire: :notice, call: :notice, replies: [notice: :notice]
+  defendpoint :bye, wire: :bye, call: :bye, replies: [bye: :bye]
 
   # The agent behind a client's `:` (today `atlas steer`, which the client starts; later
   # Control): ask for a plan made on the page at `on`, run its kept steps, cancel, stop.
@@ -296,8 +513,8 @@ defmodule AtlasBFFContract.Blocks do
     field :steps, {:list, :run_step}, required: true
   end
 
-  defendpoint :ask, call: :ask, takes: :ask, replies: [plan: :plan, notice: :notice]
-  defendpoint :run, call: :run, takes: :run, replies: [plan: :plan, notice: :notice]
-  defendpoint :cancel, call: :cancel, replies: [plan: :plan]
-  defendpoint :stop, call: :stop, replies: [plan: :plan, notice: :notice]
+  defendpoint :ask, wire: :ask, call: :ask, takes: :ask, replies: [plan: :plan, notice: :notice]
+  defendpoint :run, wire: :run, call: :run, takes: :run, replies: [plan: :plan, notice: :notice]
+  defendpoint :cancel, wire: :cancel, call: :cancel, replies: [plan: :plan]
+  defendpoint :stop, wire: :stop, call: :stop, replies: [plan: :plan, notice: :notice]
 end
