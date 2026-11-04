@@ -176,6 +176,20 @@ defmodule AtlasState.FlowsTest do
           })
       end
 
+    # The parent relations an `empty` condition names: what they point at.
+    acc =
+      for {_name, flow} <- extra["flows"],
+          %{"when" => %{"empty" => relation}} <- flow["states"],
+          reduce: acc do
+        acc ->
+          block = block(yaml, "relations", relation)
+
+          put_in(acc, ["relations", relation], %{
+            "from" => list(block, "from"),
+            "to" => list(block, "to")
+          })
+      end
+
     for {_name, %{"on" => on}} <- extra["flows"],
         is_binary(on),
         reduce: acc do
@@ -243,6 +257,38 @@ defmodule AtlasState.FlowsTest do
 
     assert %{"sign" => ["done depends on todo, which Flow writes"]} =
              Flows.check(description(on_todo))
+  end
+
+  test "empty names a parent relation that puts something under the flow's kinds" do
+    split = fn relation ->
+      [
+        hd(@sound),
+        %{
+          "name" => "split",
+          "when" => %{"empty" => relation},
+          "owner" => "ada",
+          "next" => ["work"]
+        }
+        | tl(@sound)
+      ]
+    end
+
+    parented = %{"in_box" => %{"from" => ["crate"], "to" => ["box"], "parent" => true}}
+    good = put_in(description(split.("in_box")), ["relations"], parented)
+    assert Flows.check(good) == %{"sign" => []}
+
+    for relation <- ["signed_by", "in_nothing"] do
+      assert %{"sign" => [problem]} =
+               Flows.check(
+                 put_in(
+                   description(split.(relation)),
+                   ["relations", "in_box"],
+                   parented["in_box"]
+                 )
+               )
+
+      assert problem == "split: empty names #{relation}, which puts nothing under its kinds"
+    end
   end
 
   test "the definitions in rela/atlas.json are sound" do

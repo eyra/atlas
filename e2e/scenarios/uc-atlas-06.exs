@@ -120,4 +120,34 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
     {got, _} = atlas_json(i, ["get", key])
     ["Assigned to", "ada"] in got["fields"] || raise "Flow moved it: #{inspect(got["fields"])}"
   end
+
+  # IS-Atlas-84: a scene with nothing under it is to be broken down, by whom it was handed to.
+  step "Nothing under the scene: Break it down, by Ada; a use case under it moves it on", fn ->
+    key = Process.get(:uc06)
+    {got, _} = atlas_json(i, ["get", key])
+    fields = got["fields"]
+    ["Expected", "Break it down into use cases and issues"] in fields || raise inspect(fields)
+    ["Assigned to", "ada"] in fields || raise inspect(fields)
+
+    home(t1)
+    open_row(t1, "A scene for Ada")
+    see(t1, "No use cases yet")
+
+    # A use case under it: a new state, Build it. Its owner is the coordinator, which this
+    # scenario does not make, so later scenarios' pages hold no owner: the owner waits for
+    # it, and UC-27's scenarios show a new fact getting it.
+    {_, at} = atlas_json(i, ["put", "use_case", "--in", key, "--title", "Ada's first use case"])
+    by_hint(t1, "Ada's first use case", at)
+
+    got =
+      Enum.reduce_while(1..50, nil, fn _, _ ->
+        {got, _} = atlas_json(i, ["get", key])
+
+        if ["Expected", "Build it"] in got["fields"],
+          do: {:halt, got},
+          else: Process.sleep(100) && {:cont, got}
+      end)
+
+    ["Expected", "Build it"] in got["fields"] || raise inspect(got["fields"])
+  end
 end

@@ -69,6 +69,25 @@ defmodule AtlasFlowTest do
       assert {%{"name" => "check"}, _} = Definition.state_of(@flow, signed, [], ["in_box"])
     end
 
+    test "empty: nothing under it through a relation its kind has things under through" do
+      flow = %{
+        "states" => [
+          %{"name" => "split", "when" => %{"empty" => "in_box"}},
+          %{"name" => "packing"}
+        ]
+      }
+
+      name = fn children, parents ->
+        {state, _} = Definition.state_of(flow, %{}, children, parents)
+        state["name"]
+      end
+
+      assert name.([], ["in_box"]) == "split"
+      assert name.([%{"links" => %{"in_box" => ["B-1"]}}], ["in_box"]) == "packing"
+      # A kind nothing belongs under through it is never empty through it.
+      assert name.([], ["in_crate"]) == "packing"
+    end
+
     test "done: nobody owns it and nothing is expected" do
       done = hd(@flow["states"])
       assert Definition.owner(done) == nil
