@@ -500,6 +500,18 @@
       "wire": "submit"
     },
     {
+      "call": "boot",
+      "name": "boot",
+      "params": [],
+      "path": "",
+      "replies": {
+        "error": "boot_error",
+        "shell": "shell"
+      },
+      "takes": "boot_request",
+      "wire": "boot"
+    },
+    {
       "call": "turn",
       "name": "turn",
       "params": [],
@@ -883,6 +895,86 @@
     {
       "fields": [
         {
+          "name": "id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "shell_tab"
+    },
+    {
+      "fields": [
+        {
+          "name": "to",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "boot_request"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "env",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "spec",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "tabs",
+          "required": true,
+          "type": "list of shell_tab"
+        },
+        {
+          "name": "initial_to",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "active_tab",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "shell"
+    },
+    {
+      "fields": [
+        {
+          "name": "error",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "boot_error"
+    },
+    {
+      "fields": [
+        {
           "name": "env",
           "required": true,
           "type": "string"
@@ -1162,6 +1254,55 @@
     }
   ],
   "protocol": [
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "boot",
+      "replies": [
+        {
+          "absent": [
+            "error"
+          ],
+          "effect": "complete",
+          "name": "shell",
+          "optional": {
+            "active_tab": "string"
+          },
+          "required": {
+            "env": "string",
+            "initial_to": "string",
+            "revision": "string",
+            "spec": "string",
+            "tabs": "list",
+            "title": "string"
+          },
+          "select": {
+            "op": "boot"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "present": [
+            "error"
+          ],
+          "required": {
+            "error": "string"
+          },
+          "select": {
+            "op": "boot"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "to": "string"
+        },
+        "select": {
+          "op": "boot"
+        }
+      }
+    },
     {
       "channel": "control",
       "direction": "request",

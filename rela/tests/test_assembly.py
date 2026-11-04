@@ -27,12 +27,28 @@ class AssemblyTest(unittest.TestCase):
 
     def test_equivalence_and_freshness(self):
         result = assemble.build(self.root, self.manifest)
-        self.assertEqual(result, self.original)
+        self.assertEqual({k: v for k, v in result.items() if k != "shell"}, self.original)
+        self.assertEqual(result["shell"]["title"], "Atlas Console")
         assemble.build(self.root, self.manifest, check=True)
         path = self.root / 'modules/foundation/atlas.json'
         path.write_text(path.read_text() + '\n')
         with self.assertRaisesRegex(config.ConfigError, 'stale generated'):
             assemble.build(self.root, self.manifest, check=True)
+
+    def test_shell_navigation_references_and_uniqueness(self):
+        extra = assemble.build(self.root, self.manifest)
+        for mutate in [
+            lambda s: s['tabs'].append(dict(s['tabs'][0])),
+            lambda s: s['tabs'][0].update({'to': '/k/missing'}),
+            lambda s: s['tabs'][0].update({'to': '/k/scene/new'}),
+            lambda s: s['tabs'][0].update({'assigned': 'true'}),
+            lambda s: s['tabs'][0].update({'layout': 'terminal'}),
+            lambda s: s.update({'tabs': []}),
+        ]:
+            bad = copy.deepcopy(extra)
+            mutate(bad['shell'])
+            with self.assertRaises(config.ConfigError):
+                assemble.validate(bad, self.schema)
 
     def test_duplicate_leaves_arrays_and_json_keys(self):
         for value in [1, [], 'text', {}]:
