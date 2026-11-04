@@ -117,3 +117,26 @@ In IS-Atlas-94's real turn the agent spent 4 of its 8 commands finding `atlas`'s
 - **Both go into the turn's rules**, after what is expected of the agent. Nothing of them is written into the prompt by hand. Where `atlas` does not answer, the turn runs with the rules alone.
 - **Melle can test:** nothing in the TUI. A real turn's report shows whether the agent's first command is its work, not `--help`.
 
+## IS-Atlas-23: failure actions in the test TUI
+
+In the test environment, every browsing page (the start page, a list, a fact) has `! Failures…`: what can be made to fail there, each seen as it recovers. Never in prod: Control offers none, and a prod Bus refuses the `fault` class they travel in.
+
+- **What is offered comes from the layers.** Control asks Runtime and Flow over the Bus what they offer for the fact (class `fault`, answered at once), and adds its own:
+
+| Where | Failure | Seen as it recovers |
+|---|---|---|
+| a turn Runtime runs | Kill its agent | the turn ends `the agent crashed: :killed`; the agent's next turn starts after the crash pause |
+| a fact Flow runs a process for | Kill its process | Flow's supervisor starts a new one at once, which reads State again (the notice names both) |
+| an agent Runtime runs through the stand-in | Make it idle | it shows `idle` and does nothing: its turn runs to its maximum, then a new one starts |
+|  | Make it silent | its turn ends `silent for …`, then a new one starts |
+|  | Make it end its turns empty | each turn ends at once, without a change, and the next one starts |
+|  | Put it back to work | activity again |
+| any page | Drop the next hint | a client showing the next change sees it at its reconcile (within 5 s), not by hint |
+|  | Take Control offline for 10 s | every client shows it is not connected, and comes back by itself |
+|  | Restart the node | `atlas restart`: clients lose Control and come back; Runtime ends the turns that ran (`Runtime restarted`) and starts them again; Flow starts every open fact's process again |
+
+- **Each opens a confirm** that says what will be seen; `y` causes it, and Control says what happened as a notice.
+- **The stand-in only:** an agent's modes are offered for agents whose port is `stub`, never for a real agent (`claude`).
+- **Melle can test:** in the TUI on a private test instance (or Fly test once Runtime runs agents there), press `!` on a page. The e2e scenario `uc-atlas-07-failures` walks every row of the table with a stand-in agent, `tester`.
+- **Not here:** what an owner that stops working leads to (a decision, IS-Atlas-22) and Melle offline as a fact (IS-Atlas-25). "Go offline" here is Control unreachable for a while.
+

@@ -33,6 +33,9 @@ defmodule AtlasRuntime.Turn do
   @doc "End the turn, with why (from the engine)."
   def finish(pid, why), do: GenServer.cast(pid, {:finish, why})
 
+  @doc "The agent's process, while it runs (for a failure Control causes, IS-Atlas-23)."
+  def agent(pid), do: GenServer.call(pid, :agent)
+
   @doc "Its item left its agent (from the engine): it ends by itself, or after the grace."
   def leave(pid, why), do: GenServer.cast(pid, {:leave, why})
 
@@ -160,6 +163,9 @@ defmodule AtlasRuntime.Turn do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  @impl true
+  def handle_call(:agent, _from, state), do: {:reply, state[:agent_pid], state}
 
   @impl true
   def handle_cast({:finish, why}, state), do: finish_turn(state, why)

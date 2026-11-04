@@ -71,6 +71,27 @@ defmodule AtlasRuntime.Engine do
     end
   end
 
+  # A failure Control asks about or causes (test only; IS-Atlas-23): answered at once.
+  def handle_info({:atlas_bus, %Envelope{class: "fault"} = envelope, content}, state) do
+    answer =
+      case content do
+        %{"do" => "offer", "key" => key} ->
+          %{"offers" => AtlasRuntime.Faults.offers(key, state.opts)}
+
+        %{"do" => "run", "fault" => fault, "key" => key} ->
+          case AtlasRuntime.Faults.run(fault, key, state.opts) do
+            {:ok, done} -> %{"done" => done}
+            {:error, why} -> %{"refused" => why}
+          end
+
+        _ ->
+          %{"refused" => "Runtime does not know that failure."}
+      end
+
+    AtlasBus.send(Envelope.reply(envelope, "answer"), answer)
+    {:noreply, state}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   defp round_now(state) do

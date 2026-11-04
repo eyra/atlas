@@ -142,6 +142,20 @@ defmodule AtlasBusTest do
 
     assert :ok = send_from(sender, Envelope.new("fact", "thing"))
     assert {:error, :prod} = AtlasBus.drop_hints(1)
+    # A failure to cause (IS-Atlas-23) is never routed in prod.
+    assert {:error, :prod} = send_from(sender, %{Envelope.new("fault", "_fault") | address: "x"})
+  end
+
+  test "a fault goes to its address only (IS-Atlas-23)", c do
+    sender = endpoint(c.sender)
+    endpoint(c.other, ["_fault"])
+    endpoint(c.store)
+    :ok = send_from(sender, %{Envelope.new("fault", "_fault") | address: c.other})
+    other = c.other
+    assert_receive {^other, %Envelope{class: "fault", sender: sender_name}, _}
+    assert sender_name == c.sender
+    store = c.store
+    refute_receive {^store, _, _}, 50
   end
 
   test "a dropped hint still acknowledges the sender", c do

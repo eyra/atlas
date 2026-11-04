@@ -157,6 +157,36 @@ defmodule AtlasRuntimeTest do
     end)
   end
 
+  test "failures (IS-Atlas-23): kill a turn's agent; a stand-in agent's modes", %{dir: dir} do
+    alias AtlasRuntime.Faults
+    box()
+    opts = [agents: %{"ada" => %{"port" => "stub"}, "cy" => %{"port" => "claude"}}, stub_dir: dir]
+    engine(dir)
+    eventually(fn -> run("R-C-B-1-1")["values"]["status"] == "going" end)
+
+    # On a turn it runs: kill its agent. The turn ends as a crash; the next one starts.
+    assert [%{"fault" => "kill-agent"}] = Faults.offers("R-C-B-1-1", opts)
+
+    assert {:ok, "Killed ada's process for R-C-B-1-1." <> _} =
+             Faults.run("kill-agent", "R-C-B-1-1", opts)
+
+    eventually(fn -> run("R-C-B-1-1")["values"]["reason"] == "the agent crashed: :killed" end)
+    eventually(fn -> run("R-C-B-1-2")["values"]["status"] == "going" end)
+
+    # On a stand-in agent: its modes, through its file. A real agent's port gets none.
+    assert ~w(idle silent empty active) == Enum.map(Faults.offers("ada", opts), & &1["fault"])
+    assert Faults.offers("cy", opts) == []
+    assert {:ok, "ada is idle now."} = Faults.run("idle", "ada", opts)
+    assert File.read!(Path.join(dir, "ada")) == "idle"
+    eventually(fn -> run("R-C-B-1-2")["values"]["last"] == "idle" end)
+    assert {:ok, "ada ends its turns empty now."} = Faults.run("empty", "ada", opts)
+    assert File.read!(Path.join(dir, "ada")) == "end"
+
+    # Nothing it does not offer.
+    assert {:error, _} = Faults.run("idle", "cy", opts)
+    assert {:error, _} = Faults.run("kill-agent", "R-NONE", opts)
+  end
+
   test "a fact Flow has no state for (done) gets no turn", %{dir: dir} do
     box("ada", nil)
     engine(dir)

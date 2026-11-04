@@ -5,6 +5,8 @@ defmodule AtlasRuntime.Agent.Stub do
   read every few hundred milliseconds:
 
   - `active` (or no file): it shows activity, each time it looks;
+  - `idle`: it shows it is there (activity `idle`) and does nothing else, so its turn runs
+    until its maximum;
   - `silent`: it shows nothing, as an agent that answers but does nothing;
   - `crash`: it crashes, and the next turn's stub does too;
   - `crash once`: it crashes, and sets its file to `active` first, so the next turn runs;
@@ -48,6 +50,11 @@ defmodule AtlasRuntime.Agent.Stub do
       "end" ->
         send(state.turn_pid, {:agent, self(), {:ended, "the stub ended its turn"}})
         {:stop, :normal, state}
+
+      "idle" ->
+        send(state.turn_pid, {:agent, self(), {:activity, "idle"}})
+        Process.send_after(self(), :look, @look)
+        {:noreply, state}
 
       "silent" ->
         Process.send_after(self(), :look, @look)

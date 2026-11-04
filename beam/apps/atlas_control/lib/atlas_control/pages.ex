@@ -66,6 +66,10 @@ defmodule AtlasControl.Pages do
       {:ok, :new_under, p} -> {:new, p.kind, {p.relation, p.parent}}
       {:ok, page, p} when page in [:item, :edit, :delete] -> {page, p.kind, p.key}
       {:ok, page, p} when page in [:links, :set, :remove] -> {page, p.kind, p.key, p.relation}
+      {:ok, :faults, _} -> {:faults, nil}
+      {:ok, :fact_faults, p} -> {:faults, {p.kind, p.key}}
+      {:ok, :fault, p} -> {:fault, p.fault, nil}
+      {:ok, :fact_fault, p} -> {:fault, p.fault, {p.kind, p.key}}
       :error -> :unknown
     end
   end
@@ -195,6 +199,8 @@ defmodule AtlasControl.Pages do
   def submit_route(:link, p), do: {:links, p.kind, p.key, p.relation}
   def submit_route(:accept, p), do: {:set, p.kind, p.key, p.relation}
   def submit_route(:reopen, p), do: {:remove, p.kind, p.key, p.relation}
+  def submit_route(:fault, p), do: {:fault, p.fault, nil}
+  def submit_route(:fact_fault, p), do: {:fault, p.fault, {p.kind, p.key}}
 
   @doc """
   The `call` (the contract's `call` model) that submits the form or confirm of `route`:
@@ -248,6 +254,14 @@ defmodule AtlasControl.Pages do
 
   def path({page, kind, key, relation}) when page in [:links, :set, :remove],
     do: Blocks.path(page, kind: kind, key: key, relation: relation)
+
+  # The failure pages (test only, `AtlasControl.Faults`).
+  def path({:faults, nil}), do: Blocks.path(:faults)
+  def path({:faults, {kind, key}}), do: Blocks.path(:fact_faults, kind: kind, key: key)
+  def path({:fault, fault, nil}), do: Blocks.path(:fault, fault: fault)
+
+  def path({:fault, fault, {kind, key}}),
+    do: Blocks.path(:fact_fault, kind: kind, key: key, fault: fault)
 
   @doc """
   The name and key of a CRUD operation (`:create`, `:update`, `:delete`) on a kind, as
@@ -404,6 +418,9 @@ defmodule AtlasControl.Pages do
   end
 
   def reads({:unavailable, _path, _failed}, _), do: []
+  # What can fail is asked of the layers (`AtlasControl.Faults`), not read from State.
+  def reads({:faults, _on}, _), do: []
+  def reads({:fault, _fault, _on}, _), do: []
   def reads({:new, _}, _), do: []
   def reads({:new, _, _}, _), do: []
 

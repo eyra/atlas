@@ -8,9 +8,11 @@ defmodule AtlasBus.Router do
 
   @to_store ~w(fact read)
   @to_address ~w(refused answer)
+  # A failure to offer or cause (IS-Atlas-23): addressed to a layer, test only.
+  @faults ~w(fault)
   @acknowledged_and_hinted ~w(stored)
 
-  def classes, do: @to_store ++ @acknowledged_and_hinted ++ @to_address
+  def classes, do: @to_store ++ @acknowledged_and_hinted ++ @to_address ++ @faults
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
 
@@ -36,6 +38,7 @@ defmodule AtlasBus.Router do
     with :ok <- Envelope.validate(envelope),
          :ok <- known_class(envelope.class),
          :ok <- same_environment(envelope.environment),
+         :ok <- not_in_prod(envelope.class),
          {:ok, sender} <- sender_of(self()) do
       GenServer.call(__MODULE__, {:route, %{envelope | sender: sender}, content})
     end
@@ -59,7 +62,7 @@ defmodule AtlasBus.Router do
   end
 
   def handle_call({:route, %Envelope{class: class} = envelope, content}, _from, state)
-      when class in @to_address do
+      when class in @to_address or class in @faults do
     deliver([endpoint(envelope.address)], envelope, content)
     {:reply, :ok, state}
   end
@@ -82,6 +85,10 @@ defmodule AtlasBus.Router do
     if environment == AtlasBus.environment(),
       do: :ok,
       else: {:error, {:other_environment, environment}}
+  end
+
+  defp not_in_prod(class) do
+    if class in @faults and AtlasBus.environment() == "prod", do: {:error, :prod}, else: :ok
   end
 
   defp sender_of(pid) do

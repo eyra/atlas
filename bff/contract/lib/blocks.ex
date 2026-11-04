@@ -20,7 +20,9 @@ defmodule AtlasBFFContract.Blocks do
   # (a `call`), no longer a path; the session's other calls; hello carries the version.
   # 0.12.0: a part of role todo (what its owner is to do); hello may say `as`, the fact an
   # agent client is.
-  version "0.12.0"
+  # 0.13.0: failure pages, in the test environment only (IS-Atlas-23): what can be made
+  # to fail on a page, and a confirm that causes one.
+  version "0.13.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -192,6 +194,11 @@ defmodule AtlasBFFContract.Blocks do
   defpage :links, "/k/:kind/:key/links/:relation"
   defpage :set, "/k/:kind/:key/set/:relation"
   defpage :remove, "/k/:kind/:key/remove/:relation"
+  # Test only: what can be made to fail (the node, or a fact), and the confirm for one.
+  defpage :faults, "/faults"
+  defpage :fact_faults, "/k/:kind/:key/faults"
+  defpage :fault, "/fault/:fault"
+  defpage :fact_fault, "/k/:kind/:key/fault/:fault"
 
   # The form submits Control takes: {"op": "submit", "endpoint": name, "params": {...},
   # "values": {name => text}}, as a form's submit_to or a confirm's confirm_to names them
@@ -208,6 +215,8 @@ defmodule AtlasBFFContract.Blocks do
   defendpoint :link, "/k/:kind/:key/links/:relation", @submit
   defendpoint :accept, "/k/:kind/:key/set/:relation", @submit
   defendpoint :reopen, "/k/:kind/:key/remove/:relation", @submit
+  defendpoint :fault, "/fault/:fault", @submit
+  defendpoint :fact_fault, "/k/:kind/:key/fault/:fault", @submit
 
   # The session's other messages, in JSON lines over the socket (bff/README.md, Protocol).
   # Each endpoint's call is the message's "op".

@@ -63,12 +63,16 @@ defmodule AtlasE2E.Instance do
         # Long enough to see each step go, and to stop a run between two (UC-Atlas-18).
         "step_pause_ms" => 2_000
       },
-      # Runtime (IS-Atlas-15) runs one stand-in agent, runner, whose mode a scenario sets in
-      # its file in stub_dir (active, silent, crash, end); no real agent runs. Only facts
-      # runner owns get turns, so no other scenario meets it. Short numbers, to see them go.
+      # Runtime (IS-Atlas-15) runs two stand-in agents, runner (UC-Atlas-07) and tester (its
+      # failure actions, IS-Atlas-23, with a maximum to see an idle turn end), whose mode a
+      # scenario sets in its file in stub_dir; no real agent runs. Only facts they own get
+      # turns, so no other scenario meets them. Short numbers, to see them go.
       "runtime" => %{
         "machine" => "e2e",
-        "agents" => %{"runner" => %{"port" => "stub"}},
+        "agents" => %{
+          "runner" => %{"port" => "stub"},
+          "tester" => %{"port" => "stub", "max_seconds" => 15}
+        },
         "stub_dir" => Path.join(dir, "stub"),
         "silence_seconds" => 3,
         "leave_grace_seconds" => 4,
