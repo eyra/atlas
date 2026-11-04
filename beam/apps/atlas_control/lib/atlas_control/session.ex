@@ -215,6 +215,28 @@ defmodule AtlasControl.Session do
       else: {:noreply, show(state, route, "reconcile", nil)}
   end
 
+  defp handle_op("turn", _message, state) do
+    result =
+      case AtlasControl.Turns.current(state.description, state.by, &ask/2) do
+        {:ok, context} -> Map.take(context, ["key", "on"])
+        {:error, why} -> %{"error" => why}
+      end
+
+    send_client(state, Map.put(result, "op", "turn"))
+    {:noreply, state}
+  end
+
+  defp handle_op("turn_end", message, state) do
+    case AtlasControl.Turns.outcome(state.description, state.by, message, &ask/2) do
+      {:ok, kind, content} ->
+        {:noreply, put_fact(state, kind, content, {:item, kind, content["key"]})}
+
+      {:error, why} ->
+        send_client(state, %{"op" => "turn", "error" => why})
+        {:noreply, state}
+    end
+  end
+
   # A submit names one of the contract's submit endpoints and its params, as a form's
   # submit_to does (or its path); anything else is refused before anything is read or
   # written.

@@ -235,6 +235,7 @@ entities:
       of: { type: string, required: true, description: "The key of the fact it belongs to" }
       expected: { type: string, description: "What its owner is expected to do next; Flow writes it (IS-Atlas-53)" }
       deadline: { type: datetime, description: "When it should be done by; optional, it only marks it late (IS-Atlas-14)" }
+      handover: { type: string, description: "A deferred automatic handover; Flow keeps it until the running owner ends its turn" }
       flow_state: { type: string, description: "The state of its flow it is in; Flow writes it (IS-Atlas-54)" }
 
   # One stretch in which an agent acts on one item (architecture v4, section 3, W1 to W4):
@@ -256,6 +257,7 @@ entities:
       activity: { type: string, description: "The agent's last activity Runtime saw" }
       why: { type: string, description: "Why it ended" }
       ended_at: { type: datetime, description: "When it ended" }
+      outcome: { type: string, description: "The agent's fact about what it did; Runtime reads it and ends the turn" }
 
 relations:
   in_scene:

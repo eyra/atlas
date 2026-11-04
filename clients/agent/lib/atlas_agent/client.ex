@@ -35,6 +35,19 @@ defmodule AtlasAgent.Client do
     end
   end
 
+  @doc "The current turn, or the result of recording its outcome, from Control."
+  def turn(client, message \\ %{"op" => "turn"}) do
+    with :ok <- send_line(client, message) do
+      await(client, @stored_wait, fn
+        %{"op" => "turn", "error" => why} -> {:error, why}
+        %{"op" => "turn"} -> true
+        %{"op" => "page", "reason" => "stored"} -> true
+        %{"op" => "page", "reason" => "refused"} -> {:error, "State refused the outcome"}
+        _ -> false
+      end)
+    end
+  end
+
   def close(%__MODULE__{socket: socket}), do: :gen_tcp.close(socket)
 
   # The contract version this client implements; Control sends a too old one away.

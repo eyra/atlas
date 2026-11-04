@@ -133,12 +133,31 @@ defmodule AtlasRuntime.Engine do
               do: turn
 
         # 1. Running in State, with no process here.
-        for turn <- mine, not Map.has_key?(local, turn["key"]) do
-          lost(
-            names,
-            turn["key"],
-            "no process runs it on #{machine} any more (Runtime restarted)"
-          )
+        orphaned = Enum.reject(mine, &Map.has_key?(local, &1["key"]))
+
+        for turn <- orphaned do
+          outcome = names.outcome && turn["values"][names.outcome]
+
+          why =
+            if is_binary(outcome) and outcome != "",
+              do: "the agent ended its turn: #{outcome}",
+              else: "no process runs it on #{machine} any more (Runtime restarted)"
+
+          lost(names, turn["key"], why)
+        end
+
+        # Let Flow reconcile those ends before another turn can start from this round's
+        # old ownership snapshot.
+        ended_items = Enum.flat_map(orphaned, &(get_in(&1, ["links", names.on]) || []))
+        owned = Enum.reject(owned, &(&1.item in ended_items))
+
+        # A stored outcome belongs to the agent; only Runtime ends the turn.
+        for turn <- mine,
+            names.outcome != nil,
+            outcome = turn["values"][names.outcome],
+            is_binary(outcome) and outcome != "",
+            {pid, _} <- Registry.lookup(AtlasRuntime.Turns, turn["key"]) do
+          Turn.finish(pid, "the agent ended its turn: #{outcome}")
         end
 
         # 2. Its item is no longer its agent's, or no longer open.
@@ -306,7 +325,7 @@ defmodule AtlasRuntime.Engine do
     end
   end
 
-  @names ~w(kind key on by state running ended machine lease activity why ended_at)
+  @names ~w(kind key on by state running ended machine lease activity why ended_at outcome)
 
   # The ended turns of this machine, newest first: `[{agent, ended at (ms), crashed?}]`.
   defp mine_ended(turns, names, machine) do
