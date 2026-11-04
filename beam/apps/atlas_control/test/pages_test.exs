@@ -1395,6 +1395,72 @@ defmodule AtlasControl.PagesTest do
     assert Pages.assigned_count(@carded_start, [cards, widgets]) == "1 held"
   end
 
+  # Open work: the list of the cards is what is held, for everyone; a card is due by a time.
+  @open @carded_start
+        |> put_in(["start", "open"], %{"title" => "All held", "empty" => "Nothing is held."})
+        |> put_in(["entities", "card", "properties", "due"], %{"type" => "datetime"})
+        |> put_in(["entities", "card", "late"], %{"after" => "due", "while" => "todo"})
+
+  test "open work: the same rows for everyone, with who holds each; late first" do
+    assert Pages.open_work?(@open, "card")
+    refute Pages.open_work?(@open, "widget")
+    refute Pages.open_work?(@carded_start, "card")
+    assert Pages.reads({:list, "card"}, @open) == [{"card", %{}}, {"widget", %{}}]
+    assert Pages.shows?({:list, "card"}, @open, "widget")
+
+    card = fn key, by, values, since ->
+      fact(key, Map.merge(%{"of" => String.replace_prefix(key, "C-", "")}, values))
+      |> Map.put("links", %{"held_by" => by})
+      |> Map.put("origins", %{"held_by" => %{"since" => since, "cause" => "why"}})
+    end
+
+    cards = %{
+      "facts" => [
+        card.("C-W-1", ["ada"], %{"todo" => "Paint it"}, "2026-11-03T12:00:00Z"),
+        card.(
+          "C-W-2",
+          ["bob"],
+          %{"todo" => "Sand it", "due" => "2020-01-02T12:00:00Z"},
+          "2026-11-03T10:00:00Z"
+        )
+        |> Map.put("late", true),
+        # Nobody holds it and nothing is expected: not open work.
+        card.("C-W-3", [], %{}, nil),
+        card.("C-W-4", ["ada"], %{"todo" => "Paint it"}, "2026-11-03T13:00:00Z")
+      ]
+    }
+
+    widget = fn key, title ->
+      fact(key, %{"title" => title}) |> Map.put("links", %{"card" => ["C-" <> key]})
+    end
+
+    widgets = %{
+      "facts" => [
+        widget.("W-1", "One"),
+        widget.("W-2", "Two"),
+        widget.("W-3", "Three"),
+        widget.("W-4", "Done") |> Map.put("completion", %{"done" => true})
+      ]
+    }
+
+    %{title: "All held", back: "/", blocks: [%{"props" => list}]} =
+      Pages.render({:list, "card"}, @open, [cards, widgets])
+
+    # Late first; each with who holds it, what is expected, and its time.
+    assert [%{"id" => "W-2", "to" => "/k/widget/W-2"} = late, %{"id" => "W-1"} = one] =
+             list["rows"]
+
+    assert late["detail"] =~
+             ~r/^bob · Sand it · Late · due 2020-01-02 12:00 · since 3 Nov \d\d:00$/
+
+    assert one["detail"] =~ ~r/^ada · Paint it · since 3 Nov \d\d:00$/
+
+    %{blocks: [%{"props" => empty}]} =
+      Pages.render({:list, "card"}, @open, [%{"facts" => []}, %{"facts" => []}])
+
+    assert empty["rows"] == [] and empty["empty"] == "Nothing is held."
+  end
+
   # What to do (IS-Atlas-54): a flow on widgets, on their card; its state is the card's step.
   @todo @carded
         |> put_in(["entities", "card", "properties", "step"], %{"type" => "string"})
