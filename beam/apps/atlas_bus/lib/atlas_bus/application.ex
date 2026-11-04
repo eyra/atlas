@@ -10,6 +10,13 @@ defmodule AtlasBus.Application do
       AtlasBus.Router
     ]
 
-    Supervisor.start_link(children, strategy: :rest_for_one, name: AtlasBus.Supervisor)
+    link =
+      case AtlasBus.Link.settings() do
+        %{"mode" => "server"} = settings -> [{AtlasBus.Link.Server, settings}]
+        %{"mode" => "client"} = settings -> [{AtlasBus.Link.Client, settings}]
+        _ -> []
+      end
+
+    Supervisor.start_link(children ++ link, strategy: :rest_for_one, name: AtlasBus.Supervisor)
   end
 end

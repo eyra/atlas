@@ -180,7 +180,12 @@ scenario "UC-Atlas-07: failure actions in the test TUI, each seen as it recovers
          see(t1, "● connected", 90_000)
          see(t2, "● connected", 30_000)
 
-         field.(i, turn, "Why", &(&1 =~ "(Runtime restarted)"))
+         # Runtime is a separate node: the core restart cuts its Bus link, which
+         # reconnects and renews the running turn. Then restart Runtime itself too.
+         running.(i, use_case)
+         AtlasE2E.Instance.stop_runtime(i)
+         AtlasE2E.Instance.start_runtime(i)
+         field.(i, turn, "Why", &(&1 =~ "(Runtime restarted)" or &1 =~ "maximum"))
          running.(i, use_case) != turn || raise "no new turn after #{turn}"
        end
 

@@ -5,9 +5,10 @@ defmodule AtlasRuntime.Application do
   @impl true
   def start(_type, _args) do
     engine =
-      if Application.get_env(:atlas_runtime, :start, true),
-        do: [{AtlasRuntime.Engine, AtlasRuntime.Settings.get() ++ [name: AtlasRuntime.Engine]}],
-        else: []
+      if Application.get_env(:atlas_runtime, :start, true) and
+           Keyword.get(AtlasRuntime.Settings.get(), :agents) != %{},
+         do: [{AtlasRuntime.Engine, AtlasRuntime.Settings.get() ++ [name: AtlasRuntime.Engine]}],
+         else: []
 
     # One process per running turn, under its own supervisor: a turn whose process dies is
     # ended by the engine's next round (it reads the turn as running, with no process).

@@ -41,7 +41,7 @@ defmodule AtlasRuntime.Turn do
 
   @impl true
   def init(turn) do
-    :ok = AtlasBus.attach("runtime/#{turn.key}")
+    :ok = AtlasBus.attach("runtime@#{turn.machine}/#{turn.key}")
     # The turn's agent and item, for the registry: one turn per agent at a time.
     Registry.update_value(AtlasRuntime.Turns, turn.key, fn _ -> {turn.agent, turn.item} end)
     # Starting waits for State; the engine that started it does not.
