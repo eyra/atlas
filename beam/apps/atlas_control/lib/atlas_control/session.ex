@@ -198,17 +198,37 @@ defmodule AtlasControl.Session do
     # A boot refresh is a read, even while editing: never redraw or reset a draft.
     # Unlike page refresh, stale cached description is not a successful shell reply.
     case ask(@description, %{}) do
-      %{"description" => description} when is_map(description) ->
-        state = install_description(state, description)
+      %{"description" => description} ->
+        result =
+          with :ok <- AtlasControl.Shell.validate_description(description) do
+            # Work against a candidate only. Invalid metadata/target resolution must
+            # leave the prior description, listeners, route and form intact.
+            candidate = %{state | description: description}
+            by_kind = known_kind(candidate, actor_kind(candidate))
+            candidate = %{candidate | by_kind: by_kind}
 
-        response =
-          case AtlasControl.Shell.boot(description, state.by_kind, message["to"]) do
-            {:ok, shell} -> shell
-            {:error, why} -> %{"error" => why}
+            case AtlasControl.Shell.boot(
+                   description,
+                   by_kind,
+                   message["to"],
+                   &route(&1, candidate)
+                 ) do
+              {:ok, shell} -> {:ok, shell, candidate}
+              {:error, _} = error -> error
+            end
           end
 
-        send_client(state, Map.put(response, "op", "boot"))
-        {:noreply, state}
+        case result do
+          {:ok, shell, candidate} ->
+            kinds = Map.keys(description["entities"])
+            Enum.each(kinds, &AtlasBus.listen/1)
+            send_client(state, Map.put(shell, "op", "boot"))
+            {:noreply, %{candidate | listening: MapSet.new(kinds)}}
+
+          {:error, why} ->
+            send_client(state, %{"op" => "boot", "error" => why})
+            {:noreply, state}
+        end
 
       _ ->
         send_client(state, %{

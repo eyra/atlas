@@ -24,13 +24,19 @@ label, 64 for id, 2048 for destinations and requested targets.
 Default `initial_to` is the first eligible tab. Explicit kind and resolvable
 generic-key detail/form links retain a canonical target and matching index tab.
 Valid details outside configured indexes have no active tab. An unknown target or
-removed index falls back to the first tab. Boot checks routes/kinds; ordinary open
-resolves existence/permissions. Boot never navigates, resets editing state, changes
-a draft or writes facts.
+removed index falls back to the first tab. Boot reuses ordinary Session routing,
+including State reads for ambiguous unprefixed generic keys. A failed lookup is a
+typed error rather than an authoritative fallback. Ordinary open still owns page
+existence/permissions. Boot never navigates, resets editing state, changes a draft
+or writes facts. Both raw and canonical emitted targets obey the 2048-byte limit,
+so a successful target can be reissued on reconnect after percent encoding.
 
 Each boot reads the current description through Bus. Missing/invalid configuration
 or unavailable State returns `{"op":"boot","error":"..."}` without authoritative
-empty tabs or successful cached metadata. Retain the last good shell as stale
+empty tabs or successful cached metadata. Validate the nested entity, relation and
+actor-resolution shapes before installation; keep the entire prior Session on a
+boot error. Only a successful boot installs fresh metadata/listeners. Retain the
+last good shell as stale
 until a successful retry. The revision is an opaque deterministic SHA-256 of
 emitted shell semantics: title, environment, contract version and ordered
 actor-visible tabs. It is independent of requested content and fact activity;

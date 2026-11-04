@@ -188,6 +188,80 @@ defmodule AtlasControl.ShellTest do
     assert FakeStore.last_fact()["values"] == %{"title" => "After"}
   end
 
+  test "State-resolved unprefixed detail and form links survive boot", %{port: port} do
+    d =
+      put_in(description(), ["entities", "another"], %{"label" => "Another", "properties" => %{}})
+
+    FakeStore.describe(d)
+    FakeStore.put("alpha", %{"name" => "Private member"}, "member")
+    s = connected(port)
+
+    for suffix <- ["", "/edit", "/delete", "/links/checked_by"] do
+      target = "/k/_/alpha" <> suffix
+      canonical = "/k/member/alpha" <> suffix
+      send_message(s, %{"op" => "open", "to" => target})
+      assert %{"op" => "page", "path" => ^canonical} = receive_message(s)
+      shell = boot(s, to: target)
+      assert shell["initial_to"] == canonical
+      refute Map.has_key?(shell, "active_tab")
+    end
+  end
+
+  test "unavailable generic lookup is a typed error rather than index fallback", %{port: port} do
+    d =
+      put_in(description(), ["entities", "another"], %{"label" => "Another", "properties" => %{}})
+
+    FakeStore.describe(d)
+    s = connected(port)
+    FakeStore.silent_reads(["member"])
+    assert {:reply, %{effect: :error}} = Protocol.classify(:boot, boot(s, to: "/k/_/alpha/edit"))
+    FakeStore.silent_reads([])
+    assert %{"initial_to" => "/k/part"} = boot(s, to: "/k/_/absent/edit")
+  end
+
+  test "canonical UTF8 and reserved targets round-trip within the byte limit" do
+    for {char, count, tail} <- [{"é", 339, "abcd"}, {"#", 679, "a"}] do
+      target = "/k/widget/" <> String.duplicate(char, count) <> tail
+      assert {:ok, shell} = Shell.boot(description(), nil, target)
+      assert byte_size(shell["initial_to"]) == 2_048
+      assert Shell.boot(description(), nil, shell["initial_to"]) == {:ok, shell}
+      assert {:error, _} = Shell.boot(description(), nil, target <> char)
+    end
+
+    target = "/k/widget/" <> String.duplicate("é", 1_019)
+    assert byte_size(target) == 2_048
+    assert {:error, _} = Shell.boot(description(), nil, target)
+  end
+
+  test "malformed fresh description preserves the entire editing session", %{port: port} do
+    FakeStore.put("W-01", %{"title" => "Before"})
+    s = connected(port)
+    send_message(s, %{"op" => "open", "to" => "/k/widget/W-01/edit"})
+    assert %{"op" => "page"} = receive_message(s)
+    [{_, pid, _, _}] = DynamicSupervisor.which_children(AtlasControl.Sessions)
+    initial = :sys.get_state(pid)
+
+    for bad <- [
+          Map.put(description(), "entities", []),
+          Map.put(description(), "relations", []),
+          put_in(description(), ["entities", "member"], []),
+          put_in(description(), ["entities", "member", "create"], []),
+          put_in(description(), ["entities", "member", "properties"], []),
+          put_in(description(), ["entities", "member", "id_prefixes"], [1]),
+          put_in(description(), ["relations", "checked_by", "to"], "member"),
+          Map.put(description(), "start", [])
+        ] do
+      FakeStore.describe(bad)
+      assert {:reply, %{effect: :error}} = Protocol.classify(:boot, boot(s))
+      assert :sys.get_state(pid) == initial
+    end
+
+    FakeStore.describe(description())
+    assert %{"op" => "boot", "initial_to" => "/k/part"} = boot(s)
+    assert :sys.get_state(pid) == initial
+    assert FakeStore.sent() == []
+  end
+
   test "fresh boot reconciles and reconnects; failed description is a typed error", %{port: port} do
     s = connected(port)
     first = boot(s)

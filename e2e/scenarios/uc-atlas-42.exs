@@ -68,6 +68,13 @@ scenario "UC-Atlas-42: Boot returns a native configured shell without navigating
       {:error, :timeout} = :gen_tcp.recv(socket, 0, 200)
     end
 
+    step "Boot retains a generic unprefixed detail resolved by ordinary State routing", fn ->
+      send_message.(socket, %{"op" => "open", "to" => "/k/_/melle/edit"})
+      %{"op" => "page", "path" => "/k/person/melle/edit"} = receive_message.(socket)
+      send_message.(socket, ConsoleBootProtocol.message(:boot, :boot, to: "/k/_/melle/edit"))
+      %{"op" => "boot", "initial_to" => "/k/person/melle/edit"} = receive_message.(socket)
+    end
+
     step "Reconciliation and reconnect return the same shell revision", fn ->
       send_message.(socket, ConsoleBootProtocol.message(:boot, :boot, to: "/k/scene"))
       Process.get(:console_shell) == receive_message.(socket) || raise "shell revision drifted"
