@@ -6,7 +6,8 @@ defmodule AtlasRuntime.Agent.Stub do
 
   - `active` (or no file): it shows activity, each time it looks;
   - `silent`: it shows nothing, as an agent that answers but does nothing;
-  - `crash`: it crashes;
+  - `crash`: it crashes, and the next turn's stub does too;
+  - `crash once`: it crashes, and sets its file to `active` first, so the next turn runs;
   - `end`: it ends its turn itself.
   """
   @behaviour AtlasRuntime.Agent
@@ -38,6 +39,10 @@ defmodule AtlasRuntime.Agent.Stub do
   def handle_info(:look, state) do
     case mode(state) do
       "crash" ->
+        exit(:crashed)
+
+      "crash once" ->
+        File.write!(Path.join(state.dir, state.turn.agent), "active")
         exit(:crashed)
 
       "end" ->

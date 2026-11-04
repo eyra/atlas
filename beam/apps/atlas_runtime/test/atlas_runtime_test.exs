@@ -103,9 +103,10 @@ defmodule AtlasRuntimeTest do
     engine(dir)
     eventually(fn -> run("R-C-B-1-1") != nil end)
 
-    mode(dir, "ada", "crash")
+    mode(dir, "ada", "crash once")
     eventually(fn -> run("R-C-B-1-1")["values"]["status"] == "over" end)
     assert run("R-C-B-1-1")["values"]["reason"] =~ "the agent crashed: :crashed"
+    eventually(fn -> run("R-C-B-1-2")["values"]["status"] == "going" end)
 
     mode(dir, "ada", "end")
 

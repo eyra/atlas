@@ -68,9 +68,9 @@ scenario "UC-Atlas-07: Runtime runs an agent's turns, and keeps their leases", f
 
   step "A crash ends the turn; runner gets the next", fn ->
     %{use_case: use_case} = Process.get(:uc07)
-    mode.("crash")
+    # Once: the stub sets itself back to active, so the next turn does not crash too.
+    mode.("crash once")
     field.(i, "TU-AS-#{use_case}-2", "Why", &(&1 =~ "the agent crashed"))
-    mode.("active")
     field.(i, "TU-AS-#{use_case}-3", "State", &(&1 == "Running"))
   end
 
