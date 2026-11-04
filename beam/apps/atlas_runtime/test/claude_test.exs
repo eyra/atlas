@@ -125,6 +125,47 @@ defmodule AtlasRuntime.ClaudeTest do
     assert out =~ "build atlas: get X" and out =~ ~r/ls: (command )?not found/ and status != 0
   end
 
+  test "the agent's own commands run through the prefix, with only the turn's atlas",
+       %{tmp_dir: dir} do
+    folder = Path.join(dir, "turn")
+    o = opts(dir, "unused")
+    :ok = Claude.wrapper(folder, o)
+    env = Claude.environment(@turn, o, folder)
+    prefix = env["CLAUDE_CODE_SHELL_PREFIX"]
+
+    assert prefix == Claude.shell(folder)
+    refute String.starts_with?(prefix, folder <> "/")
+
+    # As Claude Code runs a command: its snapshot first, which sets PATH back to its own
+    # (Claude Code 2.1.280 builds `source <snapshot> 2>/dev/null || true && … && eval …`).
+    snapshot = Path.join(dir, "snapshot.sh")
+    File.write!(snapshot, "export PATH=#{env["PATH"]}:/usr/bin:/bin\n")
+
+    run = fn command ->
+      System.cmd(
+        prefix,
+        ["source \"#{snapshot}\" 2>/dev/null || true && eval #{inspect(command)}"],
+        env: Enum.to_list(env),
+        stderr_to_stdout: true
+      )
+    end
+
+    for tool <- ~w(security head ls git) do
+      {out, status} = run.("#{tool} --version")
+      assert status == 127 and out =~ "#{tool}: command not found", "#{tool}: #{out}"
+    end
+
+    {out, 127} = run.("PATH=/usr/bin:$PATH head -1 /etc/hosts")
+    assert out =~ "PATH: readonly variable"
+
+    {out, 0} = run.("atlas get X")
+    assert out =~ "build atlas: get X (file=#{o[:env_file]})"
+
+    # Every command it ran is kept beside the folder, one line each.
+    kept = File.read!(Claude.commands(folder)) |> String.split("\n", trim: true)
+    assert length(kept) == 6 and List.last(kept) =~ "atlas\\ get\\ X"
+  end
+
   test "its command: confined, headless, with the agent's model and budget" do
     {exe, args} =
       Claude.command(@turn, %{"command" => "claude", "model" => "sonnet", "budget_usd" => 0.5})
