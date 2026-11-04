@@ -14,6 +14,7 @@ defmodule Atlas.MixProject do
             atlas_bus: :permanent,
             atlas_state: :permanent,
             atlas_flow: :permanent,
+            atlas_runtime: :permanent,
             atlas_control: :permanent
           ],
           include_executables_for: [:unix]

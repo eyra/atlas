@@ -19,13 +19,14 @@ defmodule AtlasAgent.Tools do
   # How the kinds page (`/_kinds`) says a kind belongs under nothing.
   @top "nothing"
   # How it marks a kind that is no tool.
-  @not_tools ["Agent record", "Made with"]
+  @not_tools ["Agent record", "Made with", "By hand"]
 
   @doc "Every tool Control offers now: `{:ok, tools}`."
   def list(client) do
     with {:ok, kinds} <- AtlasAgent.kinds(client) do
       # The kinds the agent keeps its own record in are not tools (AtlasAgent.Record), nor
-      # those State makes with a fact (its Assignment): set them through that fact.
+      # those State makes with a fact (its Assignment): set them through that fact; nor
+      # those only a layer writes (a turn: Runtime).
       kinds =
         Enum.reject(kinds, fn kind ->
           Enum.any?(kind["fields"], &match?([label, _] when label in @not_tools, &1))

@@ -758,6 +758,7 @@ defmodule AtlasControl.Pages do
          Blocks.item(
            title: "#{singular(spec, kind)} (#{kind})",
            # A component (`components/2`): State makes and deletes it with its fact.
+           # A kind only a layer writes (`by_hand: false`: a turn, Runtime's) is no tool.
            fields:
              [
                Blocks.pair(label: "Kind", value: kind),
@@ -786,7 +787,11 @@ defmodule AtlasControl.Pages do
                case made_with(description, kind) do
                  [] -> []
                  froms -> [Blocks.pair(label: "Made with", value: Enum.join(froms, ", "))]
-               end,
+               end ++
+               if(spec["by_hand"] == false,
+                 do: [Blocks.pair(label: "By hand", value: "no")],
+                 else: []
+               ),
            # What can be done with one, named as every page names it; `<key>` is its key.
            actions: [
              action(:create, spec, kind, path({:new, kind})),

@@ -5,3 +5,4 @@ config :atlas_state, start: false
 config :atlas_control, start: false
 config :logger, level: :warning
 config :atlas_flow, start: false
+config :atlas_runtime, start: false

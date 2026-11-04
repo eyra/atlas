@@ -18,6 +18,7 @@ defmodule AtlasBus.BoundaryTest do
     atlas_bus: "AtlasBus",
     atlas_state: "AtlasState",
     atlas_flow: "AtlasFlow",
+    atlas_runtime: "AtlasRuntime",
     atlas_control: "AtlasControl"
   }
   # Clients of Control: the TUI, and the command line agents drive Atlas with.

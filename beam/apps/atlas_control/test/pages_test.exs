@@ -1169,6 +1169,15 @@ defmodule AtlasControl.PagesTest do
     refute Pages.shows?({:item, "widget", "W-1"}, @d, "card")
   end
 
+  test "the kinds page says which kinds are not made by hand" do
+    by_layer = put_in(@d, ["entities", "member", "by_hand"], false)
+    %{blocks: blocks} = Pages.render(:kinds, by_layer, [])
+    member = Enum.find(blocks, &(&1["id"] == "kind:member"))["props"]
+    assert %{"label" => "By hand", "value" => "no"} in member["fields"]
+    widget = Enum.find(blocks, &(&1["id"] == "kind:widget"))["props"]
+    refute Enum.any?(widget["fields"], &(&1["label"] == "By hand"))
+  end
+
   test "the kinds page says what a component is made with" do
     %{blocks: blocks} = Pages.render(:kinds, @carded, [])
     card = Enum.find(blocks, &(&1["id"] == "kind:card"))["props"]
