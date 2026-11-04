@@ -4,9 +4,24 @@ defmodule AtlasAgent.WireContractTest do
   test "independent observed turn-end replies have distinct contract payloads" do
     # Observed Control transcript: these are separate wire shapes, not aliases.
     transcript = [
-      {%{"op" => "page", "reason" => "stored"}, :stored, :view_model},
+      {%{
+         "op" => "page",
+         "reason" => "stored",
+         "path" => "/k/sample/X",
+         "title" => "Sample",
+         "blocks" => [],
+         "markup" => []
+       }, :stored, :view_model},
       {%{"op" => "turn", "error" => "stale turn"}, :error, :turn_context},
-      {%{"op" => "page", "reason" => "refused"}, :refused, :view_model}
+      {%{
+         "op" => "page",
+         "reason" => "refused",
+         "path" => "/k/sample/X",
+         "title" => "Sample",
+         "blocks" => [],
+         "markup" => [],
+         "refused" => ["refused"]
+       }, :refused, :view_model}
     ]
 
     endpoint = Enum.find(AtlasBFFContract.Blocks.__schema__().endpoints, &(&1.name == :turn_end))
@@ -34,13 +49,7 @@ defmodule AtlasAgent.WireContractTest do
         assert %{name: name, returns: payload} in endpoint.replies
 
         assert {:reply, %{name: ^name}} =
-                 AtlasAgent.Protocol.classify(
-                   :turn_end,
-                   Map.merge(
-                     %{"path" => "/", "title" => "Test", "blocks" => [], "markup" => []},
-                     wire
-                   )
-                 )
+                 AtlasAgent.Protocol.classify(:turn_end, JSON.decode!(line))
       end
 
       Task.await(peer)
