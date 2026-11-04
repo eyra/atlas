@@ -45,7 +45,8 @@ defmodule AtlasRuntime.FakeState do
           "lease" => "until",
           "activity" => "last",
           "why" => "reason",
-          "ended_at" => "done_at"
+          "ended_at" => "done_at",
+          "outcome" => "result"
         },
         "agent" => %{"cannot_run" => "stuck"}
       }

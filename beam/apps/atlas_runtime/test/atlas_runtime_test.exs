@@ -68,6 +68,36 @@ defmodule AtlasRuntimeTest do
     end
   end
 
+  test "an orphaned turn keeps its stored outcome and does not restart from stale ownership", %{
+    dir: dir
+  } do
+    box()
+    engine(dir, every: 60_000)
+    eventually(fn -> run("R-C-B-1-1") != nil end)
+    [{pid, _}] = Registry.lookup(AtlasRuntime.Turns, "R-C-B-1-1")
+    DynamicSupervisor.terminate_child(AtlasRuntime.Supervisor, pid)
+    eventually(fn -> Registry.lookup(AtlasRuntime.Turns, "R-C-B-1-1") == [] end)
+    turn = run("R-C-B-1-1") |> put_in(["values", "result"], "packed it before the restart")
+    FakeState.put("run", turn)
+    Engine.round(Engine)
+
+    assert run("R-C-B-1-1")["values"]["reason"] ==
+             "the agent ended its turn: packed it before the restart"
+
+    assert run("R-C-B-1-2") == nil
+  end
+
+  test "a stored outcome ends the local turn through Runtime", %{dir: dir} do
+    box()
+    engine(dir)
+    eventually(fn -> run("R-C-B-1-1") != nil end)
+    turn = run("R-C-B-1-1") |> put_in(["values", "result"], "packed it")
+    FakeState.put("run", turn)
+    Engine.round(Engine)
+    eventually(fn -> run("R-C-B-1-1")["values"]["status"] == "over" end)
+    assert run("R-C-B-1-1")["values"]["reason"] == "the agent ended its turn: packed it"
+  end
+
   test "an owned open fact gets a turn; its lease follows the agent's activity", %{dir: dir} do
     box()
     engine(dir)

@@ -56,7 +56,14 @@ defmodule AtlasFlow.Engine do
   def handle_info({:atlas_bus, %Envelope{class: "stored", kind: kind}, content}, state) do
     # A delete: what was above it can no longer be read. A new owner (a fact of a kind a
     # flow assigns to): a fact whose owner waited for it can have it now.
-    all? = content["op"] == "delete" or (content["op"] == "create" and kind in state.owners)
+    targets =
+      for {_name, flow} <- state.description["flows"] || %{},
+          to <- get_in(state.description, ["relations", flow["on"], "to"]) || [],
+          do: to
+
+    all? =
+      content["op"] == "delete" or (content["op"] == "create" and kind in state.owners) or
+        kind == get_in(state.description, ["runtime", "turn", "kind"]) or kind in targets
 
     case content do
       # Its own write changes nothing any state depends on.

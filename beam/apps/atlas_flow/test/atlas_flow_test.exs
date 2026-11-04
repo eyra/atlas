@@ -31,6 +31,92 @@ defmodule AtlasFlowTest do
     end
   end
 
+  defp deferred_setup do
+    flow = Map.put(FakeState.flow(), "handover_field", "later")
+    description = FakeState.description(flow)
+    description = put_in(description, ["entities", "run"], %{})
+
+    description =
+      Map.put(description, "runtime", %{
+        "turn" => %{
+          "kind" => "run",
+          "on" => "work",
+          "by" => "worker",
+          "state" => "status",
+          "running" => "going"
+        }
+      })
+
+    FakeState.set_description(description)
+
+    FakeState.put("box", %{
+      "key" => "B-1",
+      "values" => %{"todo" => "Pack it"},
+      "links" => %{"owned_by" => ["bob"]},
+      "origins" => %{"owned_by" => %{"by" => "human", "position" => 1}},
+      "progress" => %{"value" => "check"}
+    })
+
+    FakeState.put("run", %{
+      "key" => "R-1",
+      "values" => %{"status" => "going"},
+      "links" => %{"work" => ["B-1"], "worker" => ["bob"]}
+    })
+
+    pid = engine()
+    AtlasBus.attach("observer-#{System.unique_integer([:positive])}")
+    eventually(fn -> FakeState.get("box", "B-1")["values"]["later"] != nil end)
+    pid
+  end
+
+  test "deferred ownership survives process restart, then moves after the running turn ends" do
+    engine_pid = deferred_setup()
+    fact = FakeState.get("box", "B-1")
+    assert fact["values"]["todo"] == "Check it"
+    assert fact["links"]["owned_by"] == ["bob"]
+    [{pid, _}] = Registry.lookup(AtlasFlow.Items, {"box", "B-1"})
+    DynamicSupervisor.terminate_child(AtlasFlow.Supervisor, pid)
+    Engine.round(engine_pid)
+    eventually(fn -> alive("B-1") end)
+    assert FakeState.get("box", "B-1")["links"]["owned_by"] == ["bob"]
+    run = FakeState.get("run", "R-1") |> put_in(["values", "status"], "over")
+    FakeState.put("run", run)
+    AtlasFlow.Talk.put("run", %{"op" => "change", "key" => "R-1", "values" => %{}})
+    eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
+    assert FakeState.get("box", "B-1")["values"]["later"] == nil
+  end
+
+  test "a deferred handover also waits for the next owner to exist" do
+    GenServer.call(FakeState, {:drop, "clerk", "ada"})
+    deferred_setup()
+    assert FakeState.get("box", "B-1")["links"]["owned_by"] == ["bob"]
+    run = FakeState.get("run", "R-1") |> put_in(["values", "status"], "over")
+    FakeState.put("run", run)
+    AtlasFlow.Talk.put("run", %{"op" => "change", "key" => "R-1", "values" => %{}})
+    [{pid, _}] = Registry.lookup(AtlasFlow.Items, {"box", "B-1"})
+    send(pid, :look)
+    :sys.get_state(pid)
+    assert FakeState.get("box", "B-1")["values"]["later"] != nil
+    FakeState.put("clerk", %{"key" => "ada"})
+    AtlasFlow.Talk.put("clerk", %{"op" => "create", "key" => "ada", "values" => %{}})
+    eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
+  end
+
+  test "a human handover cancels the deferred automatic move" do
+    deferred_setup()
+    for key <- ["carol"], do: FakeState.put("clerk", %{"key" => key})
+
+    fact =
+      FakeState.get("box", "B-1")
+      |> put_in(["links", "owned_by"], ["carol"])
+      |> put_in(["origins", "owned_by"], %{"by" => "human", "position" => 2})
+
+    FakeState.put("box", fact)
+    AtlasFlow.Talk.put("box", %{"op" => "change", "key" => "B-1", "values" => %{}})
+    eventually(fn -> FakeState.get("box", "B-1")["values"]["later"] == nil end)
+    assert FakeState.get("box", "B-1")["links"]["owned_by"] == ["carol"]
+  end
+
   describe "the state a fact is in" do
     @flow FakeState.flow()
 
