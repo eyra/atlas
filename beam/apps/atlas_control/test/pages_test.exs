@@ -84,7 +84,8 @@ defmodule AtlasControl.PagesTest do
     submits = for %{call: :submit} = e <- AtlasControl.Blocks.endpoints(), do: e
 
     assert Enum.map(submits, & &1.name) ==
-             [:create, :create_under, :update, :delete, :link, :accept, :reopen]
+             [:create, :create_under, :update, :delete, :link, :accept, :reopen] ++
+               [:fault, :fact_fault]
 
     for endpoint <- submits do
       params = Map.new(endpoint.params, &{&1, "x #{&1}"})

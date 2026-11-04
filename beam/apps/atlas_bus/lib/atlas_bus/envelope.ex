@@ -5,7 +5,7 @@ defmodule AtlasBus.Envelope do
   - `id`: chosen by the sender; the same on every resend. A reply carries the id of the
     message it answers, so "stored #42" answers "fact #42".
   - `environment`: `test` or `prod`. The Bus refuses a message of the other environment.
-  - `class`: `fact`, `stored`, `refused`, `read` or `answer` (see `AtlasBus`).
+  - `class`: `fact`, `stored`, `refused`, `read`, `answer` or `fault` (see `AtlasBus`).
   - `kind`: the name of a kind of fact as rela's description defines it. The Bus routes
     hints on the exact name and never knows what it means.
   - `address`: the endpoint a reply goes to (the sender of the fact or read).

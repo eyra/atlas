@@ -21,7 +21,7 @@ defmodule AtlasControl.Session do
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasControl.Pages
+  alias AtlasControl.{Faults, Pages}
 
   @description "_description"
   @read_attempts 3
@@ -365,6 +365,17 @@ defmodule AtlasControl.Session do
     end
   end
 
+  # A failure (test only): caused, said as a notice, and the page it was caused on again.
+  defp submit({:fault, fault, on}, _raw, state) do
+    {tone, text} =
+      case Faults.run(fault, on) do
+        {:ok, done} -> {"info", done}
+        {:error, why} -> {"error", why}
+      end
+
+    state |> show(Faults.after_run(on), "open", nil) |> notice(tone, text)
+  end
+
   defp submit({:delete, kind, key} = route, _raw, state) do
     answer = ask(kind, %{"key" => key})
 
@@ -699,7 +710,18 @@ defmodule AtlasControl.Session do
     state = count(state, route, answers)
 
     form = Map.merge(state.form, %{by: state.by, by_kind: state.by_kind})
-    page = Pages.render(route, state.description, answers, form)
+
+    page =
+      case route do
+        {:faults, on} ->
+          Faults.page(route, Faults.offers(on))
+
+        {:fault, _fault, on} ->
+          Faults.page(route, Faults.offers(on))
+
+        route ->
+          route |> Pages.render(state.description, answers, form) |> Faults.with_action(route)
+      end
 
     # Remember the version a change form was made from, so the change names it; the values
     # it was read with, so only a change to the same fields refuses it; and the parents the

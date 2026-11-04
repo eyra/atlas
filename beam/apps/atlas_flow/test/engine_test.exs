@@ -33,6 +33,30 @@ defmodule AtlasFlow.EngineTest do
       AtlasFlow.Talk.put("crate", %{"op" => "change", "key" => "C-1", "values" => %{}})
   end
 
+  test "a failure (IS-Atlas-23): a fact's process killed comes back, and reads State again" do
+    alias AtlasFlow.Faults
+    FakeState.put("box", %{"key" => "B-1", "progress" => %{"value" => "check"}})
+    start_supervised!({Engine, every: 3_600_000})
+    eventually(fn -> todo("B-1") == "Check it" end)
+    [{old, _}] = Registry.lookup(AtlasFlow.Items, {"box", "B-1"})
+
+    assert [%{"fault" => "kill-process"}] = Faults.offers("B-1")
+    assert Faults.offers("B-2") == []
+
+    # What Flow wrote is gone from State; only a process that reads State writes it again.
+    FakeState.put("box", %{"key" => "B-1", "progress" => %{"value" => "check"}})
+    assert todo("B-1") == nil
+
+    assert {:ok, "Killed Flow's process for B-1; back as a new one" <> _} =
+             Faults.run("kill-process", "B-1")
+
+    [{new, _}] = Registry.lookup(AtlasFlow.Items, {"box", "B-1"})
+    assert new != old and not Process.alive?(old)
+    eventually(fn -> todo("B-1") == "Check it" end)
+
+    assert {:error, _} = Faults.run("kill-process", "B-2")
+  end
+
   test "a fact that reopens right after its process stopped moves at once, not a round later" do
     FakeState.put("box", %{"key" => "B-1", "progress" => %{"value" => "check"}})
     FakeState.put("crate", %{"key" => "C-1", "links" => %{"in_box" => ["B-1"]}})

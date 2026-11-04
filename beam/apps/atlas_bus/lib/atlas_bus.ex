@@ -13,6 +13,10 @@ defmodule AtlasBus do
   |            |           | every listener of its kind (hint): one message, both jobs   |
   | `refused`  | the store | its address only                                            |
   | `answer`   | the store | its address only                                            |
+  |            | or a layer|                                                             |
+  | `fault`    | Control   | its address only (a layer's endpoint): a failure to offer   |
+  |            |           | or cause, in the test environment only; a prod Bus refuses  |
+  |            |           | it (IS-Atlas-23)                                            |
 
   A reply carries the id of the message it answers. Delivery is not promised: a sender
   that gets no reply sends the same message again, with the same id.

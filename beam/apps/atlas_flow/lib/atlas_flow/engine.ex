@@ -82,6 +82,27 @@ defmodule AtlasFlow.Engine do
     {:noreply, state}
   end
 
+  # A failure Control asks about or causes (test only; IS-Atlas-23): answered at once.
+  def handle_info({:atlas_bus, %Envelope{class: "fault"} = envelope, content}, state) do
+    answer =
+      case content do
+        %{"do" => "offer", "key" => key} ->
+          %{"offers" => AtlasFlow.Faults.offers(key)}
+
+        %{"do" => "run", "fault" => fault, "key" => key} ->
+          case AtlasFlow.Faults.run(fault, key) do
+            {:ok, done} -> %{"done" => done}
+            {:error, why} -> %{"refused" => why}
+          end
+
+        _ ->
+          %{"refused" => "Flow does not know that failure."}
+      end
+
+    AtlasBus.send(Envelope.reply(envelope, "answer"), answer)
+    {:noreply, state}
+  end
+
   # Answers that came after their wait, and anything else.
   def handle_info(_message, state), do: {:noreply, state}
 

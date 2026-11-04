@@ -105,7 +105,7 @@ defmodule AtlasControl.SessionTest do
   test "a client sees the top list at once", %{port: port} do
     FakeStore.put("W-1", %{"title" => "One"})
     c = client(port)
-    assert %{"env" => "test", "spec" => "0.12.0"} = next(c, "welcome")
+    assert %{"env" => "test", "spec" => "0.13.0"} = next(c, "welcome")
     assert %{"path" => "/", "title" => "Widgets", "reason" => "open"} = page = next(c, "page")
     assert rows(page) == ["One"]
   end
@@ -152,6 +152,65 @@ defmodule AtlasControl.SessionTest do
     put(b, %{"op" => "refresh"})
     assert %{"reason" => "reconcile"} = page = next(b, "page")
     assert rows(page) == ["One"]
+  end
+
+  test "failures (IS-Atlas-23): ! opens what can fail; a confirm causes it", %{port: port} do
+    a = client(port)
+    b = client(port)
+    home = next(a, "page")
+    next(b, "page")
+
+    # `! Failures…` on a browsing page, after its own actions.
+    actions = home["blocks"] |> hd() |> get_in(["props", "actions"])
+    assert %{"key" => "!", "label" => "Failures…", "to" => "/faults"} = List.last(actions)
+
+    # The node's: Control's own (no Runtime or Flow runs here to offer more).
+    put(a, %{"op" => "open", "to" => "/faults"})
+
+    assert rows(next(a, "page")) == [
+             "Drop the next hint",
+             "Take Control offline for 10 s",
+             "Restart the node"
+           ]
+
+    put(a, %{"op" => "open", "to" => "/fault/drop-hint"})
+    assert %{"blocks" => [%{"type" => "confirm", "props" => confirm}]} = next(a, "page")
+
+    assert confirm["confirm_to"] == %{
+             "endpoint" => "fault",
+             "params" => %{"fault" => "drop-hint"}
+           }
+
+    # Confirmed: the next hint is dropped, so b sees the next change only at its reconcile.
+    put(a, %{"op" => "submit", "endpoint" => "fault", "params" => %{"fault" => "drop-hint"}})
+    assert %{"tone" => "info", "text" => "The Bus drops the next hint" <> _} = next(a, "notice")
+    put(a, %{"op" => "submit", "to" => "/k/widget/new", "values" => %{"title" => "Late"}})
+    assert %{"reason" => "stored"} = next(a, "page")
+    assert next(b, "page", 300) == nil
+
+    # Not offered: refused, nothing caused.
+    put(a, %{"op" => "submit", "endpoint" => "fault", "params" => %{"fault" => "melt"}})
+    assert %{"tone" => "error"} = next(a, "notice")
+
+    # A prod Control offers none, and no `!`.
+    Application.put_env(:atlas_bus, :environment, "prod")
+    on_exit(fn -> Application.put_env(:atlas_bus, :environment, "test") end)
+    assert AtlasControl.Faults.offers(nil) == []
+  end
+
+  test "failures: Control offline closes every client and takes none, for a while",
+       %{port: port} do
+    a = client(port)
+    next(a, "page")
+    :ok = AtlasControl.Gateway.offline(400, :gateway)
+    assert {:error, :closed} = :gen_tcp.recv(a, 0, 1_000)
+
+    # A client that connects meanwhile is closed at once; after the while, served again.
+    c = client(port)
+    assert {:error, :closed} = :gen_tcp.recv(c, 0, 1_000)
+    Process.sleep(400)
+    d = client(port)
+    assert %{"op" => "page"} = next(d, "page")
   end
 
   test "a refused change shows the form again, with what was typed and why", %{port: port} do

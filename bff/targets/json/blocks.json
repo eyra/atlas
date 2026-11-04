@@ -298,6 +298,55 @@
       }
     },
     {
+      "call": "open",
+      "name": "faults",
+      "page": "faults",
+      "params": [],
+      "path": "/faults",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "open",
+      "name": "fact_faults",
+      "page": "fact_faults",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key/faults",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "open",
+      "name": "fault",
+      "page": "fault",
+      "params": [
+        "fault"
+      ],
+      "path": "/fault/:fault",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
+      "call": "open",
+      "name": "fact_fault",
+      "page": "fact_fault",
+      "params": [
+        "kind",
+        "key",
+        "fault"
+      ],
+      "path": "/k/:kind/:key/fault/:fault",
+      "replies": {
+        "page": "view model"
+      }
+    },
+    {
       "call": "submit",
       "name": "create",
       "params": [
@@ -392,6 +441,34 @@
         "relation"
       ],
       "path": "/k/:kind/:key/remove/:relation",
+      "replies": {
+        "refused": "view model",
+        "stored": "view model"
+      },
+      "takes": "values"
+    },
+    {
+      "call": "submit",
+      "name": "fault",
+      "params": [
+        "fault"
+      ],
+      "path": "/fault/:fault",
+      "replies": {
+        "refused": "view model",
+        "stored": "view model"
+      },
+      "takes": "values"
+    },
+    {
+      "call": "submit",
+      "name": "fact_fault",
+      "params": [
+        "kind",
+        "key",
+        "fault"
+      ],
+      "path": "/k/:kind/:key/fault/:fault",
       "replies": {
         "refused": "view model",
         "stored": "view model"
@@ -956,9 +1033,42 @@
       ],
       "path": "/k/:kind/:key/remove/:relation",
       "returns": "view model"
+    },
+    {
+      "name": "faults",
+      "params": [],
+      "path": "/faults",
+      "returns": "view model"
+    },
+    {
+      "name": "fact_faults",
+      "params": [
+        "kind",
+        "key"
+      ],
+      "path": "/k/:kind/:key/faults",
+      "returns": "view model"
+    },
+    {
+      "name": "fault",
+      "params": [
+        "fault"
+      ],
+      "path": "/fault/:fault",
+      "returns": "view model"
+    },
+    {
+      "name": "fact_fault",
+      "params": [
+        "kind",
+        "key",
+        "fault"
+      ],
+      "path": "/k/:kind/:key/fault/:fault",
+      "returns": "view model"
     }
   ],
-  "version": "0.12.0",
+  "version": "0.13.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",
