@@ -13,6 +13,13 @@ defmodule AtlasRuntimeTest do
     {:ok, _} = Supervisor.restart_child(AtlasRuntime.Root, AtlasRuntime.Supervisor)
     eventually(fn -> Registry.count(AtlasRuntime.Turns) == 0 end)
 
+    # And none outlives this test: the umbrella runs the other apps' tests in this VM, where
+    # a turn still renewing its lease puts facts on their Bus.
+    on_exit(fn ->
+      for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasRuntime.Supervisor),
+          do: DynamicSupervisor.terminate_child(AtlasRuntime.Supervisor, pid)
+    end)
+
     start_supervised!(FakeState)
     FakeState.put("clerk", %{"key" => "ada"})
     FakeState.put("clerk", %{"key" => "bob"})
