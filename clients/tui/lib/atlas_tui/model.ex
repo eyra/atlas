@@ -105,9 +105,15 @@ defmodule AtlasTui.Model do
 
     model = if msg["reason"] == "hint", do: %{model | last_hint: updated}, else: model
 
-    case form(model) do
-      %Form{inputs: inputs} -> %{model | values: Map.new(inputs, &{&1.name, &1.value || ""})}
-      nil -> %{model | values: %{}}
+    if same and step_form(model) != nil do
+      # Background hints update the page beneath the local step editor. Its inputs
+      # belong to the draft, not to that page, and must survive the redraw.
+      model
+    else
+      case form(model) do
+        %Form{inputs: inputs} -> %{model | values: Map.new(inputs, &{&1.name, &1.value || ""})}
+        nil -> %{model | values: %{}}
+      end
     end
   end
 
