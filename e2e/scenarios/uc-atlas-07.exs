@@ -76,14 +76,16 @@ scenario "UC-Atlas-07: Runtime runs an agent's turns, and keeps their leases", f
 
   step "Moved to another owner: its turn ends, and no new one starts", fn ->
     %{use_case: use_case} = Process.get(:uc07)
-    atlas_json(i, ["put", "agent", "--name", "Coordinator"])
+    # An agent of this scenario's own, which this machine does not run: making the
+    # coordinator here would let Flow hand later scenarios' facts to it sooner.
+    atlas_json(i, ["put", "agent", "--name", "Bystander"])
 
     atlas_json(i, [
       "set",
       use_case,
-      "assigned_to=coordinator",
+      "assigned_to=bystander",
       "--cause",
-      "the coordinator takes it"
+      "the bystander takes it"
     ])
 
     field.(

@@ -27,7 +27,7 @@ Test and prod have no `runtime` yet, so Runtime there does nothing; IS-Atlas-18 
 | On its page | the use case's Assignment (`AS-UC-Atlas-NN`, in its references) | **Turns**: the turn, by hint. |
 | Silent | `echo silent > <stub_dir>/runner` | After the silence limit: State Ended, Why `silent for 3 s: no activity since …`. Then a new turn, `-2`, since runner still owns it. |
 | A crash | `echo "crash once" > <stub_dir>/runner` | The turn ends: `the agent crashed: :crashed`, and the next starts (`crash` makes every next turn crash too). |
-| Another owner | `atlas set UC-Atlas-NN assigned_to=coordinator --cause …` | The turn ends: `AS-UC-Atlas-NN is no longer runner's to work on`, and no new one starts. |
+| Another owner | `atlas set UC-Atlas-NN assigned_to=<another agent> --cause …` | The turn ends: `AS-UC-Atlas-NN is no longer runner's to work on`, and no new one starts. |
 | Restarted | stop the core while a turn runs, start it again | The turn State had running ends: `no process runs it on <machine> any more (Runtime restarted)`, and a new one starts. |
 
 ## How it works
