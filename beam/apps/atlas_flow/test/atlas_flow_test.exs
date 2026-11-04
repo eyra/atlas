@@ -37,6 +37,9 @@ defmodule AtlasFlowTest do
     description = put_in(description, ["entities", "run"], %{})
 
     description =
+      put_in(description, ["relations", "work"], %{"from" => ["run"], "to" => ["box"]})
+
+    description =
       Map.put(description, "runtime", %{
         "turn" => %{
           "kind" => "run",
@@ -100,6 +103,20 @@ defmodule AtlasFlowTest do
     FakeState.put("clerk", %{"key" => "ada"})
     AtlasFlow.Talk.put("clerk", %{"op" => "create", "key" => "ada", "values" => %{}})
     eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
+  end
+
+  test "a turn end wakes its own fact without reconciling unrelated open facts" do
+    FakeState.put("box", %{"key" => "B-2"})
+    deferred_setup()
+    eventually(fn -> FakeState.get("box", "B-2")["values"]["todo"] == "Pack it" end)
+    other = FakeState.get("box", "B-2") |> put_in(["values", "todo"], "not poked")
+    FakeState.put("box", other)
+    run = FakeState.get("run", "R-1") |> put_in(["values", "status"], "over")
+    FakeState.put("run", run)
+    AtlasFlow.Talk.put("run", %{"op" => "change", "key" => "R-1", "values" => %{}})
+    eventually(fn -> FakeState.get("box", "B-1")["links"]["owned_by"] == ["ada"] end)
+    Process.sleep(100)
+    assert FakeState.get("box", "B-2")["values"]["todo"] == "not poked"
   end
 
   test "a human handover cancels the deferred automatic move" do

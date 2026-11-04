@@ -132,3 +132,5 @@ The page Control answers has the concrete path, such as `/k/issue/IS-Atlas-01`.
 ### The agent behind `:`
 
 A plan block comes, for now, from the agent the TUI starts (`atlas steer`), not from Control. They talk in JSON lines on its stdin and stdout: the client sends `ask` (request, the page's path), `run` (the kept steps' numbers and values), `cancel` and `stop`. The agent answers `plan` (the whole block, after every change) and `notice`. The full table is in `AtlasAgent.Steer`. The agent is a Control client of its own and writes only on `run`, only the steps it proposed. Once Runtime runs agents (SC-Atlas-02), Control sends the same block.
+
+<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0015).</sub>

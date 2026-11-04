@@ -56,14 +56,7 @@ defmodule AtlasFlow.Engine do
   def handle_info({:atlas_bus, %Envelope{class: "stored", kind: kind}, content}, state) do
     # A delete: what was above it can no longer be read. A new owner (a fact of a kind a
     # flow assigns to): a fact whose owner waited for it can have it now.
-    targets =
-      for {_name, flow} <- state.description["flows"] || %{},
-          to <- get_in(state.description, ["relations", flow["on"], "to"]) || [],
-          do: to
-
-    all? =
-      content["op"] == "delete" or (content["op"] == "create" and kind in state.owners) or
-        kind == get_in(state.description, ["runtime", "turn", "kind"]) or kind in targets
+    all? = content["op"] == "delete" or (content["op"] == "create" and kind in state.owners)
 
     case content do
       # Its own write changes nothing any state depends on.
@@ -161,12 +154,38 @@ defmodule AtlasFlow.Engine do
   defp up(description, kind, key, depth) do
     parents =
       case Talk.read(kind, %{"key" => key, "plain" => true}) do
-        %{"fact" => %{"links" => links}} ->
-          for {relation, %{"parent" => true, "from" => from, "to" => [to]}} <-
-                description["relations"] || %{},
-              kind in from,
-              parent <- links[relation] || [],
-              do: {to, parent}
+        %{"fact" => %{"links" => links} = fact} ->
+          parents =
+            for {relation, %{"parent" => true, "from" => from, "to" => [to]}} <-
+                  description["relations"] || %{},
+                kind in from,
+                parent <- links[relation] || [],
+                do: {to, parent}
+
+          n = get_in(description, ["runtime", "turn"]) || %{}
+
+          ended =
+            if kind == n["kind"] and fact["values"][n["state"]] != n["running"] do
+              for to <- get_in(description, ["relations", n["on"], "to"]) || [],
+                  item <- links[n["on"]] || [],
+                  do: {to, item}
+            else
+              []
+            end
+
+          # Reverse component links lead from the written fact back to its flow's fact.
+          components =
+            for {relation, %{"component" => %{}, "to" => to, "from" => from}} <-
+                  description["relations"] || %{},
+                kind in to,
+                from_kind <- from,
+                %{"facts" => facts} <- [
+                  Talk.read(from_kind, %{"linked" => %{relation => key}, "plain" => true})
+                ],
+                item <- facts,
+                do: {from_kind, item["key"]}
+
+          Enum.uniq(parents ++ ended ++ components)
 
         _ ->
           []
