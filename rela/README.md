@@ -15,6 +15,13 @@ python3 -m venv ~/.local/share/atlas/config-python
 export ATLAS_CONFIG_PYTHON="$HOME/.local/share/atlas/config-python/bin/python"
 ```
 
+For ordinary `atlas` commands, an executable `.venv-config/bin/python` at the
+repository root is discovered automatically when `ATLAS_CONFIG_PYTHON` is unset.
+Create it from the repository root with `python3 -m venv .venv-config`, then run
+`.venv-config/bin/pip install -r rela/scripts/requirements.txt`. No activation is
+needed. An explicit override takes precedence; otherwise the existing `python3`
+fallback remains for CI and Fly. Direct scripts can still use the override above.
+
 CI installs the pinned requirement; the rela image uses Debian's `python3-yaml`.
 Startup copies the selected closure, comparison checks every included byte, and
 fits scans a private data copy against the resolved description. Old included
