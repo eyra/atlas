@@ -72,15 +72,26 @@ defmodule AtlasState.GuidanceNativeTest do
     {:ok, schema} = Rela.description(rela)
     extra = @root |> Path.join("rela/atlas.json") |> File.read!() |> JSON.decode!()
     d = AtlasState.Description.merge(schema, extra)
-    assert {:ok, []} = Rela.create(rela, "agents", "private-worker", %{"name" => "Private"}, %{})
+    turn = d["runtime"]["turn"]
+    [worker_kind] = d["relations"][turn["by"]]["to"]
+    worker_spec = d["entities"][worker_kind]
+    collection = worker_spec["plural"]
+    primary = worker_spec["primary"]
+
+    assert {:ok, []} =
+             Rela.create(rela, collection, "private-worker", %{primary => "Private"}, %{})
 
     assert {:ok, []} =
              Rela.create(
                rela,
-               "turns",
+               d["entities"][turn["kind"]]["plural"],
                "TU-private",
-               %{"state" => "running", "machine" => "private", "attempt" => "attempt-1"},
-               %{"turn_by" => {"agent", ["private-worker"]}}
+               %{
+                 turn["state"] => turn["running"],
+                 turn["machine"] => "private",
+                 turn["attempt"] => "attempt-1"
+               },
+               %{turn["by"] => {worker_kind, ["private-worker"]}}
              )
 
     owner = self()
@@ -91,7 +102,7 @@ defmodule AtlasState.GuidanceNativeTest do
           send(owner, {:claim_ready, self()})
 
           receive do
-            :claim -> Rela.create(rela, "people", "private-claim", %{"name" => name}, %{})
+            :claim -> Rela.create(rela, collection, "private-claim", %{primary => name}, %{})
           end
         end)
       end
@@ -101,7 +112,7 @@ defmodule AtlasState.GuidanceNativeTest do
     claims = Enum.map(claims, &Task.await/1)
     assert Enum.count(claims, &(&1 == {:ok, []})) == 1
     assert Enum.count(claims, &(&1 == {:error, :exists})) == 1
-    assert {:ok, original_claim} = Rela.get(rela, "people", "private-claim")
+    assert {:ok, original_claim} = Rela.get(rela, collection, "private-claim")
 
     values = %{
       "worker" => "private-worker",
@@ -187,7 +198,7 @@ defmodule AtlasState.GuidanceNativeTest do
     System.cmd("kill", ["-TERM", to_string(pid)])
     assert_receive {^process, {:exit_status, _}}, 2_000
     {fresh, _, _} = start_rela(dir)
-    assert {:ok, recovered_claim} = Rela.get(fresh, "people", "private-claim")
+    assert {:ok, recovered_claim} = Rela.get(fresh, collection, "private-claim")
     assert recovered_claim.properties == original_claim.properties
 
     assert {:ok, restored} =
