@@ -145,11 +145,13 @@ defmodule AtlasAgent.CLI do
   defp run({:turn_end, outcome}, client) do
     with {:ok, context} <- AtlasAgent.Client.turn(client),
          {:ok, _} <-
-           AtlasAgent.Client.turn(client, %{
-             "op" => "turn_end",
-             "key" => context["key"],
-             "outcome" => outcome
-           }) do
+           AtlasAgent.Client.turn(
+             client,
+             AtlasAgent.Protocol.message(:turn_end, :turn_end,
+               key: context["key"],
+               outcome: outcome
+             )
+           ) do
       {:outcome, %{"turn" => context["key"], "outcome" => outcome}}
     end
   end

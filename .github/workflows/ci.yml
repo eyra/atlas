@@ -22,7 +22,7 @@ jobs:
           elixir-version: "1.18"
       - name: The generator holds none of Atlas's values
         run: |
-          if grep -rniE 'AtlasBFFContract|AtlasControl|AtlasTui|submit_to|cancel_to|confirm_to|\.\./contract|bff/contract|"0\.2\.0"' lib test mix.exs; then
+          if grep -rniE 'AtlasBFFContract|AtlasControl|AtlasTui|AtlasAgent|scene|use_case|turn_outcome|submit_to|cancel_to|confirm_to|\.\./contract|bff/contract|"0\.2\.0"' lib test mix.exs; then
             echo "::error::bff/generator mentions Atlas's contract. Keep Atlas's values in bff/contract."
             exit 1
           fi

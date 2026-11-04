@@ -134,3 +134,20 @@ The page Control answers has the concrete path, such as `/k/issue/IS-Atlas-01`.
 A plan block comes, for now, from the agent the TUI starts (`atlas steer`), not from Control. They talk in JSON lines on its stdin and stdout: the client sends `ask` (request, the page's path), `run` (the kept steps' numbers and values), `cancel` and `stop`. The agent answers `plan` (the whole block, after every change) and `notice`. The full table is in `AtlasAgent.Steer`. The agent is a Control client of its own and writes only on `run`, only the steps it proposed. Once Runtime runs agents (SC-Atlas-02), Control sends the same block.
 
 <sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0015).</sub>
+
+### Compile-time protocol payloads
+
+`use AtlasBFF.Targets.Protocol, contract: MyContract` exposes `version/0`,
+`pages/0`, `endpoints/0`, `path/2`, `match/1` and `endpoint_path/3` from
+`__schema__/0`. `payload(call, name, props)` validates an endpoint's `takes`
+and returns JSON-ready string keys, including nested models, lists and maps.
+Unknown fields, missing required values and wrong types raise `ArgumentError`;
+optional nil values are omitted. Dynamic `:values` are maps of text inputs.
+
+`message(call, name, props)` adds the `op` tag for an explicitly selected
+pathless endpoint. It cannot construct open/submit envelopes from the current
+contract and refuses endpoints with paths. The target does not infer which
+side sends an operation, dispatch replies, enforce permissions or retry writes.
+The agent uses it for hello, turn and turn_end; its existing transport and reply
+adapter remain responsible for completion and deadlines. Outcome validation,
+turn lifecycle and ownership remain server responsibilities.
