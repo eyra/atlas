@@ -55,6 +55,65 @@ defmodule AtlasControl.SessionTest do
   defp rows(page),
     do: page["blocks"] |> hd() |> get_in(["props", "rows"]) |> Enum.map(& &1["label"])
 
+  defmodule Protocol do
+    use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Blocks, channel: :control
+  end
+
+  test "actual session envelopes match the declared reply classifiers", %{port: port} do
+    a = client(port)
+    b = client(port)
+
+    on_exit(fn ->
+      :gen_tcp.close(a)
+      :gen_tcp.close(b)
+    end)
+
+    assert {:reply, %{name: :welcome, effect: :progress}} =
+             Protocol.classify(:hello, next(a, "welcome"))
+
+    assert {:reply, %{name: :page, requires: [:welcome]}} =
+             Protocol.classify(:hello, next(a, "page"))
+
+    next(b, "page")
+    put(a, %{"op" => "open", "to" => "/k/widget/new"})
+    assert {:reply, %{effect: :complete}} = Protocol.classify(:open, next(a, "page"))
+
+    put(a, %{
+      "op" => "submit",
+      "endpoint" => "create",
+      "params" => %{"kind" => "widget"},
+      "values" => %{"title" => "One"},
+      "cause" => "wire parity"
+    })
+
+    assert {:reply, %{effect: :progress}} = Protocol.classify(:submit, next(a, "notice"))
+
+    assert {:reply, %{name: :stored, effect: :complete}} =
+             Protocol.classify(:submit, next(a, "page"))
+
+    assert {:reply, %{effect: :progress}} = Protocol.classify(:open, next(b, "page"))
+    put(b, %{"op" => "refresh"})
+    assert {:reply, %{effect: :progress}} = Protocol.classify(:open, next(b, "page"))
+    put(a, %{"op" => "turn_end", "key" => "stale", "outcome" => "done"})
+
+    assert {:reply, %{name: :error, effect: :error}} =
+             Protocol.classify(:turn_end, next(a, "turn"))
+
+    put(a, %{"op" => "open", "to" => "/k/widget/new"})
+    next(a, "page")
+    FakeStore.refuse("W-02", "no")
+
+    put(a, %{
+      "op" => "submit",
+      "endpoint" => "create",
+      "params" => %{"kind" => "widget"},
+      "values" => %{"title" => "Two"}
+    })
+
+    assert {:reply, %{name: :refused, effect: :complete}} =
+             Protocol.classify(:submit, next(a, "page"))
+  end
+
   test "a key made from a property: never sent when it cannot be made, never renumbered",
        %{port: port} do
     FakeStore.link("P-1", "W-1")

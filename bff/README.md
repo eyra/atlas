@@ -137,17 +137,51 @@ A plan block comes, for now, from the agent the TUI starts (`atlas steer`), not 
 
 ### Compile-time protocol payloads
 
-`use AtlasBFF.Targets.Protocol, contract: MyContract` exposes `version/0`,
+`use AtlasBFF.Targets.Protocol, contract: MyContract, channel: :my_channel` exposes `version/0`,
 `pages/0`, `endpoints/0`, `path/2`, `match/1` and `endpoint_path/3` from
 `__schema__/0`. `payload(call, name, props)` validates an endpoint's `takes`
 and returns JSON-ready string keys, including nested models, lists and maps.
 Unknown fields, missing required values and wrong types raise `ArgumentError`;
 optional nil values are omitted. Dynamic `:values` are maps of text inputs.
 
-`message(call, name, props)` adds the `op` tag for an explicitly selected
-pathless endpoint. It cannot construct open/submit envelopes from the current
-contract and refuses endpoints with paths. The target does not infer which
-side sends an operation, dispatch replies, enforce permissions or retry writes.
-The agent uses it for hello, turn and turn_end; its existing transport and reply
-adapter remain responsible for completion and deadlines. Outcome validation,
-turn lifecycle and ownership remain server responsibilities.
+`message(call, name, props)` encodes an explicitly selected pathless endpoint.
+When wire descriptors exist it checks the operation is a request on Control.
+`request(name, props, channel)` constructs the declared envelope;
+`classify(name, message, channel)` returns its declared reply or push,
+with effect `complete`, `progress`, `error`, or `terminal`. Incoming additive fields
+are tolerated; declared required envelope fields and present optional fields are
+checked. The channel argument defaults to the consumer’s configured `channel:`
+option (the agent selects `:control`); the target embeds no channel name. Unknown messages are skipped under the same total deadline.
+
+`protocol [...]` supplies these plain descriptors to `__schema__/0` and the JSON
+target; each endpoint's `wire:` names its descriptor (page endpoints use `open`).
+The validator rejects unclassified endpoints, invalid direction/channel, missing
+completion, contradictory/overlapping selectors and invalid prerequisites.
+Selectors contain only literal `op`/other string discriminants and field presence
+or absence, never executable predicates. Required/optional envelope fields use
+primitive types, lists, objects or maps of primitives. Typed endpoint payload
+models remain available through `payload/3`.
+
+The agent keeps one outstanding request on each passive socket. Its handwritten
+transport uses the descriptors for hello (welcome **then** initial page), open,
+submit, turn and turn_end. All handshake stages share one 10-second deadline;
+open has 10 seconds and submit/turn have 60 seconds. Notices, hints and reconciles
+are progress, never acknowledgements, and cannot extend those deadlines. A bye,
+malformed JSON, invalid required reply, EOF or timeout closes the connection.
+Semantic turn errors preserve the existing error adapter. No write is replayed.
+Sockets and caller-owned successful connections remain handwritten.
+
+Turn_end has three actual replies: `page+stored`, `turn+error`, and `page+refused`.
+A stored outcome acknowledges State; Runtime ending the turn and Flow handing it
+over still happen independently. Owner, stale-turn and outcome validation remain
+on the server. Refresh is explicitly a stream requiring an adapter: it sends no
+page while editing a form. Local steer operations are also streams on their own
+channel, with handwritten policy and lifecycle, and server pushes cannot be sent
+as Control commands.
+
+IS-101 keeps wire version **0.14.0**: it describes the existing server protocol and
+corrects semantic metadata without changing bytes sent by Control. Existing
+0.14.0 clients remain usable in either delivery order; no negotiation change or
+client-before-server deployment is needed for this slice. Deployments still go
+through coordinator review. A later version bump must distribute compatible
+clients before advancing Control, since older versions are refused at hello.

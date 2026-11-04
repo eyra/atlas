@@ -166,7 +166,8 @@
       "path": "/",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -176,7 +177,8 @@
       "path": "/_kinds",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -188,7 +190,8 @@
       "path": "/k/:kind",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -200,7 +203,8 @@
       "path": "/k/:kind/new",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -214,7 +218,8 @@
       "path": "/k/:kind/new/:relation/:parent",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -227,7 +232,8 @@
       "path": "/k/:kind/:key",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -240,7 +246,8 @@
       "path": "/k/:kind/:key/edit",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -253,7 +260,8 @@
       "path": "/k/:kind/:key/delete",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -267,7 +275,8 @@
       "path": "/k/:kind/:key/links/:relation",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -281,7 +290,8 @@
       "path": "/k/:kind/:key/set/:relation",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -295,7 +305,8 @@
       "path": "/k/:kind/:key/remove/:relation",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -305,7 +316,8 @@
       "path": "/faults",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -318,7 +330,8 @@
       "path": "/k/:kind/:key/faults",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -330,7 +343,8 @@
       "path": "/fault/:fault",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "open",
@@ -344,7 +358,8 @@
       "path": "/k/:kind/:key/fault/:fault",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "open"
     },
     {
       "call": "submit",
@@ -357,7 +372,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -372,7 +388,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -386,7 +403,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -400,7 +418,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -415,7 +434,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -430,7 +450,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -445,7 +466,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -458,7 +480,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "submit",
@@ -473,7 +496,8 @@
         "refused": "view model",
         "stored": "view model"
       },
-      "takes": "values"
+      "takes": "values",
+      "wire": "submit"
     },
     {
       "call": "turn",
@@ -481,8 +505,10 @@
       "params": [],
       "path": "",
       "replies": {
+        "error": "turn_context",
         "turn": "turn_context"
-      }
+      },
+      "wire": "turn"
     },
     {
       "call": "turn_end",
@@ -490,10 +516,12 @@
       "params": [],
       "path": "",
       "replies": {
-        "refused": "turn_context",
+        "error": "turn_context",
+        "refused": "view model",
         "stored": "view model"
       },
-      "takes": "turn_outcome"
+      "takes": "turn_outcome",
+      "wire": "turn_end"
     },
     {
       "call": "hello",
@@ -502,9 +530,11 @@
       "path": "",
       "replies": {
         "bye": "bye",
+        "page": "view model",
         "welcome": "welcome"
       },
-      "takes": "hello"
+      "takes": "hello",
+      "wire": "hello"
     },
     {
       "call": "refresh",
@@ -513,7 +543,8 @@
       "path": "",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "refresh"
     },
     {
       "call": "page",
@@ -522,7 +553,8 @@
       "path": "",
       "replies": {
         "page": "view model"
-      }
+      },
+      "wire": "hint"
     },
     {
       "call": "notice",
@@ -531,7 +563,8 @@
       "path": "",
       "replies": {
         "notice": "notice"
-      }
+      },
+      "wire": "notice"
     },
     {
       "call": "bye",
@@ -540,7 +573,8 @@
       "path": "",
       "replies": {
         "bye": "bye"
-      }
+      },
+      "wire": "bye"
     },
     {
       "call": "ask",
@@ -551,7 +585,8 @@
         "notice": "notice",
         "plan": "plan"
       },
-      "takes": "ask"
+      "takes": "ask",
+      "wire": "ask"
     },
     {
       "call": "run",
@@ -562,7 +597,8 @@
         "notice": "notice",
         "plan": "plan"
       },
-      "takes": "run"
+      "takes": "run",
+      "wire": "run"
     },
     {
       "call": "cancel",
@@ -571,7 +607,8 @@
       "path": "",
       "replies": {
         "plan": "plan"
-      }
+      },
+      "wire": "cancel"
     },
     {
       "call": "stop",
@@ -581,7 +618,8 @@
       "replies": {
         "notice": "notice",
         "plan": "plan"
-      }
+      },
+      "wire": "stop"
     }
   ],
   "markup": [
@@ -1121,6 +1159,559 @@
       ],
       "path": "/k/:kind/:key/fault/:fault",
       "returns": "view model"
+    }
+  ],
+  "protocol": [
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "open",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "page",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "open"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "to": "string"
+        },
+        "select": {
+          "op": "open"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "submit",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "stored",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "stored"
+          }
+        },
+        {
+          "effect": "complete",
+          "name": "refused",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "refused"
+          }
+        },
+        {
+          "effect": "progress",
+          "name": "page",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "open"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "cause": "string"
+        },
+        "required": {
+          "endpoint": "string",
+          "params": "map of string",
+          "values": "map of string"
+        },
+        "select": {
+          "op": "submit"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "hello",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "welcome",
+          "required": {
+            "env": "string",
+            "spec": "string"
+          },
+          "select": {
+            "op": "welcome"
+          }
+        },
+        {
+          "effect": "complete",
+          "name": "page",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "requires": [
+            "welcome"
+          ],
+          "select": {
+            "op": "page",
+            "reason": "open"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "as": "string"
+        },
+        "required": {
+          "client": "string",
+          "env": "string",
+          "spec": "string"
+        },
+        "select": {
+          "op": "hello"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "turn",
+      "replies": [
+        {
+          "absent": [
+            "error"
+          ],
+          "effect": "complete",
+          "name": "turn",
+          "required": {
+            "key": "string",
+            "on": "string"
+          },
+          "select": {
+            "op": "turn"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "present": [
+            "error"
+          ],
+          "required": {
+            "error": "string"
+          },
+          "select": {
+            "op": "turn"
+          }
+        }
+      ],
+      "request": {
+        "select": {
+          "op": "turn"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "turn_end",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "stored",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "stored"
+          }
+        },
+        {
+          "effect": "complete",
+          "name": "refused",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "refused"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "present": [
+            "error"
+          ],
+          "required": {
+            "error": "string"
+          },
+          "select": {
+            "op": "turn"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "key": "string",
+          "outcome": "string"
+        },
+        "select": {
+          "op": "turn_end"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "stream",
+      "name": "refresh",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "page",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "reconcile"
+          }
+        }
+      ],
+      "request": {
+        "select": {
+          "op": "refresh"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "push",
+      "name": "hint",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "page",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "hint"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "control",
+      "direction": "push",
+      "name": "reconcile",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "page",
+          "optional": {
+            "at": "string",
+            "back": "string",
+            "count": "string",
+            "position": "integer",
+            "refused": "list"
+          },
+          "required": {
+            "blocks": "list",
+            "markup": "list",
+            "path": "string",
+            "title": "string"
+          },
+          "select": {
+            "op": "page",
+            "reason": "reconcile"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "control",
+      "direction": "push",
+      "name": "notice",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "notice",
+          "optional": {
+            "at": "string"
+          },
+          "required": {
+            "text": "string",
+            "tone": "string"
+          },
+          "select": {
+            "op": "notice"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "control",
+      "direction": "push",
+      "name": "bye",
+      "replies": [
+        {
+          "effect": "terminal",
+          "name": "bye",
+          "required": {
+            "text": "string"
+          },
+          "select": {
+            "op": "bye"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "steer",
+      "direction": "stream",
+      "name": "ask",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "plan",
+          "required": {
+            "block": "map"
+          },
+          "select": {
+            "op": "plan"
+          }
+        },
+        {
+          "effect": "progress",
+          "name": "notice",
+          "optional": {
+            "at": "string"
+          },
+          "required": {
+            "text": "string",
+            "tone": "string"
+          },
+          "select": {
+            "op": "notice"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "intent": "string"
+        },
+        "required": {
+          "on": "string",
+          "request": "string"
+        },
+        "select": {
+          "op": "ask"
+        }
+      }
+    },
+    {
+      "channel": "steer",
+      "direction": "stream",
+      "name": "run",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "plan",
+          "required": {
+            "block": "map"
+          },
+          "select": {
+            "op": "plan"
+          }
+        },
+        {
+          "effect": "progress",
+          "name": "notice",
+          "optional": {
+            "at": "string"
+          },
+          "required": {
+            "text": "string",
+            "tone": "string"
+          },
+          "select": {
+            "op": "notice"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "steps": "list"
+        },
+        "select": {
+          "op": "run"
+        }
+      }
+    },
+    {
+      "channel": "steer",
+      "direction": "stream",
+      "name": "cancel",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "plan",
+          "required": {
+            "block": "map"
+          },
+          "select": {
+            "op": "plan"
+          }
+        }
+      ],
+      "request": {
+        "select": {
+          "op": "cancel"
+        }
+      }
+    },
+    {
+      "channel": "steer",
+      "direction": "stream",
+      "name": "stop",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "plan",
+          "required": {
+            "block": "map"
+          },
+          "select": {
+            "op": "plan"
+          }
+        },
+        {
+          "effect": "progress",
+          "name": "notice",
+          "optional": {
+            "at": "string"
+          },
+          "required": {
+            "text": "string",
+            "tone": "string"
+          },
+          "select": {
+            "op": "notice"
+          }
+        }
+      ],
+      "request": {
+        "select": {
+          "op": "stop"
+        }
+      }
     }
   ],
   "version": "0.14.0",

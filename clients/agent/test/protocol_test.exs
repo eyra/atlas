@@ -90,7 +90,7 @@ defmodule AtlasAgent.ProtocolTest do
 
     assert Client.turn(client) == {:ok, %{"op" => "turn", "key" => "T-1", "on" => "X-1"}}
     message = Protocol.message(:turn_end, :turn_end, key: "T-1", outcome: "Done α\nnext")
-    assert Client.turn(client, message) == {:ok, %{"op" => "page", "reason" => "stored"}}
+    assert {:ok, %{"op" => "page", "reason" => "stored"}} = Client.turn(client, message)
     assert Client.turn(client, message) == {:error, "stale turn"}
     assert Client.turn(client, message) == {:error, "State refused the outcome"}
     Client.close(client)
@@ -178,5 +178,19 @@ defmodule AtlasAgent.ProtocolTest do
     JSON.decode!(line)
   end
 
-  defp send_line(socket, message), do: :gen_tcp.send(socket, [JSON.encode!(message), "\n"])
+  defp send_line(socket, message) do
+    message =
+      case message["op"] do
+        "page" ->
+          Map.merge(%{"path" => "/", "title" => "Test", "blocks" => [], "markup" => []}, message)
+
+        "welcome" ->
+          Map.merge(%{"env" => "test", "spec" => AtlasAgent.Protocol.version()}, message)
+
+        _ ->
+          message
+      end
+
+    :gen_tcp.send(socket, [JSON.encode!(message), "\n"])
+  end
 end
