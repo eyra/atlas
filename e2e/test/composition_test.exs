@@ -119,7 +119,10 @@ defmodule AtlasE2E.CompositionTest do
   test "foundation alone serves Control tools without software or Eyra", ctx do
     start(ctx, "foundation")
     kinds = command(ctx, ["help"]) |> Enum.map(& &1["kind"])
-    assert Enum.sort(kinds) == ~w(agent assignment person turn)
+
+    assert Enum.sort(kinds) ==
+             ~w(agent assignment interaction interaction_receipt person turn worker_execution)
+
     tools = command(ctx, ["tools"]) |> JSON.encode!()
 
     for name <- ["scene", "use_case", "issue", "pull_request", "accepted_by"],

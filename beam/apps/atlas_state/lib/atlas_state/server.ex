@@ -63,7 +63,79 @@ defmodule AtlasState.Server do
   end
 
   @impl true
-  def handle_info({:atlas_bus, %Envelope{class: "fact"} = envelope, content}, state) do
+  def handle_info({:atlas_bus, %Envelope{class: class} = envelope, content}, state)
+      when class in ["fact", "read"] do
+    {_, state} = ensure_description(state, envelope.kind)
+
+    case AtlasState.Guidance.role(state.description || %{}, envelope.kind) do
+      nil ->
+        if envelope.class == "fact" do
+          case AtlasState.Guidance.authorize_turn(
+                 state.rela,
+                 state.description || %{},
+                 envelope,
+                 content
+               ) do
+            :ok ->
+              ordinary(envelope, content, state)
+
+            {:error, reason} ->
+              reply(envelope, "refused", %{"code" => Atom.to_string(reason)}, nil)
+              {:noreply, state}
+          end
+        else
+          ordinary(envelope, content, state)
+        end
+
+      role ->
+        guidance(envelope, content, role, state)
+    end
+  end
+
+  def handle_info({:atlas_bus, _envelope, _content}, state), do: {:noreply, state}
+
+  defp ensure_description(state, kind) do
+    case kind_spec(state, kind) do
+      {:ok, _, state} -> {:ok, state}
+      {_, _, state} -> {:error, state}
+    end
+  end
+
+  defp guidance(envelope, content, role, state) do
+    result =
+      if envelope.class == "fact",
+        do:
+          AtlasState.Guidance.write(state.rela, state.description, role, envelope, content, fn ->
+            Ledger.reserve(state.ledger)
+          end),
+        else: AtlasState.Guidance.read(state.rela, state.description, role, content)
+
+    case result do
+      {:ok, answer} when envelope.class == "fact" ->
+        position = answer["recorded_position"]
+        reply(envelope, "stored", %{"key" => answer["key"], "fact" => answer}, position)
+
+      {:ok, answer} ->
+        reply(envelope, "answer", answer, nil)
+
+      {:error, reason} ->
+        class = if envelope.class == "read", do: "answer", else: "refused"
+
+        reply(
+          envelope,
+          class,
+          %{"error" => inspect(reason), "code" => guidance_code(reason)},
+          nil
+        )
+    end
+
+    {:noreply, state}
+  end
+
+  defp guidance_code(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp guidance_code(_), do: "store_error"
+
+  defp ordinary(%Envelope{class: "fact"} = envelope, content, state) do
     case Ledger.answer(state.ledger, envelope.id) do
       {class, answer, position} ->
         reply(envelope, class, answer, position)
@@ -76,13 +148,11 @@ defmodule AtlasState.Server do
     end
   end
 
-  def handle_info({:atlas_bus, %Envelope{class: "read"} = envelope, content}, state) do
+  defp ordinary(%Envelope{class: "read"} = envelope, content, state) do
     {answer, state} = read(state, envelope.kind, content || %{})
     reply(envelope, "answer", Map.put(answer, "position", Ledger.position(state.ledger)), nil)
     {:noreply, state}
   end
-
-  def handle_info({:atlas_bus, _envelope, _content}, state), do: {:noreply, state}
 
   defp answer(state, envelope, content, result) do
     about = %{"op" => content_op(content), "key" => content_key(content)}

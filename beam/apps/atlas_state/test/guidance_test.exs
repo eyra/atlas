@@ -1,0 +1,471 @@
+defmodule AtlasState.GuidanceTest do
+  use ExUnit.Case, async: false
+  alias AtlasBus.Envelope
+  alias AtlasState.{Guidance, GuidanceStore, Rela}
+  @moduletag :tmp_dir
+  defp description do
+    roles = %{
+      "execution" =>
+        ~w(environment worker turn attempt machine harness harness_version configured_model reported_model capability_version queued_input durable_accept_query consumption_evidence recorded_at recorded_position),
+      "interaction" =>
+        ~w(environment actor client_key body body_digest worker turn attempt mode execution cause recorded_at recorded_position),
+      "receipt" =>
+        ~w(environment interaction worker turn attempt execution stage evidence_id admission_id consumption_id reason writer cause recorded_at recorded_position)
+    }
+
+    mapping =
+      Map.new(roles, fn {role, fields} ->
+        {role,
+         %{"kind" => "synthetic_" <> role, "fields" => Map.new(fields, &{&1, "slot_" <> &1})}}
+      end)
+
+    entities =
+      Map.new(mapping, fn {role, spec} ->
+        props =
+          Map.new(spec["fields"], fn {slot, field} ->
+            {field,
+             %{
+               "type" =>
+                 if(slot in ~w(queued_input durable_accept_query consumption_evidence),
+                   do: "boolean",
+                   else: if(slot == "recorded_position", do: "integer", else: "string")
+                 )
+             }}
+          end)
+
+        {spec["kind"], %{"plural" => role <> "s", "properties" => props}}
+      end)
+
+    %{
+      "guidance" => mapping,
+      "entities" => Map.put(entities, "run", %{"plural" => "runs"}),
+      "runtime" => %{
+        "turn" => %{
+          "kind" => "run",
+          "machine" => "host",
+          "attempt" => "fence",
+          "by" => "performer",
+          "state" => "status",
+          "running" => "live"
+        }
+      }
+    }
+  end
+
+  setup %{tmp_dir: dir} do
+    d = description()
+
+    Application.put_env(
+      :atlas_bus,
+      :store,
+      "guidance-state-#{System.unique_integer([:positive])}"
+    )
+
+    {:ok, store} = GuidanceStore.start(Path.join(dir, "facts.json"), d)
+    rela = {GuidanceStore, store}
+
+    {:ok, []} =
+      Rela.create(
+        rela,
+        "runs",
+        "run-a",
+        %{"host" => "box", "fence" => "attempt-a", "status" => "live"},
+        %{"performer" => {"actor", ["worker-a"]}}
+      )
+
+    server = start_supervised!({AtlasState.Server, rela: rela, data_dir: dir})
+    :ok = AtlasBus.attach("control/session-#{System.unique_integer([:positive])}")
+
+    assert {"stored", %{"fact" => ex}, _} =
+             as("runtime@box", "execution", %{
+               "op" => "register_execution",
+               "values" => execution()
+             })
+
+    %{store: store, rela: rela, d: d, execution: ex, dir: dir, server: server}
+  end
+
+  defp execution,
+    do: %{
+      "worker" => "worker-a",
+      "turn" => "run-a",
+      "attempt" => "attempt-a",
+      "machine" => "box",
+      "harness" => "stub",
+      "harness_version" => "1",
+      "configured_model" => "fake",
+      "capability_version" => "1",
+      "queued_input" => true,
+      "durable_accept_query" => true,
+      "consumption_evidence" => true
+    }
+
+  defp interaction(ex),
+    do: %{
+      "op" => "submit_interaction",
+      "by" => "reader-a",
+      "values" => %{
+        "client_key" => "client-1",
+        "body" => "/literal guidance",
+        "worker" => "worker-a",
+        "turn" => "run-a",
+        "attempt" => "attempt-a",
+        "mode" => "queued_guidance",
+        "execution" => ex["key"],
+        "cause" => "user submitted"
+      }
+    }
+
+  defp receipt(i, stage, extra \\ %{}) do
+    v =
+      Map.take(i, ~w(worker turn attempt execution))
+      |> Map.merge(%{
+        "interaction" => i["key"],
+        "stage" => stage,
+        "evidence_id" => "evidence-" <> stage,
+        "cause" => "harness lookup"
+      })
+      |> Map.merge(extra)
+
+    %{"op" => "record_receipt", "values" => v}
+  end
+
+  defp request(role, content, opts \\ []) do
+    e =
+      Envelope.new(
+        Keyword.get(opts, :class, "fact"),
+        "synthetic_" <> role,
+        Keyword.take(opts, [:id, :environment])
+      )
+
+    case AtlasBus.send(e, content) do
+      :ok ->
+        assert_receive {:atlas_bus, %Envelope{id: id} = reply, body} when id == e.id, 2_000
+        {reply.class, body, reply.position}
+
+      error ->
+        error
+    end
+  end
+
+  defp as(endpoint, role, content, opts \\ []),
+    do:
+      Task.async(fn ->
+        :ok = AtlasBus.attach(endpoint)
+        request(role, content, opts)
+      end)
+      |> Task.await()
+
+  defp race(content, other) do
+    owner = self()
+
+    tasks =
+      for {c, n} <- [{content, 1}, {other, 2}] do
+        Task.async(fn ->
+          :ok = AtlasBus.attach("control/session-race-#{n}")
+          send(owner, {:ready, self()})
+
+          receive do
+            :go -> request("interaction", c)
+          end
+        end)
+      end
+
+    for _ <- tasks, do: assert_receive({:ready, _})
+    Enum.each(tasks, &send(&1.pid, :go))
+    Enum.map(tasks, &Task.await/1)
+  end
+
+  test "concurrent identical submissions return one immutable fact and position", c do
+    content = interaction(c.execution)
+    [a, b] = race(content, content)
+    assert a == b
+    assert {"stored", %{"fact" => f}, _} = a
+    assert f["projection"] == %{"proven" => "queued", "uncertain" => false, "closures" => []}
+    assert {:ok, [_]} = Rela.list(c.rela, "interactions")
+  end
+
+  test "concurrent conflicting bodies have one winner", c do
+    content = interaction(c.execution)
+    result = race(content, put_in(content, ["values", "body"], "changed"))
+    assert Enum.sort(Enum.map(result, &elem(&1, 0))) == ["refused", "stored"]
+    assert {:ok, [_]} = Rela.list(c.rela, "interactions")
+  end
+
+  test "all target fields and body/mode/cause are immutable", c do
+    content = interaction(c.execution)
+    assert {"stored", _, _} = request("interaction", content)
+
+    for field <- ~w(worker turn attempt mode execution body cause) do
+      assert {"refused", %{"code" => "immutable_conflict"}, _} =
+               request("interaction", put_in(content, ["values", field], "changed"))
+    end
+  end
+
+  test "actor isolation and environment injection refusal", c do
+    content = interaction(c.execution)
+    {"stored", %{"key" => a}, _} = request("interaction", content)
+    {"stored", %{"key" => b}, _} = request("interaction", %{content | "by" => "reader-b"})
+    assert a != b
+
+    for field <- ~w(actor environment body_digest recorded_at) do
+      assert {"refused", %{"code" => "unknown_fields"}, _} =
+               request("interaction", put_in(content, ["values", field], "forged"))
+    end
+
+    assert {:error, {:other_environment, "elsewhere"}} =
+             request("interaction", content, environment: "elsewhere")
+
+    e = %{
+      Envelope.new("fact", "synthetic_interaction")
+      | environment: "elsewhere",
+        sender: "control/session-forged"
+    }
+
+    assert {:error, :wrong_environment} =
+             Guidance.write(c.rela, c.d, "interaction", e, content, fn -> 1 end)
+  end
+
+  test "writer validation precedes successful envelope id replay", c do
+    content = interaction(c.execution)
+    assert {"stored", %{"fact" => f}, _} = request("interaction", content, id: "shared")
+
+    assert {"refused", %{"code" => "interaction_authority"}, _} =
+             as("runtime@box", "interaction", content, id: "shared")
+
+    r = receipt(f, "delivered", %{"admission_id" => "inbox-1"})
+    assert {"stored", _, _} = as("runtime@box", "receipt", r, id: "r-shared")
+
+    assert {"refused", %{"code" => "receipt_authority"}, _} =
+             request("receipt", r, id: "r-shared")
+
+    assert {"refused", %{"code" => "receipt_authority"}, _} =
+             as("runtime@other", "receipt", r, id: "r-shared")
+
+    assert {"refused", _, _} =
+             as("runtime@box", "receipt", put_in(r, ["values", "attempt"], "replacement"))
+  end
+
+  test "generic CRUD cannot alter or delete durable records", c do
+    {"stored", %{"key" => key}, _} = request("interaction", interaction(c.execution))
+
+    for op <- ~w(create change delete), role <- ~w(execution interaction receipt) do
+      assert {"refused", %{"code" => "protected_operation_required"}, _} =
+               request(role, %{"op" => op, "key" => key, "values" => %{}})
+    end
+  end
+
+  test "receipt replay returns original; projection retains proof and uncertainty", c do
+    content = interaction(c.execution)
+    {"stored", %{"fact" => f}, position} = request("interaction", content)
+
+    ack =
+      receipt(f, "acknowledged", %{"admission_id" => "inbox-1", "consumption_id" => "context-1"})
+
+    first = as("runtime@box", "receipt", ack)
+    assert first == as("runtime@box", "receipt", ack)
+
+    assert {"refused", %{"code" => "immutable_conflict"}, _} =
+             as("runtime@box", "receipt", put_in(ack, ["values", "consumption_id"], "changed"))
+
+    for {stage, extra} <- [
+          {"delivered", %{"admission_id" => "inbox-1"}},
+          {"uncertain", %{"reason" => "lost response"}},
+          {"stale", %{"reason" => "turn ended"}}
+        ] do
+      assert {"stored", _, _} = as("runtime@box", "receipt", receipt(f, stage, extra))
+    end
+
+    assert {"stored", %{"fact" => current}, ^position} = request("interaction", content)
+
+    assert current["projection"] == %{
+             "proven" => "acknowledged",
+             "uncertain" => true,
+             "closures" => ["stale"]
+           }
+
+    assert length(current["receipts"]) == 4
+
+    assert {"answer", %{"fact" => ^current}, _} =
+             request("interaction", %{"actor" => "reader-a", "client_key" => "client-1"},
+               class: "read"
+             )
+  end
+
+  test "receipt stages require correlated evidence or a reason", c do
+    {"stored", %{"fact" => f}, _} = request("interaction", interaction(c.execution))
+
+    for {stage, code} <- [
+          {"delivered", "admission_evidence_required"},
+          {"acknowledged", "consumption_evidence_required"},
+          {"uncertain", "reason_required"},
+          {"unsupported", "reason_required"},
+          {"rejected", "reason_required"}
+        ] do
+      assert {"refused", %{"code" => ^code}, _} = as("runtime@box", "receipt", receipt(f, stage))
+    end
+
+    assert {:ok, []} = Rela.list(c.rela, "receipts")
+  end
+
+  test "execution registration checks durable turn and attempt", c do
+    for field <- ~w(turn worker attempt machine) do
+      assert {"refused", _, _} =
+               as("runtime@box", "execution", %{
+                 "op" => "register_execution",
+                 "values" => Map.put(execution(), field, "other")
+               })
+    end
+
+    assert {"refused", _, _} =
+             request("execution", %{"op" => "register_execution", "values" => execution()})
+
+    assert {"refused", %{"code" => "immutable_conflict"}, _} =
+             as("runtime@box", "execution", %{
+               "op" => "register_execution",
+               "values" => Map.put(execution(), "configured_model", "changed")
+             })
+
+    refute Map.has_key?(c.execution, "reported_model")
+  end
+
+  test "lost create response recovers after State and store restart", c do
+    content = interaction(c.execution)
+    GuidanceStore.barrier(c.store, self())
+
+    task =
+      Task.async(fn ->
+        :ok = AtlasBus.attach("control/session-lost")
+        request("interaction", content)
+      end)
+
+    assert_receive {:committed, store, key}, 2_000
+    Process.unlink(c.server)
+    Process.exit(c.server, :kill)
+    send(store, :release_commit)
+    stop_supervised!(AtlasState.Server)
+    Task.shutdown(task, :brutal_kill)
+    Agent.stop(c.store)
+    {:ok, fresh} = GuidanceStore.start(Path.join(c.dir, "facts.json"), c.d)
+    start_supervised!({AtlasState.Server, rela: {GuidanceStore, fresh}, data_dir: c.dir})
+    assert {"stored", %{"key" => ^key, "fact" => original}, _} = request("interaction", content)
+    assert {:ok, [_]} = Rela.list({GuidanceStore, fresh}, "interactions")
+
+    assert {"stored", %{"fact" => r}, _} =
+             as(
+               "runtime@box",
+               "receipt",
+               receipt(original, "delivered", %{"admission_id" => "recovered"})
+             )
+
+    stop_supervised!(AtlasState.Server)
+    start_supervised!({AtlasState.Server, rela: {GuidanceStore, fresh}, data_dir: c.dir})
+    assert {"stored", %{"fact" => restored}, _} = request("interaction", content)
+    assert restored["recorded_at"] == original["recorded_at"]
+    assert restored["receipts"] == [r]
+    assert restored["projection"]["proven"] == "delivered"
+  end
+
+  test "malformed values refuse without crashing State", c do
+    content = interaction(c.execution)
+
+    for value <- [false, true, 12, [], %{}, nil] do
+      assert {"refused", _, _} =
+               request("interaction", put_in(content, ["values", "body"], value))
+    end
+
+    assert {"stored", %{"fact" => f}, _} = request("interaction", content)
+
+    assert {"refused", %{"code" => "receipt_authority"}, _} =
+             as(
+               "runtime@box/another-turn",
+               "receipt",
+               receipt(f, "delivered", %{"admission_id" => "a"})
+             )
+
+    assert {"refused", %{"code" => "immutable_conflict"}, _} =
+             request("interaction", put_in(content, ["values", "mode"], "interrupt"))
+  end
+
+  test "fenced turn authority cannot be replaced through generic writes", c do
+    e = %{Envelope.new("fact", "run") | sender: "control/session-forged"}
+    content = %{"op" => "change", "key" => "run-a", "values" => %{"fence" => "replacement"}}
+    assert {:error, :turn_authority} = Guidance.authorize_turn(c.rela, c.d, e, content)
+
+    assert {:error, :turn_authority} =
+             Guidance.authorize_turn(c.rela, c.d, %{e | sender: "runtime@other"}, content)
+
+    assert {:error, :turn_authority} =
+             Guidance.authorize_turn(c.rela, c.d, %{e | sender: "runtime@box"}, content)
+
+    assert :ok = Guidance.authorize_turn(c.rela, %{}, e, content)
+    unfenced = put_in(c.d, ["runtime", "turn"], Map.delete(c.d["runtime"]["turn"], "attempt"))
+    assert :ok = Guidance.authorize_turn(c.rela, unfenced, e, content)
+  end
+
+  test "execution history uses bounded durable position pages", c do
+    content = interaction(c.execution)
+    {"stored", %{"fact" => first}, position} = request("interaction", content)
+
+    {"stored", %{"fact" => second}, _} =
+      request("interaction", put_in(content, ["values", "client_key"], "second"))
+
+    query = %{"execution" => c.execution["key"], "limit" => 1}
+
+    assert {"answer", %{"facts" => [^first], "more" => true, "after_position" => ^position}, _} =
+             request("interaction", query, class: "read")
+
+    assert {"answer", %{"facts" => [^second], "more" => false}, _} =
+             request("interaction", Map.put(query, "after_position", position), class: "read")
+
+    assert {"answer", %{"code" => "invalid_page"}, _} =
+             request("interaction", Map.put(query, "limit", 101), class: "read")
+  end
+
+  test "unsupported capability does not invent a queued interaction", c do
+    # A different environment on this private store demonstrates independent dedup
+    # scope without bridging actual environments or using any live facts.
+    old = AtlasBus.environment()
+    on_exit(fn -> Application.put_env(:atlas_bus, :environment, old) end)
+    Application.put_env(:atlas_bus, :environment, "synthetic-other")
+
+    assert {:error, :wrong_environment} =
+             Guidance.read(c.rela, c.d, "execution", %{"key" => c.execution["key"]})
+
+    e = %{Envelope.new("fact", "synthetic_execution") | sender: "runtime@box"}
+    opts = fn -> System.unique_integer([:positive, :monotonic]) end
+
+    assert {:ok, ex} =
+             Guidance.write(
+               c.rela,
+               c.d,
+               "execution",
+               e,
+               %{
+                 "op" => "register_execution",
+                 "values" => Map.put(execution(), "queued_input", false)
+               },
+               opts
+             )
+
+    assert ex["key"] != c.execution["key"]
+    content = interaction(ex)
+    e = %{Envelope.new("fact", "synthetic_interaction") | sender: "control/session-other"}
+    assert {:error, :unsupported} = Guidance.write(c.rela, c.d, "interaction", e, content, opts)
+    assert {:ok, []} = Rela.list(c.rela, "interactions")
+  end
+
+  test "projection is independent of receipt arrival order" do
+    receipts = [
+      %{"stage" => "acknowledged", "admission_id" => "a"},
+      %{"stage" => "delivered", "admission_id" => "a"},
+      %{"stage" => "stale"}
+    ]
+
+    assert Guidance.project(receipts) == Guidance.project(Enum.reverse(receipts))
+
+    assert Guidance.project(
+             receipts ++ [%{"stage" => "delivered", "admission_id" => "different"}]
+           )["uncertain"]
+  end
+end

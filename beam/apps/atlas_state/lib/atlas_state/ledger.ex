@@ -30,6 +30,14 @@ defmodule AtlasState.Ledger do
     end
   end
 
+  @doc "Reserve durable ordering before an immutable backend create; unused positions are gaps."
+  def reserve(table) do
+    position = position(table) + 1
+    :ok = :dets.insert(table, {:position, position})
+    :ok = :dets.sync(table)
+    position
+  end
+
   @doc "Record a stored fact under the next position; returns that position."
   def stored(table, id, content) do
     position = position(table) + 1

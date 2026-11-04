@@ -27,7 +27,13 @@ class AssemblyTest(unittest.TestCase):
 
     def test_equivalence_and_freshness(self):
         result = assemble.build(self.root, self.manifest)
-        self.assertEqual(result, self.original)
+        prior = copy.deepcopy(result)
+        self.assertEqual(set(prior.pop('guidance')), {'execution', 'interaction', 'receipt'})
+        for kind in ('worker_execution', 'interaction', 'interaction_receipt'):
+            self.assertEqual(prior['entities'].pop(kind), {'top': False, 'by_hand': False})
+        prior['runtime']['turn'].pop('attempt')
+        prior['entities']['turn']['properties'].pop('attempt')
+        self.assertEqual(prior, self.original)
         assemble.build(self.root, self.manifest, check=True)
         path = self.root / 'modules/foundation/atlas.json'
         path.write_text(path.read_text() + '\n')
@@ -67,6 +73,20 @@ class AssemblyTest(unittest.TestCase):
                 assemble.validate(extra, self.schema)
         with self.assertRaisesRegex(config.ConfigError, 'missing actor'):
             assemble.validate(self.original, self.schema, {'agent': [], 'person': []})
+
+    def test_guidance_mapping_is_complete_and_unambiguous(self):
+        current = assemble.read(ROOT / 'atlas.json')
+        for mutate in [
+            lambda x: x['guidance'].pop('receipt'),
+            lambda x: x['guidance']['interaction']['fields'].pop('actor'),
+            lambda x: x['guidance']['interaction']['fields'].update({'actor': 'body'}),
+            lambda x: x['guidance']['receipt'].update({'kind': 'interaction'}),
+            lambda x: x['runtime']['turn'].pop('attempt'),
+        ]:
+            extra = copy.deepcopy(current)
+            mutate(extra)
+            with self.assertRaises((config.ConfigError, KeyError)):
+                assemble.validate(extra, self.schema)
 
     def test_failure_retains_previous_artifacts(self):
         before = (self.root / 'atlas.json').read_bytes()
