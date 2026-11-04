@@ -24,7 +24,12 @@ A crash after backend commit but before acknowledgement is recovered from the
 synced intent. Unavailable/failed reads still refuse before any cached answer.
 Changed sender/target/payload cannot borrow an old request id or deletion proof;
 a reappearing target or replacement attempt cannot receive an old deletion. Old
-unbound ledger entries are not guessed into authority. This adds private ledger
+unbound ledger entries are not guessed into authority. An already answered but
+unbound id conflicts before either a present-target cache lookup or an absent-target
+proof can bind it, including ordinary acknowledgements created by the current State.
+The original answer stays unchanged and no deletion binding is added. Only an unused
+id or an exact bound deletion request can enter those recovery paths.
+This adds private ledger
 keys, not schema entities or a data conversion.
 
 Interaction submission also carries by, asserted by an admitted Control session.

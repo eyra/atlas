@@ -541,6 +541,91 @@ defmodule AtlasState.GuidanceTest do
     assert_delete_replay(c, "run-a")
   end
 
+  test "historical unbound answer cannot acknowledge a present turn deletion after restart", c do
+    :sys.replace_state(c.server, fn state ->
+      AtlasState.Ledger.stored(state.ledger, "old-unbound", %{
+        "op" => "delete",
+        "key" => "previous-target"
+      })
+
+      state
+    end)
+
+    stop_supervised!(AtlasState.Server)
+    server = start_supervised!({AtlasState.Server, rela: c.rela, data_dir: c.dir})
+    assert_unbound_delete_refused(%{c | server: server}, "old-unbound")
+    assert {:ok, _} = Rela.get(c.rela, "runs", "run-a")
+  end
+
+  test "ordinary unbound answer cannot acknowledge a present turn deletion", c do
+    seed_ordinary_answer(c, "ordinary-unbound")
+    assert_unbound_delete_refused(c, "ordinary-unbound")
+    assert {:ok, _} = Rela.get(c.rela, "runs", "run-a")
+  end
+
+  test "completed deletion proof cannot relabel an answered unbound alias", c do
+    seed_ordinary_answer(c, "ordinary-unbound")
+
+    assert {"stored", _, _} =
+             as("runtime@box", "unused", %{"op" => "delete", "key" => "run-a"},
+               kind: "run",
+               id: "proven-delete"
+             )
+
+    assert_unbound_delete_refused(c, "ordinary-unbound")
+    assert {:error, :not_found} = Rela.get(c.rela, "runs", "run-a")
+  end
+
+  defp seed_ordinary_answer(_c, id) do
+    assert {"stored", %{"op" => "create"}, _} =
+             as(
+               "runtime@box",
+               "unused",
+               %{
+                 "op" => "create",
+                 "key" => "unrelated",
+                 "values" => %{
+                   "host" => "box",
+                   "fence" => "unrelated-attempt",
+                   "status" => "live"
+                 }
+               },
+               kind: "run",
+               id: id
+             )
+  end
+
+  defp assert_unbound_delete_refused(c, id) do
+    ledger = :sys.get_state(c.server).ledger
+    original = AtlasState.Ledger.answer(ledger, id)
+    mutations = GuidanceStore.mutations(c.store)
+    assert AtlasState.Ledger.request(ledger, id) == nil
+
+    for sender <- ["runtime@box", "runtime@other", "turn/run-a"] do
+      assert {"refused", _, _} =
+               as(sender, "unused", %{"op" => "delete", "key" => "run-a"}, kind: "run", id: id)
+
+      assert AtlasState.Ledger.request(ledger, id) == nil
+      assert AtlasState.Ledger.answer(ledger, id) == original
+      assert GuidanceStore.mutations(c.store) == mutations
+    end
+
+    # The journal primitive must also refuse to relabel an ordinary answer, even
+    # if a future caller omits the Server's pre-cache eligibility check.
+    binding = %{
+      environment: AtlasBus.environment(),
+      kind: "run",
+      sender: "runtime@box",
+      content: %{"op" => "delete", "key" => "run-a"}
+    }
+
+    assert {:error, :request_conflict} =
+             AtlasState.Ledger.prepare_delete(ledger, id, binding, %{machine: "box"})
+
+    assert AtlasState.Ledger.request(ledger, id) == nil
+    assert AtlasState.Ledger.answer(ledger, id) == original
+  end
+
   test "legacy delete exact replay preserves acknowledgement across restart", c do
     assert {:ok, []} =
              Rela.create(
@@ -563,6 +648,29 @@ defmodule AtlasState.GuidanceTest do
     {:ok, fresh} = GuidanceStore.start(Path.join(c.dir, "facts.json"), c.d)
     start_supervised!({AtlasState.Server, rela: {GuidanceStore, fresh}, data_dir: c.dir})
     assert as("runtime@box", "unused", content, kind: "run", id: "delete-lost") == first
+
+    for changed <- [
+          Map.put(content, "cause", "different"),
+          Map.put(content, "version", "old"),
+          %{content | "key" => "other-target"},
+          %{content | "values" => %{"host" => "other"}}
+        ] do
+      assert {"refused", %{"code" => "request_conflict"}, _} =
+               as("runtime@box", "unused", changed, kind: "run", id: "delete-lost")
+    end
+
+    assert {"refused", %{"code" => "request_conflict"}, _} =
+             as("runtime@box", "unused", content, kind: "other-kind", id: "delete-lost")
+
+    assert {"refused", %{"code" => "request_conflict"}, _} =
+             as("turn/" <> key, "unused", content, kind: "run", id: "delete-lost")
+
+    assert {:error, {:other_environment, "elsewhere"}} =
+             as("runtime@box", "unused", content,
+               kind: "run",
+               id: "delete-lost",
+               environment: "elsewhere"
+             )
 
     for reason <- [:unavailable, {:failed, "503"}] do
       GuidanceStore.fail_next_get(fresh, "runs", key, reason)

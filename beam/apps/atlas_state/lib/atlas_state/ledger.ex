@@ -42,6 +42,15 @@ defmodule AtlasState.Ledger do
   def matches_request?(table, id, binding),
     do: request(table, id) in [nil, binding]
 
+  @doc "A delete may use only its bound id or a genuinely unused id, never an unbound answer."
+  def delete_request_available?(table, id, binding) do
+    case request(table, id) do
+      nil -> answer(table, id) == nil
+      ^binding -> true
+      _ -> false
+    end
+  end
+
   @doc "An authorized deletion intent/completion, checked against the entire request."
   def deletion(table, binding) do
     case :dets.lookup(table, deletion_key(binding)) do
@@ -53,7 +62,7 @@ defmodule AtlasState.Ledger do
 
   @doc "Sync validated authorization before the backend delete can take effect."
   def prepare_delete(table, id, binding, target) do
-    if matches_request?(table, id, binding) do
+    if delete_request_available?(table, id, binding) do
       proof =
         case deletion(table, binding) do
           :none -> %{binding: binding, target: target, answer: nil}

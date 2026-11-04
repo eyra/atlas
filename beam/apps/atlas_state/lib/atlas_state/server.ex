@@ -90,10 +90,10 @@ defmodule AtlasState.Server do
               ordinary(envelope, content, state)
 
             {:delete, target} ->
-              turn_delete(envelope, content, target, state)
+              delete_request(envelope, content, target, state)
 
             :absent_delete ->
-              absent_delete(envelope, content, state)
+              delete_request(envelope, content, :absent, state)
 
             {:error, reason} ->
               refusal(envelope, reason, state)
@@ -110,6 +110,18 @@ defmodule AtlasState.Server do
   defp refusal(envelope, reason, state) do
     reply(envelope, "refused", %{"code" => guidance_code(reason)}, nil)
     {:noreply, state}
+  end
+
+  defp delete_request(envelope, content, target, state) do
+    binding = Ledger.request_identity(envelope, content)
+
+    if Ledger.delete_request_available?(state.ledger, envelope.id, binding) do
+      if target == :absent,
+        do: absent_delete(envelope, content, state),
+        else: turn_delete(envelope, content, target, state)
+    else
+      refusal(envelope, :request_conflict, state)
+    end
   end
 
   defp turn_delete(envelope, content, target, state) do
