@@ -90,7 +90,9 @@ defmodule AtlasRuntime.ClaudeTest do
     :ok = Claude.wrapper(folder, o)
     env = Claude.environment(@turn, o, folder)
 
-    assert env["PATH"] == Path.join(folder, "bin")
+    assert env["PATH"] == Path.join(folder, "bin") <> ":" <> Path.join(folder, "sys")
+    # Its sys folder holds what Claude Code needs for itself (macOS: security) and no more.
+    assert File.ls!(Path.join(folder, "sys")) -- ["security"] == []
     assert env["ATLAS_AS"] == "trial" and env["ATLAS_ENV_FILE"] == o[:env_file]
     refute Map.has_key?(env, "GITHUB_TOKEN") or Map.has_key?(env, "MIX_ENV")
 

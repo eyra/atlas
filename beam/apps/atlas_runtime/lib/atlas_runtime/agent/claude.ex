@@ -90,8 +90,11 @@ defmodule AtlasRuntime.Agent.Claude do
 
     with true <- is_binary(exe) and File.exists?(exe),
          :ok <- wrapper(folder, opts) do
+      # Its stdin is /dev/null (else Claude Code waits 3 s for one); exec keeps the pid.
+      args = ["-c", ~s(exec "$0" "$@" < /dev/null), exe | args]
+
       port =
-        Port.open({:spawn_executable, exe}, [
+        Port.open({:spawn_executable, "/bin/sh"}, [
           :binary,
           :exit_status,
           :stderr_to_stdout,
@@ -112,11 +115,15 @@ defmodule AtlasRuntime.Agent.Claude do
   end
 
   @kept ~w(HOME USER LOGNAME TMPDIR LANG LC_ALL LC_CTYPE TERM)
+  # What Claude Code runs by name for itself: macOS's keychain tool, for its login.
+  @sys ["/usr/bin/security"]
 
   @doc """
   The turn's whole environment: a few names kept from the machine's (home, user, language),
   then which agent it is, the instance's settings file, no update of the build, and a PATH
-  of the turn's own `bin` folder alone, which holds the wrapper `atlas`.
+  of the turn's own `bin` folder, which holds the wrapper `atlas`, and its `sys` folder,
+  which holds only what Claude Code itself needs: on macOS `security`, with which it reads
+  its login from the keychain (without it: "Not logged in"). The agent may not run it.
   """
   def environment(turn, opts, folder) do
     kept = for name <- @kept, value = System.get_env(name), into: %{}, do: {name, value}
@@ -125,7 +132,7 @@ defmodule AtlasRuntime.Agent.Claude do
       "ATLAS_AS" => turn.agent,
       "ATLAS_ENV_FILE" => Keyword.get(opts, :env_file) || "",
       "ATLAS_NO_UPDATE" => "1",
-      "PATH" => Path.join(folder, "bin"),
+      "PATH" => Path.join(folder, "bin") <> ":" <> Path.join(folder, "sys"),
       "SHELL" => "/bin/bash"
     })
   end
@@ -153,6 +160,15 @@ defmodule AtlasRuntime.Agent.Claude do
       path = Path.join(dir, "atlas")
       File.write!(path, wrapper_script(file, Path.join(bin, "atlas"), System.get_env("PATH")))
       File.chmod!(path, 0o755)
+      sys = Path.join(folder, "sys")
+      File.mkdir_p!(sys)
+
+      for tool <- @sys, File.exists?(tool) do
+        link = Path.join(sys, Path.basename(tool))
+        File.rm(link)
+        :ok = File.ln_s(tool, link)
+      end
+
       :ok
     else
       {:error, :no_instance}
