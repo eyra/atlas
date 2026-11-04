@@ -62,6 +62,7 @@ jobs:
         with:
           otp-version: "28"
           elixir-version: "1.18"
+      - run: python3 -m pip install -r ../rela/scripts/requirements.txt
       - run: mix compile --warnings-as-errors
       - run: mix format --check-formatted
       - run: mix test
