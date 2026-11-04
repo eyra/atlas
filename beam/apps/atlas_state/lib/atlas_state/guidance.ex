@@ -19,6 +19,9 @@ defmodule AtlasState.Guidance do
   @interaction ~w(client_key body worker turn attempt mode execution cause)
   @receipt ~w(interaction worker turn attempt execution stage evidence_id cause)
   @stages ~w(delivered acknowledged uncertain stale unsupported rejected)
+  @record_bytes %{"execution" => 8_192, "interaction" => 32_768, "receipt" => 8_192}
+  @page_bytes 65_536
+  @page_limit 100
 
   def role(description, kind) do
     Enum.find(@roles, &(get_in(description, ["guidance", &1, "kind"]) == kind))
@@ -55,49 +58,15 @@ defmodule AtlasState.Guidance do
         })
 
       %{"execution" => execution} when role == "interaction" and is_binary(execution) ->
-        after_position = content["after_position"] || 0
-        limit = content["limit"] || 100
+        read_page(rela, description, role, {"execution", execution}, content)
 
-        if is_integer(after_position) and after_position >= 0 and is_integer(limit) and
-             limit in 1..100 do
-          with {:ok, facts} <- Rela.list(rela, collection) do
-            selected =
-              facts
-              |> Enum.filter(fn fact ->
-                v = decode(description, role, fact)
-
-                v["environment"] == AtlasBus.environment() and v["execution"] == execution and
-                  v["recorded_position"] > after_position
-              end)
-              |> Enum.sort_by(&decode(description, role, &1)["recorded_position"])
-
-            page = Enum.take(selected, limit)
-
-            Enum.reduce_while(page, {:ok, []}, fn fact, {:ok, acc} ->
-              case view(rela, description, role, fact) do
-                {:ok, value} -> {:cont, {:ok, acc ++ [value]}}
-                error -> {:halt, error}
-              end
-            end)
-            |> case do
-              {:ok, values} ->
-                {:ok,
-                 %{
-                   "facts" => values,
-                   "more" => length(selected) > limit,
-                   "after_position" =>
-                     if(values == [],
-                       do: after_position,
-                       else: List.last(values)["recorded_position"]
-                     )
-                 }}
-
-              error ->
-                error
-            end
-          end
+      %{"interaction" => interaction} when role == "receipt" and is_binary(interaction) ->
+        with {:ok, parent} <- fetch(rela, description, "interaction", interaction),
+             true <- parent["environment"] == AtlasBus.environment() do
+          read_page(rela, description, role, {"interaction", interaction}, content)
         else
-          {:error, :invalid_page}
+          false -> {:error, :wrong_environment}
+          error -> error
         end
 
       _ ->
@@ -106,6 +75,55 @@ defmodule AtlasState.Guidance do
   end
 
   def read(_, _, _, _), do: {:error, :invalid_operation}
+
+  defp read_page(rela, d, role, {field, key}, content) do
+    after_position = Map.get(content, "after_position", 0)
+    limit = Map.get(content, "limit", @page_limit)
+
+    if is_integer(after_position) and after_position >= 0 and is_integer(limit) and
+         limit in 1..@page_limit do
+      with {:ok, facts} <- Rela.list(rela, plural(d, role)) do
+        selected =
+          facts
+          |> Enum.filter(fn fact ->
+            value = decode(d, role, fact)
+
+            value["environment"] == AtlasBus.environment() and value[field] == key and
+              value["recorded_position"] > after_position
+          end)
+          |> Enum.sort_by(&decode(d, role, &1)["recorded_position"])
+
+        extra = if role == "receipt", do: %{"interaction" => key}, else: %{}
+        page(selected, limit, after_position, [], extra, fn fact -> view(rela, d, role, fact) end)
+      end
+    else
+      {:error, :invalid_page}
+    end
+  end
+
+  defp page([], _limit, position, values, extra, _render),
+    do: {:ok, page_content(values, position, false, extra)}
+
+  defp page(_rest, 0, position, values, extra, _render),
+    do: {:ok, page_content(values, position, true, extra)}
+
+  defp page([fact | rest], limit, position, values, extra, render) do
+    with {:ok, value} <- render.(fact) do
+      next = values ++ [value]
+      next_position = value["recorded_position"]
+      # false is one byte longer than true, so reserve the larger representation.
+      if byte_size(JSON.encode!(page_content(next, next_position, false, extra))) <= @page_bytes do
+        page(rest, limit - 1, next_position, next, extra, render)
+      else
+        if values == [],
+          do: {:error, :record_too_large},
+          else: {:ok, page_content(values, position, true, extra)}
+      end
+    end
+  end
+
+  defp page_content(values, position, more, extra),
+    do: Map.merge(extra, %{"facts" => values, "after_position" => position, "more" => more})
 
   @doc "Protect the authority of fenced turns, including attempts introduced by this protocol."
   def authorize_turn(rela, d, e, content) do
@@ -120,13 +138,8 @@ defmodule AtlasState.Guidance do
 
   defp authorize_fenced_turn(rela, d, e, content, turn) do
     with key when is_binary(key) <- content["key"],
-         values when is_map(values) <- content["values"] || %{} do
-      existing =
-        case Rela.get(rela, kind_plural(d, turn["kind"]), content["key"]) do
-          {:ok, fact} -> fact.properties
-          _ -> %{}
-        end
-
+         values when is_map(values) <- content["values"] || %{},
+         {:ok, existing} <- existing_turn(rela, d, turn, key, content["op"]) do
       fenced = Map.has_key?(values, turn["attempt"]) or Map.has_key?(existing, turn["attempt"])
       machine = existing[turn["machine"]] || values[turn["machine"]]
 
@@ -146,7 +159,18 @@ defmodule AtlasState.Guidance do
          do: :ok,
          else: {:error, :turn_authority}
     else
+      {:error, _} = error -> error
       _ -> {:error, :invalid_operation}
+    end
+  end
+
+  # Only confirmed absence is an absent fact. A timeout/503 must never erase a
+  # previously established fence and then fall through to an ordinary PATCH/DELETE.
+  defp existing_turn(rela, d, turn, key, op) do
+    case Rela.get(rela, kind_plural(d, turn["kind"]), key) do
+      {:ok, fact} -> {:ok, fact.properties}
+      {:error, :not_found} when op == "create" -> {:ok, %{}}
+      {:error, _} = error -> error
     end
   end
 
@@ -303,24 +327,32 @@ defmodule AtlasState.Guidance do
     props = Map.new(values, fn {k, v} -> {Map.fetch!(mapping, k), v} end)
     spec = Description.kind(d, get_in(d, ["guidance", role, "kind"]))
 
+    generated = [mapping["recorded_at"], mapping["recorded_position"]]
+
     with :ok <- Description.check(spec, props, :create) do
-      # No preflight read/check_create: the backend create is the identity claim.
-      case Rela.create(rela, spec["plural"], key, props, %{}) do
-        {:ok, []} ->
-          Rela.get(rela, spec["plural"], key)
+      case {record_size(role, Map.put(values, "key", key)),
+            record_size(role, Map.put(props, "key", key))} do
+        {:ok, :ok} ->
+          claim(rela, spec["plural"], key, props, generated)
 
-        {:error, :exists} ->
-          compare(rela, spec["plural"], key, props, [
-            mapping["recorded_at"],
-            mapping["recorded_position"]
-          ])
-
-        {:ok, warnings} ->
-          {:error, {:stored_with_warnings, warnings}}
-
-        error ->
-          error
+        _ ->
+          # A valid original may sit exactly on its byte boundary. Later clock/
+          # position metadata is irrelevant to replay and must not reject it.
+          case compare(rela, spec["plural"], key, props, generated) do
+            {:error, :not_found} -> {:error, :record_too_large}
+            result -> result
+          end
       end
+    end
+  end
+
+  defp claim(rela, plural, key, props, generated) do
+    # Atomic create is the identity claim; existing keys are never overwritten.
+    case Rela.create(rela, plural, key, props, %{}) do
+      {:ok, []} -> Rela.get(rela, plural, key)
+      {:error, :exists} -> compare(rela, plural, key, props, generated)
+      {:ok, warnings} -> {:error, {:stored_with_warnings, warnings}}
+      error -> error
     end
   end
 
@@ -360,20 +392,33 @@ defmodule AtlasState.Guidance do
         do: {slot, fact.properties[name]}
   end
 
+  defp record_size(role, value) do
+    if byte_size(JSON.encode!(value)) <= Map.fetch!(@record_bytes, role),
+      do: :ok,
+      else: {:error, :record_too_large}
+  end
+
   defp view(rela, d, "interaction", fact) do
     interaction = decode(d, "interaction", fact)
 
     with true <- interaction["environment"] == AtlasBus.environment(),
+         :ok <- record_size("interaction", interaction),
          {:ok, facts} <- Rela.list(rela, plural(d, "receipt")) do
-      receipts =
-        facts
-        |> Enum.map(&decode(d, "receipt", &1))
-        |> Enum.filter(
-          &(&1["interaction"] == fact.key and &1["environment"] == interaction["environment"])
-        )
-        |> Enum.sort_by(& &1["recorded_position"])
+      {count, projection} =
+        Enum.reduce(facts, {0, projection_seed()}, fn fact, {count, projection} ->
+          receipt = decode(d, "receipt", fact)
 
-      {:ok, Map.merge(interaction, %{"receipts" => receipts, "projection" => project(receipts)})}
+          if receipt["interaction"] == interaction["key"] and
+               receipt["environment"] == interaction["environment"],
+             do: {count + 1, project_event(receipt, projection)},
+             else: {count, projection}
+        end)
+
+      {:ok,
+       Map.merge(interaction, %{
+         "receipt_count" => count,
+         "projection" => Map.delete(projection, "admission")
+       })}
     else
       false -> {:error, :wrong_environment}
       error -> error
@@ -383,34 +428,53 @@ defmodule AtlasState.Guidance do
   defp view(_, d, role, fact) do
     value = decode(d, role, fact)
 
-    if value["environment"] == AtlasBus.environment(),
-      do: {:ok, value},
-      else: {:error, :wrong_environment}
+    with true <- value["environment"] == AtlasBus.environment(),
+         :ok <- record_size(role, value) do
+      {:ok, value}
+    else
+      false -> {:error, :wrong_environment}
+      error -> error
+    end
   end
 
   @doc "Last proven stage and independent uncertainty/closure evidence; replay never regresses proof."
-  def project(receipts) do
-    acknowledged = Enum.filter(receipts, &(&1["stage"] == "acknowledged"))
-    delivered = Enum.filter(receipts, &(&1["stage"] == "delivered"))
-    admissions = (acknowledged ++ delivered) |> Enum.map(& &1["admission_id"]) |> Enum.uniq()
+  def project(receipts),
+    do: receipts |> Enum.reduce(projection_seed(), &project_event/2) |> Map.delete("admission")
 
-    stage =
-      cond do
-        acknowledged != [] -> "acknowledged"
-        delivered != [] -> "delivered"
-        true -> "queued"
+  defp projection_seed,
+    do: %{"proven" => "queued", "uncertain" => false, "closures" => [], "admission" => nil}
+
+  # Fixed-size projection state: at most one admission id and the three closure
+  # labels, regardless of how much immutable evidence remains in the backend.
+  defp project_event(receipt, projection) do
+    stage = receipt["stage"]
+
+    projection =
+      if stage in ~w(delivered acknowledged) do
+        admission = receipt["admission_id"]
+
+        proven =
+          if stage == "acknowledged" or projection["proven"] == "acknowledged",
+            do: "acknowledged",
+            else: "delivered"
+
+        %{
+          projection
+          | "proven" => proven,
+            "uncertain" =>
+              projection["uncertain"] or
+                (projection["admission"] != nil and projection["admission"] != admission),
+            "admission" => projection["admission"] || admission
+        }
+      else
+        projection
       end
 
-    # Conflicting admission identities are evidence of ambiguity, never silently selected.
-    uncertain = Enum.any?(receipts, &(&1["stage"] == "uncertain")) or length(admissions) > 1
+    projection =
+      if stage == "uncertain", do: Map.put(projection, "uncertain", true), else: projection
 
-    closures =
-      receipts
-      |> Enum.map(& &1["stage"])
-      |> Enum.filter(&(&1 in ~w(stale unsupported rejected)))
-      |> Enum.uniq()
-      |> Enum.sort()
-
-    %{"proven" => stage, "uncertain" => uncertain, "closures" => closures}
+    if stage in ~w(stale unsupported rejected),
+      do: Map.update!(projection, "closures", &Enum.sort(Enum.uniq([stage | &1]))),
+      else: projection
   end
 end

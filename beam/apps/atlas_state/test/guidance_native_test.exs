@@ -213,7 +213,11 @@ defmodule AtlasState.GuidanceNativeTest do
              )
 
     assert restored["recorded_at"] == interaction["recorded_at"]
-    assert restored["receipts"] == [receipt]
+    assert restored["receipt_count"] == 1
+
+    assert {:ok, %{"facts" => [^receipt], "more" => false}} =
+             Guidance.read(fresh, d, "receipt", %{"interaction" => restored["key"]})
+
     assert restored["projection"]["proven"] == "acknowledged"
     assert {:ok, ^receipt} = write(fresh, d, "receipt", "record_receipt", r, "runtime@private")
   end

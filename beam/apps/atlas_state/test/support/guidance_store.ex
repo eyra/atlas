@@ -2,7 +2,15 @@ defmodule AtlasState.GuidanceStore do
   @moduledoc "Private disk store with atomic identity claims and a commit barrier."
   @behaviour AtlasState.Rela
   def start(path, description),
-    do: Agent.start_link(fn -> %{path: path, description: description, barrier: nil} end)
+    do:
+      Agent.start_link(fn ->
+        %{path: path, description: description, barrier: nil, faults: %{}, mutations: []}
+      end)
+
+  def fail_next_get(pid, plural, key, reason),
+    do: Agent.update(pid, &%{&1 | faults: Map.put(&1.faults, {plural, key}, reason)})
+
+  def mutations(pid), do: Agent.get(pid, & &1.mutations)
 
   def barrier(pid, owner), do: Agent.update(pid, &%{&1 | barrier: owner})
 
@@ -20,10 +28,19 @@ defmodule AtlasState.GuidanceStore do
   def description(pid), do: Agent.get(pid, &{:ok, &1.description})
   @impl true
   def get(pid, plural, key) do
-    Agent.get(pid, fn s ->
-      case get_in(facts(s), [plural, key]) do
-        nil -> {:error, :not_found}
-        props -> {:ok, wire(key, props)}
+    Agent.get_and_update(pid, fn s ->
+      case Map.pop(s.faults, {plural, key}) do
+        {nil, _} ->
+          result =
+            case get_in(facts(s), [plural, key]) do
+              nil -> {:error, :not_found}
+              props -> {:ok, wire(key, props)}
+            end
+
+          {result, s}
+
+        {reason, faults} ->
+          {{:error, reason}, %{s | faults: faults}}
       end
     end)
   end
@@ -66,7 +83,38 @@ defmodule AtlasState.GuidanceStore do
   @impl true
   def check_create(_, _, _, _, _), do: {:ok, []}
   @impl true
-  def change(_, _, _, _, _, _), do: {:error, {:invalid, ["immutable"]}}
+  def change(pid, plural, key, props, _version, targets) do
+    Agent.get_and_update(pid, fn s ->
+      all = facts(s)
+
+      case get_in(all, [plural, key]) do
+        nil ->
+          {{:error, :not_found}, s}
+
+        old ->
+          links =
+            Enum.reduce(targets, old["links"], fn {name, {_, keys}}, acc ->
+              Map.put(acc, name, keys)
+            end)
+
+          updated = %{old | "properties" => Map.merge(old["properties"], props), "links" => links}
+          File.write!(s.path, JSON.encode!(put_in(all, [plural, key], updated)), [:sync])
+          {{:ok, []}, %{s | mutations: [{:change, plural, key} | s.mutations]}}
+      end
+    end)
+  end
+
   @impl true
-  def delete(_, _, _, _), do: {:error, {:invalid, ["retained"]}}
+  def delete(pid, plural, key, _version) do
+    Agent.get_and_update(pid, fn s ->
+      all = facts(s)
+
+      if get_in(all, [plural, key]) do
+        File.write!(s.path, JSON.encode!(Map.update!(all, plural, &Map.delete(&1, key))), [:sync])
+        {:ok, %{s | mutations: [{:delete, plural, key} | s.mutations]}}
+      else
+        {{:error, :not_found}, s}
+      end
+    end)
+  end
 end

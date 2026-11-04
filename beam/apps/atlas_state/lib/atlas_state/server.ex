@@ -80,7 +80,7 @@ defmodule AtlasState.Server do
               ordinary(envelope, content, state)
 
             {:error, reason} ->
-              reply(envelope, "refused", %{"code" => Atom.to_string(reason)}, nil)
+              reply(envelope, "refused", %{"code" => guidance_code(reason)}, nil)
               {:noreply, state}
           end
         else

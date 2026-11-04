@@ -38,7 +38,11 @@ defmodule AtlasState.GuidanceTest do
 
     %{
       "guidance" => mapping,
-      "entities" => Map.put(entities, "run", %{"plural" => "runs"}),
+      "entities" =>
+        Map.put(entities, "run", %{
+          "plural" => "runs",
+          "properties" => Map.new(~w(host fence status), &{&1, %{"type" => "string"}})
+        }),
       "runtime" => %{
         "turn" => %{
           "kind" => "run",
@@ -134,7 +138,7 @@ defmodule AtlasState.GuidanceTest do
     e =
       Envelope.new(
         Keyword.get(opts, :class, "fact"),
-        "synthetic_" <> role,
+        Keyword.get(opts, :kind, "synthetic_" <> role),
         Keyword.take(opts, [:id, :environment])
       )
 
@@ -284,7 +288,8 @@ defmodule AtlasState.GuidanceTest do
              "closures" => ["stale"]
            }
 
-    assert length(current["receipts"]) == 4
+    assert current["receipt_count"] == 4
+    assert length(receipt_history(current["key"], 0, [])) == 4
 
     assert {"answer", %{"fact" => ^current}, _} =
              request("interaction", %{"actor" => "reader-a", "client_key" => "client-1"},
@@ -362,7 +367,8 @@ defmodule AtlasState.GuidanceTest do
     start_supervised!({AtlasState.Server, rela: {GuidanceStore, fresh}, data_dir: c.dir})
     assert {"stored", %{"fact" => restored}, _} = request("interaction", content)
     assert restored["recorded_at"] == original["recorded_at"]
-    assert restored["receipts"] == [r]
+    assert restored["receipt_count"] == 1
+    assert receipt_history(restored["key"], 0, []) == [r]
     assert restored["projection"]["proven"] == "delivered"
   end
 
@@ -453,6 +459,244 @@ defmodule AtlasState.GuidanceTest do
     e = %{Envelope.new("fact", "synthetic_interaction") | sender: "control/session-other"}
     assert {:error, :unsupported} = Guidance.write(c.rela, c.d, "interaction", e, content, opts)
     assert {:ok, []} = Rela.list(c.rela, "interactions")
+  end
+
+  test "P1 unreadable fenced turn cannot be moved by another Runtime", c do
+    for reason <- [:unavailable, {:failed, "503 after a transient store failure"}, :not_found] do
+      GuidanceStore.fail_next_get(c.store, "runs", "run-a", reason)
+
+      assert {"refused", _, _} =
+               as(
+                 "runtime@other",
+                 "unused",
+                 %{"op" => "change", "key" => "run-a", "values" => %{"host" => "other"}},
+                 kind: "run"
+               )
+
+      assert GuidanceStore.mutations(c.store) == []
+
+      assert {:ok, %{properties: %{"host" => "box", "fence" => "attempt-a"}}} =
+               Rela.get(c.rela, "runs", "run-a")
+    end
+  end
+
+  test "P1 unreadable fenced turn cannot be deleted by Control", c do
+    GuidanceStore.fail_next_get(c.store, "runs", "run-a", :unavailable)
+
+    assert {"refused", _, _} =
+             request("unused", %{"op" => "delete", "key" => "run-a"}, kind: "run")
+
+    assert GuidanceStore.mutations(c.store) == []
+    assert {:ok, _} = Rela.get(c.rela, "runs", "run-a")
+  end
+
+  test "P1 successful unfenced read retains legacy write compatibility", c do
+    assert {:ok, []} =
+             Rela.create(c.rela, "runs", "run-b", %{"host" => "box", "status" => "live"}, %{})
+
+    assert {"stored", _, _} =
+             as(
+               "runtime@box",
+               "unused",
+               %{"op" => "change", "key" => "run-b", "values" => %{"status" => "ended"}},
+               kind: "run"
+             )
+
+    assert {:ok, %{properties: %{"status" => "ended"}}} = Rela.get(c.rela, "runs", "run-b")
+  end
+
+  test "P1 only confirmed absence permits new fenced creation; unreadable unfenced state refuses",
+       c do
+    payload = %{
+      "op" => "create",
+      "key" => "run-new",
+      "values" => %{"host" => "box", "fence" => "fresh", "status" => "live"}
+    }
+
+    assert {"stored", _, _} = as("runtime@box", "unused", payload, kind: "run")
+
+    assert {:ok, []} =
+             Rela.create(
+               c.rela,
+               "runs",
+               "run-legacy",
+               %{"host" => "box", "status" => "live"},
+               %{}
+             )
+
+    GuidanceStore.fail_next_get(c.store, "runs", "run-legacy", :unavailable)
+
+    assert {"refused", _, _} =
+             as(
+               "runtime@box",
+               "unused",
+               %{"op" => "change", "key" => "run-legacy", "values" => %{"status" => "ended"}},
+               kind: "run"
+             )
+
+    assert GuidanceStore.mutations(c.store) == []
+  end
+
+  test "P2 replay and interaction pages do not embed retained evidence", c do
+    content = interaction(c.execution)
+    {"stored", %{"fact" => f}, _} = request("interaction", content)
+
+    evidence =
+      for n <- 1..101 do
+        assert {"stored", %{"fact" => r}, _} =
+                 as(
+                   "runtime@box",
+                   "receipt",
+                   receipt(f, "delivered", %{
+                     "evidence_id" => "evidence-#{n}",
+                     "admission_id" => "same-inbox"
+                   })
+                 )
+
+        r
+      end
+
+    assert {"stored", %{"fact" => replay}, _} = request("interaction", content)
+    refute Map.has_key?(replay, "receipts")
+    assert replay["receipt_count"] == 101
+    assert byte_size(JSON.encode!(replay)) < 2_048
+
+    assert {"answer", %{"fact" => exact}, _} =
+             request("interaction", %{"key" => f["key"]}, class: "read")
+
+    refute Map.has_key?(exact, "receipts")
+
+    assert {"answer", %{"facts" => [summary]}, _} =
+             request("interaction", %{"execution" => c.execution["key"], "limit" => 1},
+               class: "read"
+             )
+
+    refute Map.has_key?(summary, "receipts")
+    restored = receipt_history(f["key"], 0, [])
+    assert restored == evidence
+    assert length(Enum.uniq_by(restored, & &1["key"])) == 101
+    assert {:ok, persisted} = Rela.list(c.rela, "receipts")
+    assert length(persisted) == 101
+    stop_supervised!(AtlasState.Server)
+    Agent.stop(c.store)
+    {:ok, fresh} = GuidanceStore.start(Path.join(c.dir, "facts.json"), c.d)
+    start_supervised!({AtlasState.Server, rela: {GuidanceStore, fresh}, data_dir: c.dir})
+    assert {"stored", %{"fact" => after_restart}, _} = request("interaction", content)
+    assert after_restart == replay
+    assert receipt_history(f["key"], 0, []) == evidence
+  end
+
+  defp receipt_history(key, after_position, acc) do
+    assert {"answer", page, _} =
+             request(
+               "receipt",
+               %{"interaction" => key, "after_position" => after_position, "limit" => 17},
+               class: "read"
+             )
+
+    assert byte_size(JSON.encode!(page)) <= 65_536
+    acc = acc ++ page["facts"]
+
+    if page["more"] do
+      assert page["after_position"] > after_position
+      receipt_history(key, page["after_position"], acc)
+    else
+      acc
+    end
+  end
+
+  test "P2 per-record byte limits refuse oversized writes without storing", c do
+    content = put_in(interaction(c.execution), ["values", "body"], String.duplicate("x", 40_000))
+    assert {"refused", %{"code" => "record_too_large"}, _} = request("interaction", content)
+    assert {:ok, []} = Rela.list(c.rela, "interactions")
+    {"stored", %{"fact" => f}, _} = request("interaction", interaction(c.execution))
+
+    assert {"refused", %{"code" => "record_too_large"}, _} =
+             as(
+               "runtime@box",
+               "receipt",
+               receipt(f, "uncertain", %{"reason" => String.duplicate("x", 9_000)})
+             )
+
+    assert {:ok, []} = Rela.list(c.rela, "receipts")
+  end
+
+  test "P2 a valid record at its byte boundary still replays after position growth", c do
+    {"stored", %{"fact" => f}, _} = request("interaction", interaction(c.execution))
+
+    {"stored", %{"fact" => base}, _} =
+      as(
+        "runtime@box",
+        "receipt",
+        receipt(f, "uncertain", %{"evidence_id" => "first", "reason" => "x"})
+      )
+
+    {:ok, raw} = Rela.get(c.rela, "receipts", base["key"])
+    size = byte_size(JSON.encode!(Map.put(raw.properties, "key", raw.key)))
+
+    input =
+      receipt(f, "uncertain", %{
+        "evidence_id" => "other",
+        "reason" => String.duplicate("x", 8_192 - size + 1)
+      })
+
+    {"stored", %{"fact" => edge}, _} = as("runtime@box", "receipt", input)
+    {:ok, raw_edge} = Rela.get(c.rela, "receipts", edge["key"])
+    assert byte_size(JSON.encode!(Map.put(raw_edge.properties, "key", raw_edge.key))) == 8_192
+
+    for n <- 1..6 do
+      assert {"stored", _, _} =
+               as(
+                 "runtime@box",
+                 "receipt",
+                 receipt(f, "uncertain", %{"evidence_id" => "advance-#{n}", "reason" => "x"})
+               )
+    end
+
+    replay = as("runtime@box", "receipt", input)
+    assert elem(replay, 0) == "stored"
+    assert elem(replay, 1)["fact"] == edge
+  end
+
+  test "P2 page bytes cap large interaction and receipt pages", c do
+    for n <- 1..3 do
+      v =
+        interaction(c.execution)
+        |> put_in(["values", "client_key"], "large-#{n}")
+        |> put_in(["values", "body"], String.duplicate("x", 24_000))
+
+      assert {"stored", _, _} = request("interaction", v)
+    end
+
+    assert {"answer", page, _} =
+             request("interaction", %{"execution" => c.execution["key"], "limit" => 100},
+               class: "read"
+             )
+
+    assert byte_size(JSON.encode!(page)) <= 65_536
+    assert length(page["facts"]) == 2
+    assert page["more"]
+    f = hd(page["facts"])
+
+    for n <- 1..20 do
+      assert {"stored", _, _} =
+               as(
+                 "runtime@box",
+                 "receipt",
+                 receipt(f, "uncertain", %{
+                   "evidence_id" => "large-#{n}",
+                   "reason" => String.duplicate("x", 4_000)
+                 })
+               )
+    end
+
+    assert {"answer", receipts, _} =
+             request("receipt", %{"interaction" => f["key"], "limit" => 100}, class: "read")
+
+    assert byte_size(JSON.encode!(receipts)) <= 65_536
+    assert length(receipts["facts"]) < 20
+    assert receipts["more"]
+    assert length(receipt_history(f["key"], 0, [])) == 20
   end
 
   test "projection is independent of receipt arrival order" do

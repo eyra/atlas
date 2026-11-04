@@ -8,8 +8,10 @@ All writes travel over Bus to State, using an operation and semantic values.
 Execution registration requires the durable running turn, worker, machine and
 attempt. Only the owning Runtime machine or exact turn endpoint may register it
 or publish receipts. The Bus link binds remote machine identity. Fenced turn
-machine/attempt fields cannot be replaced through generic State writes. Existing
-unfenced turns remain compatible; IS-108 introduces their Runtime fences.
+machine/attempt fields cannot be replaced through generic State writes. A failed
+turn read refuses before ordinary storage. Only confirmed absence permits new turn
+creation; successfully read unfenced turns retain compatibility. IS-108 introduces
+their Runtime fences.
 
 Interaction submission also carries by, asserted by an admitted Control session.
 State refuses injected actor/environment/timestamp/position values. This retains
@@ -43,11 +45,29 @@ and remains in history after proof improves. Historical evidence stays on its
 original attempt; receipts change no ownership, leases, outcomes or acceptance.
 Live eligibility and admission versus closure remain later Control/Runtime work.
 
-Reads support exact identity and bounded execution history pages (maximum 100),
-ordered by durable State position. after_position and more provide continuation;
-Control supplies opaque client cursors later. The current backend scans collections
-internally. Indexed storage can replace that through State/Rela. Retained receipt
-evidence is durable history, separate from future bounded token output.
+Interaction create/replay/exact reads return immutable identity, a bounded projection
+and receipt_count, never an embedded evidence history. Read the receipt role with
+interaction=<key> and optional after_position/limit to traverse retained evidence.
+Interaction pages select execution=<key>. Both collections are ordered by durable
+State position, at most 100 records and 64 KiB of encoded JSON payload per page;
+after_position/more continue after the last included record. Byte limits can make a
+page shorter than its requested record count. The whole retained history stays
+immutable; no evidence is purged or truncated to satisfy response limits.
+
+Stored execution/receipt records are limited to 8 KiB each; interaction records to
+32 KiB, measured as encoded JSON including server metadata and identity (both
+semantic and mapped forms). Oversized writes refuse with record_too_large before
+backend creation. Identical retries retain the original metadata: growth in the
+newly reserved position cannot invalidate an already admitted boundary record.
+Exact record reads enforce those bounds too. An out-of-contract
+oversized retained record fails visibly rather than returning a non-advancing empty
+page or silently discarding its contents. Summary projections retain only bounded
+proof/uncertainty/closure state, regardless of evidence count. Control supplies
+opaque client cursors later.
+
+The current backend still scans collections internally; indexed storage can replace
+that through State/Rela. Response bounds are not an indexed-query guarantee. All
+receipts remain durable history, separate from future bounded token output.
 
 The schema adds three kinds and optional turn attempt. Tests preserve every previous
 definition and field order. No migration is required; closure/provenance packaging
