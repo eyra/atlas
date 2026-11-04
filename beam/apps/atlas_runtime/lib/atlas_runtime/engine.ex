@@ -12,7 +12,11 @@ defmodule AtlasRuntime.Engine do
   2. A turn whose item is no longer its agent's, or no longer open: ended (W1: only the
      owner works on an item).
   3. An open fact owned by one of its agents, without a turn here: a turn is started,
-     unless that agent is in a turn already (it then waits behind it, W1).
+     unless that agent is in a turn already (it then waits behind it, W1), or crashed a
+     moment ago (it waits a pause that doubles with each crash in a row), or crashed 3 times
+     in 10 minutes on this machine: it then cannot run here, and Runtime says so on the
+     agent (`runtime.agent.cannot_run`), until that is no longer so (architecture v4,
+     section 10.2). All of it is read from the turns in State, nothing is remembered.
 
   What it reads is the description's: the facts a flow writes on (its `on`, or its kinds),
   owned through the flow's `owner_relation`, open while its `state_field` has a value; and
@@ -121,10 +125,20 @@ defmodule AtlasRuntime.Engine do
         # 3. An owned open fact without a turn: one, unless its agent is in one already.
         busy = MapSet.new(for {_key, {agent, _item}} <- local, do: agent)
 
+        turns_here =
+          turns
+          |> Enum.filter(&(&1["values"][names.machine] == machine))
+          |> Enum.flat_map(&(get_in(&1, ["links", names.by]) || []))
+          |> Enum.frequencies()
+
+        opts = Keyword.put(state.opts, :turns_here, turns_here)
+        able = able(description, names, mine_ended(turns, names, machine), agents, opts)
+
         owned
         |> Enum.reject(
           &(MapSet.member?(busy, &1.agent) or {&1.agent, &1.item} in Map.values(local))
         )
+        |> Enum.filter(&(&1.agent in able))
         |> Enum.uniq_by(& &1.agent)
         |> Enum.each(&start(&1, names, turns, agents, state.opts))
 
@@ -200,12 +214,19 @@ defmodule AtlasRuntime.Engine do
           item: owned.item,
           agent: owned.agent,
           port: port,
-          port_opts: [stub_dir: Keyword.get(opts, :stub_dir)],
+          port_opts: [
+            stub_dir: Keyword.get(opts, :stub_dir),
+            agent: agents[owned.agent],
+            turns_dir: Keyword.get(opts, :turns_dir),
+            env_file: Keyword.get(opts, :env_file),
+            atlas_bin: Keyword.get(opts, :atlas_bin)
+          ],
           names: names,
           turn_kind: names.kind,
           machine: Keyword.fetch!(opts, :machine),
-          silence: Keyword.fetch!(opts, :silence),
-          max: Keyword.fetch!(opts, :max),
+          silence:
+            seconds(agents[owned.agent]["silence_seconds"], Keyword.fetch!(opts, :silence)),
+          max: seconds(agents[owned.agent]["max_seconds"], Keyword.fetch!(opts, :max)),
           lease: Keyword.fetch!(opts, :lease),
           cause: "#{owned.agent} owns #{owned.item}, and no turn of it runs: a turn (#{n})"
         }
@@ -219,7 +240,12 @@ defmodule AtlasRuntime.Engine do
     content = %{
       "op" => "change",
       "key" => key,
-      "values" => %{names.state => names.ended, names.why => why, names.lease => ""},
+      "values" => %{
+        names.state => names.ended,
+        names.why => why,
+        names.lease => "",
+        names.ended_at => now_text()
+      },
       "version" => nil,
       "by" => "runtime",
       "cause" => why
@@ -248,7 +274,109 @@ defmodule AtlasRuntime.Engine do
     end
   end
 
-  @names ~w(kind key on by state running ended machine lease activity why)
+  @names ~w(kind key on by state running ended machine lease activity why ended_at)
+
+  # The ended turns of this machine, newest first: `[{agent, ended at (ms), crashed?}]`.
+  defp mine_ended(turns, names, machine) do
+    for turn <- turns,
+        turn["values"][names.state] == names.ended,
+        turn["values"][names.machine] == machine,
+        {:ok, at, _} <- [DateTime.from_iso8601(to_string(turn["values"][names.ended_at]))],
+        [agent] <- [get_in(turn, ["links", names.by]) || []] do
+      crashed? = String.starts_with?(to_string(turn["values"][names.why]), "the agent crashed")
+      {agent, DateTime.to_unix(at, :millisecond), crashed?}
+    end
+    |> Enum.sort_by(&elem(&1, 1), :desc)
+  end
+
+  @crashes 3
+  @window 10 * 60_000
+
+  # The agents that may start a turn now: not 3 crashes in 10 minutes here, and past the
+  # pause after the crashes in a row they ended with. Says so on the agent when it changes.
+  defp able(description, names, ended, agents, opts) do
+    now = System.system_time(:millisecond)
+    machine = Keyword.fetch!(opts, :machine)
+
+    Enum.filter(Map.keys(agents), fn agent ->
+      theirs = for {^agent, at, crashed?} <- ended, do: {at, crashed?}
+      recent = for {at, true} <- theirs, now - at < @window, do: at
+      cannot? = length(recent) >= @crashes
+      :ok = cannot_run(description, names, agent, machine, cannot? && List.last(recent))
+      in_a_row = theirs |> Enum.take_while(&elem(&1, 1)) |> length()
+
+      paused? =
+        in_a_row > 0 and
+          now <
+            elem(hd(theirs), 0) +
+              Keyword.fetch!(opts, :crash_pause) * Integer.pow(2, in_a_row - 1)
+
+      under_limit?(agents[agent], agent, Keyword.get(opts, :turns_here, %{})) and not cannot? and
+        not paused?
+    end)
+  end
+
+  # An agent's `turn_limit`: no more turns on this machine than that, ever (a trial's one).
+  defp under_limit?(%{"turn_limit" => limit}, agent, turns_here) when is_integer(limit),
+    do: Map.get(turns_here, agent, 0) < limit
+
+  defp under_limit?(_settings, _agent, _turns_here), do: true
+
+  # The agent's field that says it cannot run here (`runtime.agent.cannot_run`): set when it
+  # crashed 3 times in 10 minutes on this machine, cleared once that is no longer so.
+  defp cannot_run(description, names, agent, machine, since) do
+    with field when is_binary(field) <- get_in(description, ["runtime", "agent", "cannot_run"]),
+         [kind] <- get_in(description, ["relations", names.by, "to"]),
+         %{"fact" => %{} = fact} <- Talk.read(kind, %{"key" => agent, "plain" => true}) do
+      was = to_string(fact["values"][field])
+      here? = String.starts_with?(was, "on #{machine} ")
+
+      {value, cause} =
+        cond do
+          since && not here? ->
+            text = "on #{machine} since #{text_at(since)}: #{@crashes} crashes in 10 minutes"
+            {text, "#{agent} crashed #{@crashes} times in 10 minutes on #{machine}"}
+
+          !since && here? ->
+            {"", "#{agent} no longer crashed #{@crashes} times in 10 minutes on #{machine}"}
+
+          true ->
+            {nil, nil}
+        end
+
+      if cause do
+        content = %{
+          "op" => "change",
+          "key" => agent,
+          "values" => %{field => value},
+          "version" => nil,
+          "by" => "runtime",
+          "cause" => cause
+        }
+
+        case Talk.put(kind, content) do
+          {:stored, _} -> Logger.info("runtime: #{agent}: #{cause}")
+          other -> Logger.warning("runtime: #{agent} not marked: #{inspect(other)}")
+        end
+      end
+
+      :ok
+    else
+      _ -> :ok
+    end
+  end
+
+  defp seconds(n, _default) when is_number(n), do: Kernel.round(n * 1000)
+  defp seconds(_n, default), do: default
+
+  defp now_text, do: text_at(System.system_time(:millisecond))
+
+  defp text_at(ms),
+    do:
+      ms
+      |> DateTime.from_unix!(:millisecond)
+      |> DateTime.truncate(:second)
+      |> DateTime.to_iso8601()
 
   defp atomize(names), do: Map.new(@names, &{String.to_atom(&1), names[&1]})
 end

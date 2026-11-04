@@ -217,6 +217,7 @@ entities:
       name, e.g. coordinator.
     properties:
       name: { type: string, required: true, description: "As it is shown" }
+      cannot_run: { type: string, description: "Where and since when it cannot run, and why (3 crashes in 10 minutes); Runtime writes and clears it (IS-Atlas-18)" }
 
   # What belongs to being assigned, for one fact (d-0022, IS-Atlas-78): who it is assigned
   # to (assigned_to) and what they are expected to do (expected); later deadlines and the
@@ -254,6 +255,7 @@ entities:
       lease_until: { type: datetime, description: "Until when the turn holds its lease: the agent's last activity plus the silence limit" }
       activity: { type: string, description: "The agent's last activity Runtime saw" }
       why: { type: string, description: "Why it ended" }
+      ended_at: { type: datetime, description: "When it ended" }
 
 relations:
   in_scene:
