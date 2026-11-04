@@ -60,7 +60,7 @@ On Fly the connector reads its token from that secret (`connectors.github.token_
 
 There is no Flux connector yet: `flux_id` and `flux_ref` are described as set by a connector, but no code reads Flux, so nothing needs a Flux secret. When one is built, its secret goes on `eyra-atlas` the same way.
 
-### Move prod's data, and switch
+### Move prod's data, and switch (IS-Atlas-90)
 
 Prod's data is real. Its move is checked item by item, and the Mac's prod keeps its data until the check passes. These steps run before the switch pull request is merged, while `env/prod.json` still says `"in_use": false`.
 
@@ -73,7 +73,7 @@ Prod's data is real. Its move is checked item by item, and the Mac's prod keeps 
    It checks that this build's description describes all of that data. It counts the items per kind (`assignments` among them) and the links per relation (`links assignment` and `links accepted_by` among them).
 3. **The move:** the same without `--dry-run`. It checks every file of `rela/` and `beam/` on Fly against what it sent, by SHA-256: every item, every Assignment, every link (accepted_by too), and State's own record of who set each link. Then it compares the counts. What Fly held before stays in `/data/before-move/`.
 4. **Check through Control on Fly:** `fly/smoke.sh prod` counts every kind as Control on Fly reads it.
-5. **Switch prod's clients** with the switch pull request (IS-Atlas-79): `env/prod.json` gets `"fly": {"in_use": true}` and `"control": {"port": 7593}`, the tunnel's end on this Mac, and loses the Mac-only settings (`rela`, `state`, `connectors`). From then on `atlas` opens the tunnel to `eyra-atlas` like `atlas tui --env test` does.
+5. **Switch prod's clients** with the switch pull request (IS-Atlas-90): `env/prod.json` gets `"fly": {"in_use": true}` and `"control": {"port": 7593}`, the tunnel's end on this Mac, and loses the Mac-only settings (`rela`, `state`, `connectors`). From then on `atlas` opens the tunnel to `eyra-atlas` like `atlas tui --env test` does.
 6. **If anything is wrong before the switch:** `atlas restart` starts the Mac's prod again on its own data, which nothing changed. After the switch, going back is reverting that pull request, then `atlas restart`: the Mac's prod data is still the one from before the move.
 
 After the switch, keep `~/.local/share/atlas/prod` and the backup as they are. `atlas fetch-from-fly --env prod --to <folder>` makes a fresh backup from Fly at any time (about a minute in which prod serves nothing). A migration on prod runs as on test: `docs/guides/test-on-fly.md`, "A migration".
