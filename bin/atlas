@@ -17,6 +17,8 @@
 #   atlas install      link `atlas` into ~/.local/bin (from the main clone only)
 #   atlas up           run the core in the foreground (what `atlas` starts in the background)
 #   atlas e2e [uc-atlas-01 ...]  the end-to-end test, on a private test instance of its own
+#   atlas runtime       start this machine's Runtime node (local runtime.json required)
+#   atlas runtime-stop, atlas runtime-status
 #   atlas rela-status, atlas rela-stop
 #
 #   atlas help [<kind>] [--json]    the agents' commands, and every kind from rela's description:
@@ -143,6 +145,11 @@ fly_in_use() {
   if command -v plutil >/dev/null; then [ "$(plutil -extract fly.in_use raw -o - "$settings" 2>/dev/null)" != false ]
   else [ "$(jq -r '.fly.in_use' "$settings")" != false ]; fi
 }
+
+case "$cmd" in
+  runtime|runtime-stop|runtime-status)
+    exec python3 "$root/tools/runtime.py" "$cmd" "$root" "$settings" "$env" ;;
+esac
 
 port="$(setting control.port)"
 fly_app=""

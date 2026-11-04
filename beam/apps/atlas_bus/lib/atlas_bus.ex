@@ -27,10 +27,31 @@ defmodule AtlasBus do
   alias AtlasBus.{Envelope, Router}
 
   @doc "Make the calling process the endpoint `name`; replies addressed to `name` come here."
-  defdelegate attach(name), to: Router
+  def attach(name) do
+    if AtlasBus.Link.client?() do
+      machine = AtlasBus.Link.settings()["machine"]
+
+      if AtlasBus.Link.allowed?(name, machine) do
+        with :ok <- Router.attach(name), do: AtlasBus.Link.Client.sync(self())
+      else
+        {:error, :endpoint_not_allowed}
+      end
+    else
+      Router.attach(name)
+    end
+  end
 
   @doc "Send the calling process every hint (a `stored`) of kind `kind`."
-  defdelegate listen(kind), to: Router
+  def listen(kind) do
+    with :ok <- Router.listen(kind) do
+      if AtlasBus.Link.client?(), do: AtlasBus.Link.Client.sync(self()), else: :ok
+    end
+  end
+
+  @doc "The attached endpoint names (envelopes only, no layer knowledge)."
+  def endpoints do
+    Registry.select(AtlasBus.Endpoints, [{{:"$1", :_, :_}, [], [:"$1"]}])
+  end
 
   @doc """
   Put a message on the Bus from the calling process, which must be attached.

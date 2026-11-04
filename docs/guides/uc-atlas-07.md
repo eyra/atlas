@@ -28,7 +28,7 @@ Test and prod have no `runtime` yet, so Runtime there does nothing; IS-Atlas-18 
 | Silent | `echo silent > <stub_dir>/runner` | After the silence limit: State Ended, Why `silent for 3 s: no activity since …`. Then a new turn, `-2`, since runner still owns it. |
 | A crash | `echo "crash once" > <stub_dir>/runner` | The turn ends: `the agent crashed: :crashed`, and the next starts (`crash` makes every next turn crash too). |
 | Another owner | `atlas set UC-Atlas-NN assigned_to=<another agent> --cause …` | The turn ends: `AS-UC-Atlas-NN is no longer runner's to work on`, and no new one starts. |
-| Restarted | stop the core while a turn runs, start it again | The turn State had running ends: `no process runs it on <machine> any more (Runtime restarted)`, and a new one starts. |
+| Restarted | stop the Runtime node while a turn runs, start it again | The turn State had running ends: `no process runs it on <machine> any more (Runtime restarted)`, and a new one starts. |
 
 ## How it works
 
@@ -133,10 +133,19 @@ In the test environment, every browsing page (the start page, a list, a fact) ha
 |  | Put it back to work | activity again |
 | any page | Drop the next hint | a client showing the next change sees it at its reconcile (within 5 s), not by hint |
 |  | Take Control offline for 10 s | every client shows it is not connected, and comes back by itself |
-|  | Restart the node | `atlas restart`: clients lose Control and come back; Runtime ends the turns that ran (`Runtime restarted`) and starts them again; Flow starts every open fact's process again |
+|  | Restart the node | `atlas restart`: clients lose Control and come back; the separate Runtime reconnects its Bus link and renews its turns; Flow starts every open fact's process again |
 
 - **Each opens a confirm** that says what will be seen; `y` causes it, and Control says what happened as a notice.
 - **The stand-in only:** an agent's modes are offered for agents whose port is `stub`, never for a real agent (`claude`).
 - **Melle can test:** in the TUI on a private test instance (or Fly test once Runtime runs agents there), press `!` on a page. The e2e scenario `uc-atlas-07-failures` walks every row of the table with a stand-in agent, `tester`.
 - **Not here:** what an owner that stops working leads to (a decision, IS-Atlas-22) and Melle offline as a fact (IS-Atlas-25). "Go offline" here is Control unreachable for a while.
 
+
+## A separate Runtime machine (IS-Atlas-91)
+
+The private e2e instance now runs Bus and Runtime in a separate OS process over a
+loopback Bus link. UC-07 covers failure actions across that link, a core restart and
+reconnect, and a separate Runtime restart recovering orphaned turns. Deployed link
+listeners remain disabled. See [Runtime node setup](runtime-node.md).
+
+<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0015).</sub>

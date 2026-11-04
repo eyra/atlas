@@ -23,7 +23,7 @@ defmodule AtlasE2E.Instance do
   def start do
     dir = Path.join(System.tmp_dir!(), "atlas-e2e-#{System.os_time(:millisecond)}")
     File.mkdir_p!(dir)
-    [rela_port, control_port] = free_ports(2)
+    [rela_port, control_port, link_port] = free_ports(3)
 
     bin =
       System.get_env("ATLAS_E2E_RELA_BIN") ||
@@ -36,6 +36,7 @@ defmodule AtlasE2E.Instance do
 
     settings = %{
       "env" => "test",
+      "bus_link" => %{"port" => link_port},
       "tui_user" => "melle",
       "browser" => browser,
       "control" => %{"host" => "127.0.0.1", "port" => control_port},
@@ -87,7 +88,21 @@ defmodule AtlasE2E.Instance do
 
     File.mkdir_p!(Path.join(dir, "stub"))
     file = Path.join(dir, "test.json")
-    File.write!(file, JSON.encode!(settings))
+    runtime_file = Path.join(dir, "runtime.json")
+
+    runtime_settings = %{
+      "env" => "test",
+      "runtime" => settings["runtime"],
+      "bus_link" => %{
+        "mode" => "client",
+        "host" => "127.0.0.1",
+        "port" => link_port,
+        "machine" => "e2e"
+      }
+    }
+
+    File.write!(runtime_file, JSON.encode!(runtime_settings))
+    File.write!(file, JSON.encode!(Map.delete(settings, "runtime")))
 
     instance = %__MODULE__{
       root: @root,
@@ -95,11 +110,19 @@ defmodule AtlasE2E.Instance do
       file: file,
       settings: settings,
       # The core runs as `atlas up` runs it, in Mix's dev environment.
-      env: [{"ATLAS_ENV_FILE", file}, {"ATLAS_NO_UPDATE", "1"}, {"MIX_ENV", "dev"}]
+      env: [
+        {"ATLAS_ENV_FILE", file},
+        {"ATLAS_NO_UPDATE", "1"},
+        {"MIX_ENV", "dev"},
+        {"ATLAS_RUNTIME_HOME", Path.join(dir, "runtime-node")},
+        {"ATLAS_RUNTIME_FILE", runtime_file},
+        {"ATLAS_BUS_LINK_TOKEN", JSON.encode!(%{"e2e" => "e2e-private-link"})}
+      ]
     }
 
     # `atlas restart` starts rela when it does not answer, then the core, and waits for it.
     :ok = atlas!(instance, ["restart", "--env", "test"])
+    :ok = start_runtime(instance)
     instance
   end
 
@@ -109,7 +132,25 @@ defmodule AtlasE2E.Instance do
   @doc "Start the core again, as `atlas restart` does."
   def start_core(instance), do: atlas!(instance, ["restart", "--env", "test"])
 
+  def start_runtime(instance) do
+    runtime = %{
+      instance
+      | env:
+          List.keystore(
+            instance.env,
+            "ATLAS_BUS_LINK_TOKEN",
+            0,
+            {"ATLAS_BUS_LINK_TOKEN", "e2e-private-link"}
+          )
+    }
+
+    atlas!(runtime, ["runtime", "--env", "test"])
+  end
+
+  def stop_runtime(instance), do: atlas!(instance, ["runtime-stop", "--env", "test"])
+
   def stop(instance) do
+    stop_runtime(instance)
     atlas(instance, ["stop", "--env", "test"])
     atlas(instance, ["rela-stop", "--env", "test"])
     :ok
@@ -117,7 +158,7 @@ defmodule AtlasE2E.Instance do
 
   @doc "The files worth keeping when a run fails: the core's log and rela's."
   def logs(instance),
-    do: Path.wildcard(Path.join(instance.dir, "*.log"))
+    do: Path.wildcard(Path.join(instance.dir, "**/*.log"))
 
   @doc "The web addresses the TUIs opened, through the stand-in browser, in order."
   def opened(instance) do

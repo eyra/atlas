@@ -54,28 +54,37 @@ defmodule AtlasBus.Router do
   def init(:ok), do: {:ok, %{drop_hints: 0}}
 
   @impl true
-  def handle_call({:route, %Envelope{class: class} = envelope, content}, _from, state)
-      when class in @to_store do
+  def handle_call({:route, envelope, content}, _from, state) do
+    if AtlasBus.Link.client?() do
+      AtlasBus.Link.Client.forward(envelope, content)
+      {:reply, :ok, state}
+    else
+      route_local(envelope, content, state)
+    end
+  end
+
+  def handle_call({:drop_hints, count}, _from, state),
+    do: {:reply, :ok, %{state | drop_hints: count}}
+
+  defp route_local(%Envelope{class: class} = envelope, content, state)
+       when class in @to_store do
     store = AtlasBus.store()
     deliver([endpoint(store)], %{envelope | address: store}, content)
     {:reply, :ok, state}
   end
 
-  def handle_call({:route, %Envelope{class: class} = envelope, content}, _from, state)
-      when class in @to_address or class in @faults do
+  defp route_local(%Envelope{class: class} = envelope, content, state)
+       when class in @to_address or class in @faults do
     deliver([endpoint(envelope.address)], envelope, content)
     {:reply, :ok, state}
   end
 
-  def handle_call({:route, %Envelope{class: class} = envelope, content}, _from, state)
-      when class in @acknowledged_and_hinted do
+  defp route_local(%Envelope{class: class} = envelope, content, state)
+       when class in @acknowledged_and_hinted do
     {listeners, state} = hint_receivers(state, envelope.kind)
     deliver([endpoint(envelope.address) | listeners], envelope, content)
     {:reply, :ok, state}
   end
-
-  def handle_call({:drop_hints, count}, _from, state),
-    do: {:reply, :ok, %{state | drop_hints: count}}
 
   defp known_class(class) do
     if class in classes(), do: :ok, else: {:error, {:unknown_class, class}}

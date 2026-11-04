@@ -39,7 +39,7 @@ defmodule AtlasRuntime.Engine do
 
   @impl true
   def init(opts) do
-    :ok = AtlasBus.attach("runtime")
+    :ok = AtlasBus.attach("runtime@" <> Keyword.fetch!(opts, :machine))
     send(self(), :round)
 
     {:ok,
@@ -99,8 +99,12 @@ defmodule AtlasRuntime.Engine do
 
     state =
       case Talk.read("_description", %{}) do
-        %{"description" => description} -> reconcile(description, state)
-        _ -> state
+        %{"description" => description} ->
+          reconcile(description, state)
+
+        other ->
+          Logger.warning("runtime: description unavailable: #{inspect(other)}")
+          state
       end
 
     %{state | timer: Process.send_after(self(), :round, state.every)}

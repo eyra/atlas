@@ -29,7 +29,7 @@ defmodule AtlasRuntime.Settings do
       stub_dir: settings["stub_dir"],
       turns_dir: settings["turns_dir"] || Path.join(System.tmp_dir!(), "atlas-turns"),
       crash_pause: seconds(settings["crash_pause_seconds"], 10),
-      env_file: System.get_env("ATLAS_ENV_FILE"),
+      env_file: System.get_env("ATLAS_CLIENT_ENV_FILE") || System.get_env("ATLAS_ENV_FILE"),
       atlas_bin: System.get_env("ATLAS_ROOT") && Path.join(System.get_env("ATLAS_ROOT"), "bin")
     ]
   end
