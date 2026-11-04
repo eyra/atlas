@@ -13,6 +13,20 @@ turn read refuses before ordinary storage. Only confirmed absence permits new tu
 creation; successfully read unfenced turns retain compatibility. IS-108 introduces
 their Runtime fences.
 
+Confirmed absence alone does not authorize deleting a turn. State retains deletion
+provenance in its private ledger: the full effective request (environment, Bus
+sender, kind, payload) and the authorized machine/attempt/version. After ordinary
+validation, this intent is synced immediately before the backend delete. Stored
+acknowledgement and completion evidence are recorded together. Exact retries recover
+the original acknowledgement/position after confirmed absence; a fresh envelope for
+the same proven request can acknowledge absence without another backend mutation.
+A crash after backend commit but before acknowledgement is recovered from the
+synced intent. Unavailable/failed reads still refuse before any cached answer.
+Changed sender/target/payload cannot borrow an old request id or deletion proof;
+a reappearing target or replacement attempt cannot receive an old deletion. Old
+unbound ledger entries are not guessed into authority. This adds private ledger
+keys, not schema entities or a data conversion.
+
 Interaction submission also carries by, asserted by an admitted Control session.
 State refuses injected actor/environment/timestamp/position values. This retains
 the existing admitted-client identity model. Local BEAM applications are trusted.

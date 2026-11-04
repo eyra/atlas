@@ -137,9 +137,12 @@ defmodule AtlasState.Guidance do
   end
 
   defp authorize_fenced_turn(rela, d, e, content, turn) do
+    op = content["op"]
+
     with key when is_binary(key) <- content["key"],
          values when is_map(values) <- content["values"] || %{},
-         {:ok, existing} <- existing_turn(rela, d, turn, key, content["op"]) do
+         {:ok, fact} <- existing_turn(rela, d, turn, key, op) do
+      existing = fact.properties
       fenced = Map.has_key?(values, turn["attempt"]) or Map.has_key?(existing, turn["attempt"])
       machine = existing[turn["machine"]] || values[turn["machine"]]
 
@@ -156,9 +159,10 @@ defmodule AtlasState.Guidance do
 
       if not fenced or
            (unchanged_fence and (runtime?(e.sender, machine, content["key"]) or outcome_only)),
-         do: :ok,
+         do: if(op == "delete", do: {:delete, deletion_target(d, fact)}, else: :ok),
          else: {:error, :turn_authority}
     else
+      {:error, :not_found} when op == "delete" -> :absent_delete
       {:error, _} = error -> error
       _ -> {:error, :invalid_operation}
     end
@@ -168,10 +172,21 @@ defmodule AtlasState.Guidance do
   # previously established fence and then fall through to an ordinary PATCH/DELETE.
   defp existing_turn(rela, d, turn, key, op) do
     case Rela.get(rela, kind_plural(d, turn["kind"]), key) do
-      {:ok, fact} -> {:ok, fact.properties}
-      {:error, :not_found} when op == "create" -> {:ok, %{}}
+      {:ok, fact} -> {:ok, fact}
+      {:error, :not_found} when op == "create" -> {:ok, %{properties: %{}, version: nil}}
       {:error, _} = error -> error
     end
+  end
+
+  @doc "The incarnation authorized for deletion, independent of a later absence."
+  def deletion_target(d, fact) do
+    turn = d["runtime"]["turn"]
+
+    %{
+      machine: fact.properties[turn["machine"]],
+      attempt: fact.properties[turn["attempt"]],
+      version: fact[:version]
+    }
   end
 
   defp operation(rela, d, "execution", e, %{"op" => "register_execution", "values" => v})

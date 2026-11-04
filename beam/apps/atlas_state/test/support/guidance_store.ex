@@ -4,15 +4,26 @@ defmodule AtlasState.GuidanceStore do
   def start(path, description),
     do:
       Agent.start_link(fn ->
-        %{path: path, description: description, barrier: nil, faults: %{}, mutations: []}
+        %{
+          path: path,
+          description: description,
+          barrier: nil,
+          delete_barrier: nil,
+          faults: %{},
+          mutations: []
+        }
       end)
 
   def fail_next_get(pid, plural, key, reason),
     do: Agent.update(pid, &%{&1 | faults: Map.put(&1.faults, {plural, key}, reason)})
 
+  def fail_next_delete(pid, plural, key, reason),
+    do: Agent.update(pid, &%{&1 | faults: Map.put(&1.faults, {:delete, plural, key}, reason)})
+
   def mutations(pid), do: Agent.get(pid, & &1.mutations)
 
   def barrier(pid, owner), do: Agent.update(pid, &%{&1 | barrier: owner})
+  def delete_barrier(pid, owner), do: Agent.update(pid, &Map.put(&1, :delete_barrier, owner))
 
   defp facts(s) do
     case File.read(s.path) do
@@ -107,14 +118,33 @@ defmodule AtlasState.GuidanceStore do
   @impl true
   def delete(pid, plural, key, _version) do
     Agent.get_and_update(pid, fn s ->
-      all = facts(s)
-
-      if get_in(all, [plural, key]) do
-        File.write!(s.path, JSON.encode!(Map.update!(all, plural, &Map.delete(&1, key))), [:sync])
-        {:ok, %{s | mutations: [{:delete, plural, key} | s.mutations]}}
-      else
-        {{:error, :not_found}, s}
+      case Map.pop(s.faults, {:delete, plural, key}) do
+        {nil, _} -> delete_fact(s, plural, key)
+        {reason, faults} -> {{:error, reason}, %{s | faults: faults}}
       end
     end)
+  end
+
+  defp delete_fact(s, plural, key) do
+    all = facts(s)
+
+    if get_in(all, [plural, key]) do
+      File.write!(s.path, JSON.encode!(Map.update!(all, plural, &Map.delete(&1, key))), [:sync])
+
+      if s[:delete_barrier] do
+        send(s.delete_barrier, {:deleted, self(), key})
+
+        receive do
+          :release_delete -> :ok
+        end
+      end
+
+      {:ok,
+       s
+       |> Map.put(:delete_barrier, nil)
+       |> Map.put(:mutations, [{:delete, plural, key} | s.mutations])}
+    else
+      {{:error, :not_found}, s}
+    end
   end
 end

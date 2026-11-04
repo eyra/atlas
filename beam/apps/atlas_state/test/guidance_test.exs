@@ -537,6 +537,151 @@ defmodule AtlasState.GuidanceTest do
     assert GuidanceStore.mutations(c.store) == []
   end
 
+  test "fenced delete exact replay preserves acknowledgement across restart", c do
+    assert_delete_replay(c, "run-a")
+  end
+
+  test "legacy delete exact replay preserves acknowledgement across restart", c do
+    assert {:ok, []} =
+             Rela.create(
+               c.rela,
+               "runs",
+               "run-legacy",
+               %{"host" => "box", "status" => "ended"},
+               %{}
+             )
+
+    assert_delete_replay(c, "run-legacy")
+  end
+
+  defp assert_delete_replay(c, key) do
+    content = %{"op" => "delete", "key" => key, "values" => %{}}
+    first = as("runtime@box", "unused", content, kind: "run", id: "delete-lost")
+    assert elem(first, 0) == "stored"
+    stop_supervised!(AtlasState.Server)
+    Agent.stop(c.store)
+    {:ok, fresh} = GuidanceStore.start(Path.join(c.dir, "facts.json"), c.d)
+    start_supervised!({AtlasState.Server, rela: {GuidanceStore, fresh}, data_dir: c.dir})
+    assert as("runtime@box", "unused", content, kind: "run", id: "delete-lost") == first
+
+    for reason <- [:unavailable, {:failed, "503"}] do
+      GuidanceStore.fail_next_get(fresh, "runs", key, reason)
+
+      assert {"refused", _, _} =
+               as("runtime@box", "unused", content, kind: "run", id: "delete-lost")
+    end
+
+    assert as("runtime@box", "unused", content, kind: "run", id: "delete-lost") == first
+
+    assert {"refused", _, _} =
+             as("runtime@other", "unused", content, kind: "run", id: "delete-lost")
+
+    assert {"refused", _, _} = request("unused", content, kind: "run", id: "delete-lost")
+
+    assert {"refused", _, _} =
+             as("runtime@other", "unused", content, kind: "run", id: "other-fresh")
+
+    assert {"refused", _, _} = request("unused", content, kind: "run", id: "control-fresh")
+
+    assert {"stored", _, _} =
+             as("runtime@box", "unused", content, kind: "run", id: "delete-fresh")
+
+    assert GuidanceStore.mutations(fresh) == []
+  end
+
+  test "a completed delete id cannot acknowledge another authorized target or payload", c do
+    content = %{"op" => "delete", "key" => "run-a", "values" => %{}}
+
+    assert {"stored", _, _} =
+             as("runtime@box", "unused", content, kind: "run", id: "delete-bound")
+
+    assert {:ok, []} =
+             Rela.create(
+               c.rela,
+               "runs",
+               "run-next",
+               %{"host" => "box", "fence" => "attempt-next", "status" => "live"},
+               %{}
+             )
+
+    assert {"refused", _, _} =
+             as("runtime@box", "unused", %{content | "key" => "run-next"},
+               kind: "run",
+               id: "delete-bound"
+             )
+
+    assert {"refused", _, _} =
+             as("runtime@box", "unused", Map.put(content, "cause", "changed"),
+               kind: "run",
+               id: "delete-bound"
+             )
+
+    assert {:ok, _} = Rela.get(c.rela, "runs", "run-next")
+    assert length(GuidanceStore.mutations(c.store)) == 1
+  end
+
+  test "authorized delete committed before its acknowledgement recovers without another deletion",
+       c do
+    content = %{"op" => "delete", "key" => "run-a", "values" => %{}}
+    GuidanceStore.delete_barrier(c.store, self())
+
+    task =
+      Task.async(fn ->
+        :ok = AtlasBus.attach("runtime@box")
+        request("unused", content, kind: "run", id: "delete-commit-gap")
+      end)
+
+    assert_receive {:deleted, store, "run-a"}, 2_000
+    Process.unlink(c.server)
+    Process.exit(c.server, :kill)
+    send(store, :release_delete)
+    stop_supervised!(AtlasState.Server)
+    Task.shutdown(task, :brutal_kill)
+    Agent.stop(c.store)
+    {:ok, fresh} = GuidanceStore.start(Path.join(c.dir, "facts.json"), c.d)
+    start_supervised!({AtlasState.Server, rela: {GuidanceStore, fresh}, data_dir: c.dir})
+    recovered = as("runtime@box", "unused", content, kind: "run", id: "delete-commit-gap")
+    assert elem(recovered, 0) == "stored"
+    assert GuidanceStore.mutations(fresh) == []
+    assert as("runtime@box", "unused", content, kind: "run", id: "delete-commit-gap") == recovered
+
+    assert {:ok, []} =
+             Rela.create(
+               {GuidanceStore, fresh},
+               "runs",
+               "run-a",
+               %{"host" => "box", "fence" => "replacement", "status" => "live"},
+               %{}
+             )
+
+    assert {"refused", _, _} =
+             as("runtime@box", "unused", content, kind: "run", id: "delete-commit-gap")
+
+    assert GuidanceStore.mutations(fresh) == []
+  end
+
+  test "pending deletion authorization cannot transfer to a replacement attempt", c do
+    content = %{"op" => "delete", "key" => "run-a", "values" => %{}}
+    GuidanceStore.fail_next_delete(c.store, "runs", "run-a", :unavailable)
+
+    assert {"refused", _, _} =
+             as("runtime@box", "unused", content, kind: "run", id: "pending-delete")
+
+    assert GuidanceStore.mutations(c.store) == []
+    assert {:ok, []} = Rela.change(c.rela, "runs", "run-a", %{"fence" => "replacement"}, nil, %{})
+    stop_supervised!(AtlasState.Server)
+    start_supervised!({AtlasState.Server, rela: c.rela, data_dir: c.dir})
+
+    assert {"refused", _, _} =
+             as("runtime@box", "unused", content, kind: "run", id: "pending-delete")
+
+    assert {"refused", _, _} =
+             as("runtime@box", "unused", content, kind: "run", id: "fresh-pending-delete")
+
+    refute Enum.any?(GuidanceStore.mutations(c.store), &(elem(&1, 0) == :delete))
+    assert {:ok, %{properties: %{"fence" => "replacement"}}} = Rela.get(c.rela, "runs", "run-a")
+  end
+
   test "P2 replay and interaction pages do not embed retained evidence", c do
     content = interaction(c.execution)
     {"stored", %{"fact" => f}, _} = request("interaction", content)
