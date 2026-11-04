@@ -49,8 +49,11 @@ defmodule AtlasRuntime.Agent.Claude do
     :exit, _ -> :ok
   end
 
-  @doc "The command line for a turn: `{executable, args}` (for tests and the design)."
-  def command(turn, settings) do
+  @doc """
+  The command line for a turn: `{executable, args}` (for tests and the design). `forms` is
+  what `forms/2` read from `atlas help`, for the rules.
+  """
+  def command(turn, settings, forms \\ "") do
     allowed =
       for tool <- String.split(settings["allowed"] || "get list set"),
           do: "Bash(atlas #{tool}:*)"
@@ -62,7 +65,7 @@ defmodule AtlasRuntime.Agent.Claude do
         ["--permission-mode", "dontAsk", "--no-session-persistence"] ++
         ["--model", settings["model"] || "sonnet"] ++
         ["--max-budget-usd", to_string(settings["budget_usd"] || 0.5)] ++
-        ["--append-system-prompt", rules(turn)]
+        ["--append-system-prompt", rules(turn, forms)]
 
     {settings["command"], args}
   end
@@ -72,10 +75,71 @@ defmodule AtlasRuntime.Agent.Claude do
       "Start with `atlas get #{turn.item}`: its What to do part says what is expected of you."
   end
 
-  defp rules(turn) do
+  defp rules(turn, forms) do
     "You act on Atlas only through the atlas commands you are allowed. Do what is " <>
       "expected of you on #{turn.item}, then end your turn with one change on it, with a " <>
-      "cause that says what you did and why (`atlas set #{turn.item} … --cause \"…\"`), and stop."
+      "cause that says what you did and why (`atlas set #{turn.item} … --cause \"…\"`), and stop." <>
+      forms
+  end
+
+  @doc """
+  How to call the allowed `atlas` commands, and what the item's kind has (IS-Atlas-95), as
+  `atlas help` says it: its usage lines for those commands (`atlas get --help`), and the
+  kind's section (`atlas help <kind>`: its fields, and how a link such as `assigned_to` is
+  set). Read through the build's `atlas`, so nothing of it is written here. Empty where
+  `atlas` does not answer: the turn then runs with the rules alone.
+  """
+  def forms(config, kind) do
+    allowed = String.split(config[:allowed] || "get list set")
+
+    usage =
+      case Broker.run(["get", "--help"], config) do
+        {out, 0} -> usage_lines(out, allowed)
+        _ -> []
+      end
+
+    section =
+      case kind && Broker.run(["help", kind], config) do
+        {out, 0} -> out |> String.split("\n") |> Enum.drop_while(&(&1 =~ ~r/^Kinds |^$/))
+        _ -> []
+      end
+
+    Enum.join(
+      [
+        if(usage != [],
+          do:
+            "\n\nThe atlas commands you may use (from `atlas help`):\n" <> Enum.join(usage, "\n")
+        ),
+        if(section != [],
+          do:
+            "\n\nWhat your item's kind, #{kind}, has (from `atlas help #{kind}`):\n" <>
+              String.trim_trailing(Enum.join(section, "\n"))
+        )
+      ],
+      ""
+    )
+  end
+
+  # Its usage block (before the kinds): the lines of the allowed commands, each with the
+  # lines that go on from it (indented, no `atlas` of their own).
+  defp usage_lines(out, allowed) do
+    out
+    |> String.split("\n")
+    |> Enum.take_while(&(not String.starts_with?(&1, "Kinds ")))
+    |> Enum.reduce({[], false}, fn line, {kept, keep?} ->
+      case Regex.run(~r/^\s*atlas\s+(\S+)/, line) do
+        [_, command] ->
+          {if(command in allowed, do: [line | kept], else: kept), command in allowed}
+
+        nil when keep? and line != "" ->
+          {[line | kept], true}
+
+        nil ->
+          {kept, false}
+      end
+    end)
+    |> elem(0)
+    |> Enum.reverse()
   end
 
   @impl GenServer
@@ -83,18 +147,17 @@ defmodule AtlasRuntime.Agent.Claude do
     settings = Keyword.get(opts, :agent, %{})
     folder = Path.join(Keyword.fetch!(opts, :turns_dir), turn.key)
     File.mkdir_p!(folder)
-    {command, args} = command(turn, settings)
+    command = settings["command"]
 
     # A script run by node (Claude Code's cli.js) when the settings name node, so the
     # process's PATH need not hold node either.
-    {exe, args} =
+    {exe, first} =
       case settings["node"] do
         node when is_binary(node) ->
-          {node, [command | args]}
+          {node, [command]}
 
         _ ->
-          {command && (System.find_executable(command) || (File.exists?(command) && command)),
-           args}
+          {command && (System.find_executable(command) || (File.exists?(command) && command)), []}
       end
 
     broker = %{
@@ -108,8 +171,9 @@ defmodule AtlasRuntime.Agent.Claude do
     with true <- is_binary(exe) and File.exists?(exe),
          {:ok, %{port: port}} <- Broker.open(broker),
          :ok <- wrapper(folder, opts, port) do
+      {_, args} = command(turn, settings, forms(broker, turn[:kind]))
       # Its stdin is /dev/null (else Claude Code waits 3 s for one); exec keeps the pid.
-      args = ["-c", ~s(exec "$0" "$@" < /dev/null), exe | args]
+      args = ["-c", ~s(exec "$0" "$@" < /dev/null), exe | first ++ args]
 
       port =
         Port.open({:spawn_executable, "/bin/sh"}, [

@@ -47,7 +47,9 @@ defmodule AtlasRuntime.Turn do
 
   @impl true
   def handle_continue(:start, turn) do
-    case turn.port.start(%{key: turn.key, item: turn.item, agent: turn.agent}, turn.port_opts) do
+    started = %{key: turn.key, item: turn.item, agent: turn.agent, kind: turn[:kind]}
+
+    case turn.port.start(started, turn.port_opts) do
       {:ok, agent} ->
         ref = Process.monitor(agent)
         now = now()

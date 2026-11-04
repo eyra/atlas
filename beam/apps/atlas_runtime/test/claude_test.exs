@@ -214,6 +214,84 @@ defmodule AtlasRuntime.ClaudeTest do
     assert File.read!(Claude.commands(folder)) =~ "atlas\\ get\\ X"
   end
 
+  # A stand-in for the build's `atlas` that answers help as the real one does (its output,
+  # taken from a private instance, 4 Nov 2026).
+  defp helpful_atlas(dir) do
+    path = Path.join(dir, "helpful-atlas")
+
+    File.write!(path, ~S"""
+    #!/bin/sh
+    case "$1 $2" in
+      "get --help") cat <<'EOF'
+        atlas put  <kind> [--in <key>] --<field> <text> ...  create; prints the new item
+        atlas set  <key> <field>=<text> ...                  change; prints the item
+                   <association>=<key>                       link (empty: remove the link)
+                   --cause <text>                            why (put and set), kept with it
+        atlas get  <key>                                     one item, with what hangs under it
+        atlas list <kind> [--in <key>]                       the items of a kind (under <key>)
+        atlas delete <key>                                   delete; refused while anything hangs under it
+        atlas tools                                          the agent's tools: Control's actions
+        atlas plan --on <key or path> <request ...>          what the agent proposes; writes nothing
+
+    Kinds (from rela's description, through Control):
+
+    Widget (widget)
+      Kind: widget
+    EOF
+      ;;
+      "help card") cat <<'EOF'
+    Kinds (from rela's description, through Control):
+
+    Card (card)
+      Kind: card
+      Fields:
+        of: text; required; asked on create
+      Links: owned_by: to clerk, at most one; set owned_by=<key>, empty removes it
+    EOF
+      ;;
+      *) echo "atlas: no" >&2; exit 2 ;;
+    esac
+    """)
+
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  test "its rules show the allowed atlas commands and the item's kind, as atlas help says",
+       %{tmp_dir: dir} do
+    config = %{atlas: helpful_atlas(dir), env_file: "/i.json", agent: "trial", folder: dir}
+    forms = Claude.forms(config, "card")
+
+    # The usage lines of get, list and set, and what goes on from set's line.
+    for line <- [
+          "atlas set  <key> <field>=<text> ...",
+          "<association>=<key>                       link (empty: remove the link)",
+          "--cause <text>                            why (put and set), kept with it",
+          "atlas get  <key>",
+          "atlas list <kind> [--in <key>]"
+        ],
+        do: assert(forms =~ line, line)
+
+    # Not the commands the turn may not use, nor the other kinds.
+    for line <- ["atlas put", "atlas delete", "atlas tools", "atlas plan", "Widget", "Kinds ("],
+        do: refute(forms =~ line, line)
+
+    # The kind's part, links included: how a link is set.
+    assert forms =~ "What your item's kind, card, has (from `atlas help card`):"
+    assert forms =~ "Links: owned_by: to clerk, at most one; set owned_by=<key>"
+
+    # In the turn's rules, after what is expected of it.
+    {_, args} = Claude.command(@turn, %{"command" => "claude"}, forms)
+    rules = Enum.at(args, Enum.find_index(args, &(&1 == "--append-system-prompt")) + 1)
+    assert rules =~ ~r/and stop\.\n\nThe atlas commands you may use \(from `atlas help`\):\n/
+    assert String.ends_with?(rules, "empty removes it")
+
+    # A turn whose atlas does not answer runs with the rules alone.
+    assert Claude.forms(config, "nothing") =~ "atlas set"
+    refute Claude.forms(config, "nothing") =~ "What your item's kind"
+    assert Claude.forms(%{config | atlas: Path.join(dir, "no-atlas")}, "card") == ""
+  end
+
   test "its command: confined, headless, with the agent's model and budget" do
     {exe, args} =
       Claude.command(@turn, %{"command" => "claude", "model" => "sonnet", "budget_usd" => 0.5})
