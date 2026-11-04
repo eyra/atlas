@@ -49,3 +49,29 @@ Test and prod have no `runtime` yet, so Runtime there does nothing; IS-Atlas-18 
 - **Control:** the kinds page says when a kind is not by hand. **Agent:** such kinds are no tools.
 - **The end-to-end test:** `e2e/scenarios/uc-atlas-07.exs`; the private instance runs Runtime with the stub agent `runner`.
 - **Prod at merge:** `atlas restart` (rela gets the turn kind). Runtime does nothing there until IS-Atlas-18 gives a machine its agents.
+
+## IS-Atlas-18: Claude Code headless as a port
+
+Runtime's second port, `claude`, runs one Claude Code process per turn, headless, confined to the `atlas` commands of the machine's own instance. The design part, with the first real turns: `~/agent-reports/atlas/2026-11-04-is-18-claude-port-design.md`.
+
+- **The command:** `claude -p "<prompt>" --output-format stream-json --verbose --restricted --strict-mcp-config --tools Bash --allowedTools "Bash(atlas get:*)" "Bash(atlas list:*)" "Bash(atlas set:*)" --permission-mode dontAsk --no-session-persistence --model <model> --max-budget-usd <budget> --append-system-prompt "<rules>"`, with stdin from `/dev/null`.
+- **Its folder:** a fresh one per turn, `turns_dir/<turn key>`. The raw stream is kept there in `stream.jsonl`.
+- **Its environment:** cleared down to a few names (home, user, language), plus `ATLAS_AS=<agent>` and the instance's `ATLAS_ENV_FILE`. Its PATH holds two folders:
+  - `bin`, with only a wrapper `atlas`: it refuses `--env`, another `ATLAS_ENV_FILE`, and any command but get, list and set;
+  - `sys`, with only what Claude Code needs for itself: on macOS `security`, for its keychain login.
+- **Its stream:** every line is activity for the lease. Exit 0 ends the turn with its result; any other exit is a crash. A stop sends SIGTERM, then SIGKILL after 5 s.
+- **No default command:** nothing runs Claude Code unless an agent's settings name it.
+
+```json
+"runtime": {
+  "machine": "macbook", "turns_dir": "…/turns",
+  "agents": { "trial": { "port": "claude", "command": "…/claude", "model": "sonnet", "budget_usd": 0.5,
+                          "silence_seconds": 120, "max_seconds": 300, "turn_limit": 1 } }
+}
+```
+
+- **Repeated crashes**, read from the turns in State:
+  - the next turn waits a pause that doubles with each crash in a row (`crash_pause_seconds`, 10);
+  - after 3 crashes in 10 minutes on a machine, the agent gets no more turns there, and Runtime puts `cannot_run` on the agent ("on macbook since …: 3 crashes in 10 minutes"), cleared once that is no longer so.
+- **`turn_limit`:** no more turns for that agent on that machine than that, ever. A trial's one.
+- **Tests and CI** use a fake `claude` that prints the same stream. The e2e keeps the stub.
