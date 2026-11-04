@@ -13,7 +13,7 @@ defmodule AtlasRuntime.Agent.Claude do
     `ATLAS_ENV_FILE`, and any command but get, list and set), never prod or test;
   - the agent's own commands run through a shell prefix (`CLAUDE_CODE_SHELL_PREFIX`) that
     keeps their PATH to that one folder (IS-Atlas-92): what Claude Code needs for itself
-    (`sys`) is on its own PATH only;
+    (`sys`) is on its own PATH only, and every command it ran is kept (`<turn key>.commands`);
   - every line it prints is kept in its folder (`stream.jsonl`), for what it ran and cost;
   - every line it prints is activity; it exiting 0 ends the turn with its result, any other
     exit is a crash;
@@ -180,7 +180,7 @@ defmodule AtlasRuntime.Agent.Claude do
         :ok = File.ln_s(tool, link)
       end
 
-      File.write!(shell(folder), shell_script(dir))
+      File.write!(shell(folder), shell_script(dir, commands(folder)))
       File.chmod!(shell(folder), 0o755)
       :ok
     else
@@ -212,12 +212,17 @@ defmodule AtlasRuntime.Agent.Claude do
   """
   def shell(folder), do: folder <> ".shell"
 
+  @doc "What the prefix ran, one command string per line (shell-quoted), beside the folder."
+  def commands(folder), do: folder <> ".commands"
+
   # The agent's commands get a PATH of the turn's bin alone, readonly: the shell snapshot
   # Claude Code sources first sets PATH back to its own (with sys), and so could the agent.
-  defp shell_script(bin) do
+  # Each is kept first, with builtins only, so a turn shows that it went through here.
+  defp shell_script(bin, log) do
     """
     #!/bin/bash
     # This turn's agent's own commands (IS-Atlas-92): only the turn's atlas on their PATH.
+    printf '%q\\n' "$1" >> #{sh(log)}
     PATH=#{sh(bin)}
     export PATH
     readonly PATH

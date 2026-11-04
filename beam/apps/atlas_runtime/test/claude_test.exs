@@ -160,6 +160,10 @@ defmodule AtlasRuntime.ClaudeTest do
 
     {out, 0} = run.("atlas get X")
     assert out =~ "build atlas: get X (file=#{o[:env_file]})"
+
+    # Every command it ran is kept beside the folder, one line each.
+    kept = File.read!(Claude.commands(folder)) |> String.split("\n", trim: true)
+    assert length(kept) == 6 and List.last(kept) =~ "atlas\\ get\\ X"
   end
 
   test "its command: confined, headless, with the agent's model and budget" do

@@ -75,3 +75,12 @@ Runtime's second port, `claude`, runs one Claude Code process per turn, headless
   - after 3 crashes in 10 minutes on a machine, the agent gets no more turns there, and Runtime puts `cannot_run` on the agent ("on macbook since …: 3 crashes in 10 minutes"), cleared once that is no longer so.
 - **`turn_limit`:** no more turns for that agent on that machine than that, ever. A trial's one.
 - **Tests and CI** use a fake `claude` that prints the same stream. The e2e keeps the stub.
+
+## IS-Atlas-92: the agent's own commands, with only `atlas` on their PATH
+
+Claude Code's allowlist let `atlas set --help 2>&1 | head -50` run in IS-Atlas-18's second real turn, so the PATH is the guard that holds, and `sys` (`security`) was on it.
+
+- **The shell prefix:** the turn's environment sets `CLAUDE_CODE_SHELL_PREFIX` to `turns_dir/<turn key>.shell`, beside the turn's folder, not in it. Claude Code runs each of the agent's Bash commands through it as `<prefix> '<its command string>'`.
+- **What it does:** it keeps the command string in `turns_dir/<turn key>.commands`, sets PATH to the turn's `bin` alone, makes PATH readonly, and runs the command. PATH has to be readonly: Claude Code first sources its shell snapshot, whose last line sets PATH back to its own (with `sys`). The agent cannot widen PATH either (`PATH=/usr/bin:$PATH head …` fails).
+- **Claude Code itself** keeps `bin` and `sys` on its own PATH, for its keychain login.
+- **Not stopped by a PATH:** a full path such as `/usr/bin/head` still runs. Only Claude Code's permissions stand in its way there.
