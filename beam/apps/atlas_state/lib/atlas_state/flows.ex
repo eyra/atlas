@@ -8,7 +8,7 @@ defmodule AtlasState.Flows do
   Knows no kind by name.
   """
 
-  @conditions ~w(completed progress reopened values)
+  @conditions ~w(completed progress reopened values empty)
 
   @doc "The problems of every definition: `%{name => [problem]}` (empty lists when sound)."
   def check(description) do
@@ -26,6 +26,7 @@ defmodule AtlasState.Flows do
       on(description, flow) ++
       relation(description, flow) ++
       owner_kinds(description, flow) ++
+      empties(description, flow) ++
       writes(description, flow) ++
       cond do
         states == [] ->
@@ -129,6 +130,21 @@ defmodule AtlasState.Flows do
       nil -> List.wrap(flow["kinds"])
       kind -> [kind]
     end
+  end
+
+  # `empty: relation` (nothing under the fact through it) names a parent relation that points
+  # at one of the flow's kinds.
+  defp empties(description, flow) do
+    kinds = List.wrap(flow["kinds"])
+
+    for state <- List.wrap(flow["states"]),
+        is_map(state),
+        {"empty", relation} <- state["when"] || %{},
+        # In a list, so a relation that is not described is a problem, not passed over.
+        rel <- [get_in(description, ["relations", to_string(relation)])],
+        not (is_map(rel) and rel["parent"] == true and
+               Enum.any?(List.wrap(rel["to"]), &(&1 in kinds))),
+        do: "#{state["name"]}: empty names #{relation}, which puts nothing under its kinds"
   end
 
   # Flow passes over the hints of its own writes, so no state may depend on what it writes:
