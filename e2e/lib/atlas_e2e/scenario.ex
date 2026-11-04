@@ -179,7 +179,8 @@ defmodule AtlasE2E.Scenario do
 
   @doc """
   The other TUI shows the change (`pattern` matches, or with `gone: true` no longer
-  matches) by hint, within 1 second of `at`.
+  matches) by hint, within 1 second of `at` (or `within:` ms, where the key only starts
+  what makes the change, such as an agent's run).
   """
   def by_hint(tui, pattern, at, opts \\ []) do
     shown =
@@ -192,7 +193,8 @@ defmodule AtlasE2E.Scenario do
       at,
       &(shown.(&1) and hinted_since?(&1, at.clock)),
       "show the change (#{inspect(pattern)}) by hint",
-      "#{tui.label} by hint"
+      "#{tui.label} by hint",
+      Keyword.get(opts, :within, @quick)
     )
   end
 
@@ -322,9 +324,9 @@ defmodule AtlasE2E.Scenario do
   # Waiting
 
   # The time is the first capture that matched; confirming it takes a moment more.
-  defp quick(tui, at, ok?, what, note) do
-    left = max(at.ms + @quick - now(), 0)
-    {screen, seen} = wait_at(tui, left, ok?, "#{what} within #{@quick} ms of the key")
+  defp quick(tui, at, ok?, what, note, within \\ @quick) do
+    left = max(at.ms + within - now(), 0)
+    {screen, seen} = wait_at(tui, left, ok?, "#{what} within #{within} ms of the key")
     Process.put(:e2e_notes, ["#{note} in #{seen - at.ms} ms" | Process.get(:e2e_notes)])
     screen
   end

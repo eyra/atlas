@@ -151,7 +151,9 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     see(t1, "By              Atlas, from the record of #{Process.get(:step)}")
     see(t1, "[✓] 1. Delete use case #{made}?")
     at = press(t1, "Enter")
-    by_hint(t2, row.("Keep what the agent did"), at, gone: true)
+    # The key starts the overrule's run; its delete then reaches TUI 2 by hint. Passing runs
+    # took 583 to 964 ms from the key, too near 1 s: the run's start counts here too.
+    by_hint(t2, row.("Keep what the agent did"), at, gone: true, within: 2_000)
     see(t1, "Done: 1 of 1 stored", 10_000)
     refute_see(t1, "without asking")
     see(t1, "Deleted #{made}.")
