@@ -104,7 +104,13 @@ defmodule AtlasRuntime.Agent.Claude do
           {:env, port_env(environment(turn, opts, folder))}
         ])
 
-      {:os_pid, os_pid} = Port.info(port, :os_pid)
+      # nil when the process exited already (its exit status still comes as a message).
+      os_pid =
+        case Port.info(port, :os_pid) do
+          {:os_pid, os_pid} -> os_pid
+          _ -> nil
+        end
+
       log = File.open!(Path.join(folder, "stream.jsonl"), [:write, :utf8])
 
       {:ok, %{turn_pid: turn_pid, port: port, os_pid: os_pid, result: nil, partial: "", log: log}}
