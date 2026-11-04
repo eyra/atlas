@@ -77,6 +77,10 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
+# Keep ordinary invocations on the isolated project dependency without shell setup.
+if [ -z "${ATLAS_CONFIG_PYTHON:-}" ] && [ -x "$root/.venv-config/bin/python" ]; then
+  export ATLAS_CONFIG_PYTHON="$root/.venv-config/bin/python"
+fi
 # The comment above, up to `set -euo pipefail`: the usage.
 header() { sed -n '2,/^set -euo/p' "$root/bin/atlas" | sed '$d' | sed 's/^# \{0,1\}//'; }
 usage() { header; exit 2; }
