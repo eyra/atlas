@@ -1,0 +1,92 @@
+# Complete definitions; included paths are relative to the selected root.
+types:
+  plan_status:
+    values:
+    - refine
+    - ready_to_pick_up
+    labels:
+      refine: Refine
+      ready_to_pick_up: Ready to pick up
+    descriptions:
+      refine: Being written and negotiated; not ready to build from.
+      ready_to_pick_up: Agreed; the next level can be derived and built.
+entities:
+  scene:
+    label: Scene
+    plural: scenes
+    aliases:
+    - sc
+    id_type: manual
+    id_prefix: SC-
+    description: 'An actor-centred view of the system, with one angle and one zoom level
+
+      (Flux''s meaning). The id is its code, e.g. SC-Atlas-01.
+
+      '
+    properties:
+      title: &id001
+        type: string
+        required: true
+        description: 'Without the code (Flux: name)'
+      description: &id002
+        type: string
+        description: 'The text (Flux: description)'
+      flux_id: &id003
+        type: string
+        unique: true
+        description: Flux (Basecamp) id, set by a later Flux sync
+      status: &id004
+        type: plan_status
+        description: Flux group; empty = no group
+  use_case:
+    label: Use case
+    plural: use_cases
+    aliases:
+    - uc
+    id_type: manual
+    id_prefix: UC-
+    description: 'The technical contract for part of a scene (Flux''s meaning). The id is
+
+      its code, e.g. UC-Atlas-01.
+
+      '
+    properties:
+      title: *id001
+      description: *id002
+      flux_id: *id003
+      status: *id004
+relations:
+  in_scene:
+    label: in scene
+    description: A use case belongs to at most one scene (Flux); a scene has zero or more use cases.
+    from:
+    - use_case
+    to:
+    - scene
+    max_outgoing: 1
+    inverse:
+      id: use_cases
+      label: use cases
+  in_use_case:
+    label: in use case
+    description: An issue belongs to at most one use case (Flux); a use case has zero or more issues.
+    from:
+    - issue
+    to:
+    - use_case
+    max_outgoing: 1
+    inverse:
+      id: issues
+      label: issues
+  accepted_by:
+    label: accepted by
+    description: Who accepted a scene or use case, after testing it; at most one.
+    from:
+    - scene
+    - use_case
+    to:
+    - person
+    max_outgoing: 1
+    inverse:
+      id: accepted
+      label: accepted

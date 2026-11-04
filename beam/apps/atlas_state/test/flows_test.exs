@@ -157,74 +157,18 @@ defmodule AtlasState.FlowsTest do
     assert problem == "box's progress or completion depends on todo, which Flow writes"
   end
 
-  # rela's half of the description, as far as the definitions need it: what the relation
-  # each names in `on` says in rela/schema.yaml, and the fields of the kind it points at.
-  defp rela_half(extra) do
-    yaml = @root |> Path.join("rela/schema.yaml") |> File.read!()
+  # Resolve the selected native include closure instead of scraping a flat YAML file.
+  # Only this repository test reads local configuration; the running layers use the Bus.
+  defp rela_half(_extra) do
+    python = System.get_env("ATLAS_CONFIG_PYTHON") || "python3"
 
-    acc =
-      for {_name, flow} <- extra["flows"],
-          relation = flow["owner_relation"],
-          is_binary(relation),
-          reduce: %{"entities" => %{}, "relations" => %{}} do
-        acc ->
-          block = block(yaml, "relations", relation)
+    {json, code} =
+      System.cmd(python, [Path.join(@root, "rela/scripts/config.py"), "resolved"],
+        stderr_to_stdout: true
+      )
 
-          put_in(acc, ["relations", relation], %{
-            "from" => list(block, "from"),
-            "to" => list(block, "to")
-          })
-      end
-
-    # The parent relations an `empty` condition names: what they point at.
-    acc =
-      for {_name, flow} <- extra["flows"],
-          %{"when" => %{"empty" => relation}} <- flow["states"],
-          reduce: acc do
-        acc ->
-          block = block(yaml, "relations", relation)
-
-          put_in(acc, ["relations", relation], %{
-            "from" => list(block, "from"),
-            "to" => list(block, "to")
-          })
-      end
-
-    for {_name, %{"on" => on}} <- extra["flows"],
-        is_binary(on),
-        reduce: acc do
-      acc ->
-        block = block(yaml, "relations", on)
-        [to] = list(block, "to")
-
-        fields =
-          Regex.scan(~r/^      ([a-z_]+):/m, block(yaml, "entities", to), capture: :all_but_first)
-
-        props = Map.new(List.flatten(fields), &{&1, %{"type" => "string"}})
-        max = Regex.run(~r/max_outgoing: (\d+)/, block, capture: :all_but_first)
-        relation = %{"from" => list(block, "from"), "to" => [to]}
-
-        relation =
-          if max,
-            do: Map.put(relation, "max_outgoing", String.to_integer(hd(max))),
-            else: relation
-
-        acc
-        |> put_in(["relations", on], relation)
-        |> put_in(["entities", to], %{"properties" => props})
-    end
-  end
-
-  # The lines of `name` under the top-level `section`, up to the next name at its level.
-  defp block(yaml, section, name) do
-    [_, rest] = String.split(yaml, ~r/^#{section}:$/m, parts: 2)
-    [_, rest] = String.split(rest, ~r/^  #{name}:$/m, parts: 2)
-    rest |> String.split(~r/^(  [a-z_]+:|[a-z_]+:)$/m, parts: 2) |> hd()
-  end
-
-  defp list(block, key) do
-    [items] = Regex.run(~r/^    #{key}: \[([^\]]*)\]/m, block, capture: :all_but_first)
-    items |> String.split(",") |> Enum.map(&String.trim/1)
+    assert code == 0, json
+    JSON.decode!(json)
   end
 
   test "with an owner relation, each owner names its kind, one the relation allows" do

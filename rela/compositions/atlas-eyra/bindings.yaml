@@ -1,0 +1,17 @@
+# Composition owns the complete list of assignable kinds.
+relations:
+  assignment:
+    label: assignment
+    description: What belongs to being assigned, for one fact; made and deleted with
+      it.
+    from:
+    - scene
+    - use_case
+    - issue
+    - pull_request
+    to:
+    - assignment
+    max_outgoing: 1
+    inverse:
+      id: assignment_of
+      label: assignment of

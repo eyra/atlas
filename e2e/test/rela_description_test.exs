@@ -85,7 +85,7 @@ defmodule AtlasE2E.RelaDescriptionTest do
 
     File.write!(
       schema,
-      String.replace(File.read!(schema), "\nentities:\n", "\nentities:\n" <> @gone, global: false)
+      File.read!(schema) <> "\nentities:\n" <> @gone
     )
 
     {out, status} =
@@ -141,6 +141,51 @@ defmodule AtlasE2E.RelaDescriptionTest do
     # Nothing to do the second time.
     {out, 0} = atlas(ctx.env, ["restart"])
     refute out =~ "older description"
+  end
+
+  test "include-only changes restart rela and preserve stored files byte for byte", ctx do
+    {out, status} = atlas(ctx.env, ["restart"])
+    assert status == 0, out
+    put(ctx.url, "scenes", "SC-Atlas-01", "Kept across an include-only restart")
+    put(ctx.url, "use_cases", "UC-Atlas-01", "Kept child")
+
+    {_, 0} =
+      System.cmd("curl", [
+        "-fsS",
+        "-X",
+        "PATCH",
+        "-H",
+        "content-type: application/json",
+        "-d",
+        JSON.encode!(%{
+          "relations" => %{
+            "in_scene" => %{"data" => [%{"type" => "scene", "id" => "SC-Atlas-01"}]}
+          }
+        }),
+        ctx.url <> "/use_cases/UC-Atlas-01"
+      ])
+
+    data = Path.join(ctx.dir, "rela")
+    # Stop the private core to avoid background reconciliation changing fixtures.
+    atlas(ctx.env, ["stop"])
+    before = stored_files(data)
+    included = Path.join(data, "modules/foundation/schema.yaml")
+    File.write!(included, File.read!(included) <> "\n# earlier build's include\n")
+    {out, 0} = atlas(ctx.env, ["status"])
+    assert out =~ "older than this build's"
+    {out, status} = atlas(ctx.env, ["restart"])
+    assert status == 0, out
+    assert out =~ "restarted it on this build's"
+    for {file, contents} <- before, do: assert(File.read!(file) == contents)
+    {out, 0} = atlas(ctx.env, ["status"])
+    assert out =~ "description: this build's"
+  end
+
+  defp stored_files(data) do
+    for part <- ["entities", "relations"],
+        file <- Path.wildcard(Path.join([data, part, "**", "*.md"])),
+        into: %{},
+        do: {file, File.read!(file)}
   end
 
   test "a description that would leave data without one is not started: it names it", ctx do
