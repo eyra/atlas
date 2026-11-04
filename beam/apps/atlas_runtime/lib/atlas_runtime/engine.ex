@@ -234,6 +234,7 @@ defmodule AtlasRuntime.Engine do
         turn = %{
           key: key,
           item: owned.item,
+          kind: owned.kind,
           agent: owned.agent,
           port: port,
           port_opts: [

@@ -94,7 +94,8 @@ defmodule AtlasRuntime.Agent.Claude.Broker do
     end
   end
 
-  defp run(args, config) do
+  @doc "The build's `atlas` with `args`, on the instance, as the agent: `{output, status}`."
+  def run(args, config) do
     env = [
       {"ATLAS_ENV_FILE", config.env_file},
       {"ATLAS_AS", config[:agent] || ""},
@@ -103,11 +104,17 @@ defmodule AtlasRuntime.Agent.Claude.Broker do
 
     task =
       Task.async(fn ->
-        System.cmd(config.atlas, args,
-          env: env,
-          stderr_to_stdout: true,
-          cd: config[:folder] || File.cwd!()
-        )
+        try do
+          System.cmd(config.atlas, args,
+            env: env,
+            stderr_to_stdout: true,
+            cd: config[:folder] || File.cwd!()
+          )
+        rescue
+          # No atlas there, or it cannot run: an answer like any other failure.
+          error in ErlangError ->
+            {"atlas (turn): atlas did not run: #{inspect(error.original)}\n", 2}
+        end
       end)
 
     case Task.yield(task, @run) || Task.shutdown(task, :brutal_kill) do

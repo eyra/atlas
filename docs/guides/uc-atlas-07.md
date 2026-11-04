@@ -107,6 +107,16 @@ A PATH stops command names, not full paths (`/usr/bin/security`, `/bin/ls`) or b
 - **No sandbox, no commands:** where there is no `sandbox-exec` (Linux), the prefix runs none of the agent's commands (exit 126).
 - **Tests:** the sandbox's own test runs on macOS only. Linux CI runs the broker's test and the test that nothing runs without a sandbox.
 
+## IS-Atlas-95: a turn's rules show how to call `atlas`
+
+In IS-Atlas-94's real turn the agent spent 4 of its 8 commands finding `atlas`'s syntax (`--assigned-to`, `--help`, `| head`).
+
+- **At a turn's start** the claude port asks the build's `atlas`, outside the sandbox, as the broker does:
+  - `atlas get --help`: from its usage it keeps the lines of the allowed commands (get, list, set), with the lines that go on from them (`<association>=<key>`, `--cause <text>`);
+  - `atlas help <kind>`, for the kind of the turn's item: its fields, and how a link such as `assigned_to` is set, from rela's description through Control.
+- **Both go into the turn's rules**, after what is expected of the agent. Nothing of them is written into the prompt by hand. Where `atlas` does not answer, the turn runs with the rules alone.
+- **Melle can test:** nothing in the TUI. A real turn's report shows whether the agent's first command is its work, not `--help`.
+
 ## IS-Atlas-23: failure actions in the test TUI
 
 In the test environment, every browsing page (the start page, a list, a fact) has `! Failures…`: what can be made to fail there, each seen as it recovers. Never in prod: Control offers none, and a prod Bus refuses the `fault` class they travel in.
