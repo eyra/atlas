@@ -134,6 +134,44 @@ defmodule AtlasFlowTest do
     assert FakeState.get("box", "B-1")["links"]["owned_by"] == ["carol"]
   end
 
+  test "a component hint does not restart completed work to remove a historical owner" do
+    flow = Map.put(FakeState.flow(), "on", "card")
+    description = FakeState.description(flow)
+
+    description =
+      put_in(description, ["relations", "card"], %{
+        "from" => ["box"],
+        "to" => ["card"],
+        "component" => %{}
+      })
+
+    FakeState.set_description(put_in(description, ["entities", "card"], %{}))
+
+    FakeState.put("box", %{
+      "key" => "B-done",
+      "completion" => %{"done" => true},
+      "links" => %{"card" => ["C-done"]}
+    })
+
+    FakeState.put("card", %{
+      "key" => "C-done",
+      "links" => %{"owned_by" => ["ada"]},
+      "origins" => %{"owned_by" => %{"by" => "migration"}}
+    })
+
+    server = engine()
+    Engine.round(server)
+    AtlasBus.attach("observer-#{System.unique_integer([:positive])}")
+    {reads, _} = FakeState.reads()
+    AtlasFlow.Talk.put("card", %{"op" => "change", "key" => "C-done", "values" => %{}})
+    eventually(fn -> elem(FakeState.reads(), 0) > reads end)
+    :sys.get_state(server)
+    Process.sleep(150)
+    refute alive("B-done")
+    assert FakeState.get("card", "C-done")["links"]["owned_by"] == ["ada"]
+    refute Enum.any?(FakeState.sent(), &(&1["by"] == "flow"))
+  end
+
   describe "the state a fact is in" do
     @flow FakeState.flow()
 
