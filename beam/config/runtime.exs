@@ -42,4 +42,14 @@ if config_env() != :test do
 
   # Flow looks at each open fact again this often, and at once on a hint.
   config :atlas_flow, tick_seconds: get_in(settings, ["flow", "tick_seconds"]) || 60
+
+  # Runtime runs the turns of this machine's agents (IS-Atlas-15); without `runtime`, none.
+  runtime = settings["runtime"] || %{}
+
+  config :atlas_runtime,
+    settings:
+      if(runtime["stub_dir"],
+        do: Map.put(runtime, "stub_dir", expand.(runtime["stub_dir"])),
+        else: runtime
+      )
 end

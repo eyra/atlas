@@ -63,12 +63,24 @@ defmodule AtlasE2E.Instance do
         # Long enough to see each step go, and to stop a run between two (UC-Atlas-18).
         "step_pause_ms" => 2_000
       },
+      # Runtime (IS-Atlas-15) runs one stand-in agent, runner, whose mode a scenario sets in
+      # its file in stub_dir (active, silent, crash, end); no real agent runs. Only facts
+      # runner owns get turns, so no other scenario meets it. Short numbers, to see them go.
+      "runtime" => %{
+        "machine" => "e2e",
+        "agents" => %{"runner" => %{"port" => "stub"}},
+        "stub_dir" => Path.join(dir, "stub"),
+        "silence_seconds" => 3,
+        "lease_seconds" => 1,
+        "round_seconds" => 1
+      },
       # A lone escape waits this long for the rest of its key (30 ms for a person): on a
       # loaded machine a key's bytes can reach the TUI further apart, and `\e[B` must not
       # turn into Escape and the text "[B".
       "escape_ms" => 250
     }
 
+    File.mkdir_p!(Path.join(dir, "stub"))
     file = Path.join(dir, "test.json")
     File.write!(file, JSON.encode!(settings))
 

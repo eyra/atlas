@@ -43,6 +43,13 @@ types:
       refine: Being written and negotiated; not ready to build from.
       ready_to_pick_up: Agreed; the next level can be derived and built.
 
+  # A turn runs until it ends; an ended turn never runs again (a new turn is a new fact).
+  turn_state:
+    values: [running, ended]
+    labels:
+      running: Running
+      ended: Ended
+
   # Flux's issue stages. Done is not a stage: an issue is completed when its
   # pull request is merged (IS-Atlas-63).
   issue_stage:
@@ -229,6 +236,25 @@ entities:
       deadline: { type: datetime, description: "When it should be done by; optional, it only marks it late (IS-Atlas-14)" }
       flow_state: { type: string, description: "The state of its flow it is in; Flow writes it (IS-Atlas-54)" }
 
+  # One stretch in which an agent acts on one item (architecture v4, section 3, W1 to W4):
+  # Runtime starts it for the item's owner, keeps its lease while the agent shows activity,
+  # and ends it (IS-Atlas-15). Each start, renewal and end is a fact with its cause.
+  turn:
+    label: Turn
+    plural: turns
+    id_type: manual
+    id_prefix: "TU-"
+    description: |
+      One stretch in which an agent acts on one item: started by Runtime for the item's
+      owner, kept while the agent shows activity (its lease), ended when the agent ends
+      it, goes silent, crashes, runs too long, or no longer owns the item.
+    properties:
+      state: { type: turn_state, required: true, description: "Running or ended" }
+      machine: { type: string, required: true, description: "The machine whose Runtime runs it" }
+      lease_until: { type: datetime, description: "Until when the turn holds its lease: the agent's last activity plus the silence limit" }
+      activity: { type: string, description: "The agent's last activity Runtime saw" }
+      why: { type: string, description: "Why it ended" }
+
 relations:
   in_scene:
     label: in scene
@@ -304,3 +330,20 @@ relations:
     to: [assignment]
     max_outgoing: 1
     inverse: { id: assignment_of, label: assignment of }
+
+  # A turn is on one item (its Assignment) and by one agent (IS-Atlas-15).
+  turn_on:
+    label: on
+    description: The item the turn acts on.
+    from: [turn]
+    to: [assignment]
+    max_outgoing: 1
+    inverse: { id: turns, label: turns }
+
+  turn_by:
+    label: by
+    description: The agent that acts in the turn.
+    from: [turn]
+    to: [agent]
+    max_outgoing: 1
+    inverse: { id: turns_by, label: turns }
