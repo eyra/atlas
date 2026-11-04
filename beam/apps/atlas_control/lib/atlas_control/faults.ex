@@ -196,8 +196,8 @@ defmodule AtlasControl.Faults do
   def after_run(nil), do: :home
 
   @doc """
-  A browsing page with `! Failures…` added (test only): on its first list or item block,
-  as the page's other actions are.
+  A browsing page with `! Failures…` added (test only): on its last list or item block, so
+  it comes after all of the page's own actions.
   """
   def with_action(page, route) do
     to =
@@ -216,7 +216,9 @@ defmodule AtlasControl.Faults do
       action = Blocks.action(label: "Failures…", key: "!", to: to)
 
       {blocks, _} =
-        Enum.map_reduce(page.blocks, false, fn
+        page.blocks
+        |> Enum.reverse()
+        |> Enum.map_reduce(false, fn
           %{"type" => type, "props" => props} = block, false when type in ["list", "item"] ->
             actions = (props["actions"] || []) ++ [action]
             {%{block | "props" => Map.put(props, "actions", actions)}, true}
@@ -225,7 +227,7 @@ defmodule AtlasControl.Faults do
             {block, done}
         end)
 
-      %{page | blocks: blocks}
+      %{page | blocks: Enum.reverse(blocks)}
     else
       page
     end
