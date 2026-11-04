@@ -29,6 +29,20 @@ defmodule AtlasRuntime.FakeState do
           "on" => "card",
           "field" => "todo",
           "state_field" => "step",
+          "handover_field" => "later",
+          "states" => [
+            %{
+              "name" => "checking",
+              "when" => %{"values" => %{"phase" => ["check"]}},
+              "owner" => %{"kind" => "clerk", "key" => "bob"},
+              "expected" => "Check it"
+            },
+            %{
+              "name" => "packing",
+              "owner" => %{"kind" => "clerk", "key" => "ada"},
+              "expected" => "Pack it"
+            }
+          ],
           "owner_relation" => "owned_by"
         }
       },
@@ -60,18 +74,23 @@ defmodule AtlasRuntime.FakeState do
   def get(kind, key), do: GenServer.call(__MODULE__, {:get, kind, key})
   def all(kind), do: GenServer.call(__MODULE__, {:all, kind})
 
+  # Capture one read's answer, keeping State responsive while the test advances other
+  # processes. Releasing it returns the old snapshot, as a delayed Bus reply would.
+  def hold_read(kind, content), do: GenServer.call(__MODULE__, {:hold, kind, content})
+  def release_read, do: GenServer.call(__MODULE__, :release)
+
   @doc "Every fact content sent, oldest first, with its kind."
   def sent, do: GenServer.call(__MODULE__, :sent)
 
   @impl true
   def init(:ok) do
     :ok = AtlasBus.attach(AtlasBus.store())
-    {:ok, %{facts: %{}, sent: [], position: 0}}
+    {:ok, %{facts: %{}, sent: [], position: 0, hold: nil, held: nil}}
   end
 
   @impl true
   def handle_call({:put, kind, fact}, _from, s) do
-    fact = Map.merge(%{"values" => %{}, "links" => %{}}, fact)
+    fact = Map.merge(%{"values" => %{}, "links" => %{}, "origins" => %{}}, fact)
     {:reply, :ok, put_in(s.facts[{kind, fact["key"]}], fact)}
   end
 
@@ -81,6 +100,16 @@ defmodule AtlasRuntime.FakeState do
     do: {:reply, for({{^kind, _}, fact} <- Enum.sort(s.facts), do: fact), s}
 
   def handle_call(:sent, _from, s), do: {:reply, Enum.reverse(s.sent), s}
+
+  def handle_call({:hold, kind, content}, {pid, _}, s) do
+    ref = make_ref()
+    {:reply, ref, %{s | hold: {kind, content, pid, ref}}}
+  end
+
+  def handle_call(:release, _from, %{held: {e, answer}} = s) do
+    :ok = AtlasBus.send(Envelope.reply(e, "answer"), answer)
+    {:reply, :ok, %{s | held: nil}}
+  end
 
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: "read"} = e, content}, s) do
@@ -104,8 +133,15 @@ defmodule AtlasRuntime.FakeState do
           %{"facts" => for({{^kind, _}, fact} <- Enum.sort(s.facts), do: fact)}
       end
 
-    :ok = AtlasBus.send(Envelope.reply(e, "answer"), answer)
-    {:noreply, s}
+    case s.hold do
+      {kind, ^content, pid, ref} when kind == e.kind ->
+        send(pid, {:held_read, ref})
+        {:noreply, %{s | hold: nil, held: {e, answer}}}
+
+      _ ->
+        :ok = AtlasBus.send(Envelope.reply(e, "answer"), answer)
+        {:noreply, s}
+    end
   end
 
   def handle_info({:atlas_bus, %Envelope{class: "fact"} = e, %{"key" => key} = c}, s) do

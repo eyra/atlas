@@ -121,10 +121,14 @@ defmodule AtlasRuntime.Engine do
       for {kind, _flow} <- kinds, do: AtlasBus.listen(kind)
       AtlasBus.listen(names.kind)
 
-      with {:ok, owned} <- owned(kinds, agents),
-           %{"facts" => turns} <- Talk.read(names.kind, %{}) do
+      # Snapshot local processes, then turns, then ownership. A turn that ends during
+      # these reads stays busy for this round. An old ownership reply must not be
+      # combined with newer ended-turn/process snapshots to bypass a saved handover.
+      local = local()
+
+      with %{"facts" => turns} <- Talk.read(names.kind, %{}),
+           {:ok, owned} <- owned(kinds, agents) do
         machine = Keyword.fetch!(state.opts, :machine)
-        local = local()
 
         mine =
           for turn <- turns,
@@ -162,8 +166,8 @@ defmodule AtlasRuntime.Engine do
 
         # 2. Its item is no longer its agent's, or no longer open.
         for {key, {agent, item}} <- local,
-            {agent, item} not in Enum.map(owned, &{&1.agent, &1.item}) do
-          [{pid, _}] = Registry.lookup(AtlasRuntime.Turns, key)
+            {agent, item} not in Enum.map(owned, &{&1.agent, &1.item}),
+            {pid, _} <- Registry.lookup(AtlasRuntime.Turns, key) do
           Turn.leave(pid, "#{item} is no longer #{agent}'s to work on")
         end
 
@@ -183,7 +187,7 @@ defmodule AtlasRuntime.Engine do
         |> Enum.reject(
           &(MapSet.member?(busy, &1.agent) or {&1.agent, &1.item} in Map.values(local))
         )
-        |> Enum.filter(&(&1.agent in able))
+        |> Enum.filter(&(&1.startable? and &1.agent in able))
         |> Enum.uniq_by(& &1.agent)
         |> Enum.each(&start(&1, names, turns, agents, state.opts))
 
@@ -209,7 +213,10 @@ defmodule AtlasRuntime.Engine do
         do: {kind, flow}
   end
 
-  # The open facts each agent owns: `[%{agent, item, kind}]`.
+  # Ownership still includes a held item, so its current turn may finish normally.
+  # A nonempty handover field only bars a new turn, until Flow transfers or cancels it.
+  # Runtime treats this as an opaque barrier; Flow alone interprets its origin/owner.
+  # The open facts each agent owns: `[%{agent, item, kind, startable?}]`.
   defp owned(kinds, agents) do
     Enum.reduce_while(kinds, {:ok, []}, fn {kind, flow}, {:ok, acc} ->
       found =
@@ -219,7 +226,12 @@ defmodule AtlasRuntime.Engine do
               open =
                 for fact <- facts,
                     open?(fact, flow),
-                    do: %{agent: agent, item: fact["key"], kind: kind}
+                    do: %{
+                      agent: agent,
+                      item: fact["key"],
+                      kind: kind,
+                      startable?: handover_clear?(fact, flow)
+                    }
 
               {:cont, {:ok, acc ++ open}}
 
@@ -234,6 +246,11 @@ defmodule AtlasRuntime.Engine do
       end
     end)
   end
+
+  defp handover_clear?(fact, %{"handover_field" => field}) when is_binary(field),
+    do: fact["values"][field] in [nil, ""]
+
+  defp handover_clear?(_fact, _flow), do: true
 
   # Open while Flow has a state for it (its `state_field`); without one, while it is owned.
   defp open?(fact, %{"state_field" => field}) when is_binary(field),
