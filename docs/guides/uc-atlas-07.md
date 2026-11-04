@@ -106,3 +106,14 @@ A PATH stops command names, not full paths (`/usr/bin/security`, `/bin/ls`) or b
 - **The broker:** the turn's `atlas` is now a few lines of bash that send their arguments over bash's `/dev/tcp` to a broker in the claude port, outside the sandbox. The broker refuses `--env` and any command but get, list and set, and runs the build's `atlas` on the instance as the turn's agent. What the agent sets in its environment (`ATLAS_AS`, `ATLAS_ENV_FILE`) no longer reaches the command.
 - **No sandbox, no commands:** where there is no `sandbox-exec` (Linux), the prefix runs none of the agent's commands (exit 126).
 - **Tests:** the sandbox's own test runs on macOS only. Linux CI runs the broker's test and the test that nothing runs without a sandbox.
+
+## IS-Atlas-95: a turn's rules show how to call `atlas`
+
+In IS-Atlas-94's real turn the agent spent 4 of its 8 commands finding `atlas`'s syntax (`--assigned-to`, `--help`, `| head`).
+
+- **At a turn's start** the claude port asks the build's `atlas`, outside the sandbox, as the broker does:
+  - `atlas get --help`: from its usage it keeps the lines of the allowed commands (get, list, set), with the lines that go on from them (`<association>=<key>`, `--cause <text>`);
+  - `atlas help <kind>`, for the kind of the turn's item: its fields, and how a link such as `assigned_to` is set, from rela's description through Control.
+- **Both go into the turn's rules**, after what is expected of the agent. Nothing of them is written into the prompt by hand. Where `atlas` does not answer, the turn runs with the rules alone.
+- **Melle can test:** nothing in the TUI. A real turn's report shows whether the agent's first command is its work, not `--help`.
+
