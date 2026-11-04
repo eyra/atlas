@@ -1,7 +1,8 @@
 # UC-Atlas-07, IS-Atlas-15: Runtime runs an agent's turns. A fact owned by an agent this
 # machine runs gets a turn; the turn keeps its lease while the agent shows activity, and
 # ends when it goes silent, crashes, or no longer owns the fact; the owner then gets a new
-# turn. Every step is a fact in State with its cause. The agent is the stand-in (stub),
+# turn. A turn whose fact left its agent may still end by itself for a grace (IS-Atlas-93,
+# 4 s here). Every step is a fact in State with its cause. The agent is the stand-in (stub),
 # whose mode the scenario sets in its file: no real agent runs.
 import AtlasE2E.Scenario
 
@@ -74,11 +75,41 @@ scenario "UC-Atlas-07: Runtime runs an agent's turns, and keeps their leases", f
     field.(i, "TU-AS-#{use_case}-3", "State", &(&1 == "Running"))
   end
 
-  step "Moved to another owner: its turn ends, and no new one starts", fn ->
+  step "Handed on, then the agent ends its turn itself, within the grace", fn ->
     %{use_case: use_case} = Process.get(:uc07)
     # An agent of this scenario's own, which this machine does not run: making the
     # coordinator here would let Flow hand later scenarios' facts to it sooner.
     atlas_json(i, ["put", "agent", "--name", "Bystander"])
+
+    # As runner does when it hands its fact on: the fact moves, then runner ends its turn.
+    atlas_json(i, [
+      "set",
+      use_case,
+      "assigned_to=bystander",
+      "--cause",
+      "runner hands it to the bystander"
+    ])
+
+    Process.sleep(1_500)
+    mode.("end")
+
+    field.(
+      i,
+      "TU-AS-#{use_case}-3",
+      "Why",
+      &(&1 ==
+          "AS-#{use_case} is no longer runner's to work on, and the agent ended its turn " <>
+            "by itself: the stub ended its turn")
+    )
+
+    # Back to runner, active: its next turn.
+    mode.("active")
+    atlas_json(i, ["set", use_case, "assigned_to=runner", "--cause", "back to runner"])
+    field.(i, "TU-AS-#{use_case}-4", "State", &(&1 == "Running"))
+  end
+
+  step "Moved to another owner: after the grace its turn ends, and no new one starts", fn ->
+    %{use_case: use_case} = Process.get(:uc07)
 
     atlas_json(i, [
       "set",
@@ -90,14 +121,14 @@ scenario "UC-Atlas-07: Runtime runs an agent's turns, and keeps their leases", f
 
     field.(
       i,
-      "TU-AS-#{use_case}-3",
+      "TU-AS-#{use_case}-4",
       "Why",
       &(&1 == "AS-#{use_case} is no longer runner's to work on")
     )
 
     Process.sleep(3_000)
-    {out, status, _} = atlas(i, ["get", "TU-AS-#{use_case}-4"])
-    status != 0 || raise "a fourth turn started:\n#{out}"
+    {out, status, _} = atlas(i, ["get", "TU-AS-#{use_case}-5"])
+    status != 0 || raise "a fifth turn started:\n#{out}"
   end
 
   # The scenes list stays short enough for the scenarios after this one.
@@ -105,7 +136,7 @@ scenario "UC-Atlas-07: Runtime runs an agent's turns, and keeps their leases", f
     %{scene: scene, use_case: use_case} = Process.get(:uc07)
     home(t1)
 
-    for key <- Enum.map(1..3, &"TU-AS-#{use_case}-#{&1}") ++ [use_case, scene],
+    for key <- Enum.map(1..4, &"TU-AS-#{use_case}-#{&1}") ++ [use_case, scene],
         do: {_, 0, _} = atlas(i, ["delete", key])
 
     gone(t1, "A scene with a turn")

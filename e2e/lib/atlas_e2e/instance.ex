@@ -71,6 +71,7 @@ defmodule AtlasE2E.Instance do
         "agents" => %{"runner" => %{"port" => "stub"}},
         "stub_dir" => Path.join(dir, "stub"),
         "silence_seconds" => 3,
+        "leave_grace_seconds" => 4,
         "lease_seconds" => 1,
         "round_seconds" => 1
       },
