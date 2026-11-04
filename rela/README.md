@@ -26,4 +26,33 @@ image starts rela with native includes. No data migration is needed.
 Run `python3 -m unittest discover -s rela/tests -v`, pinned `rela --project rela
 validate`, and private e2e before delivery. `tests/fixtures/baseline-schema.yaml`
 is the delivered #79 schema: tests lock definitions and property/form order.
-`atlas.json` remains the single extension consumed by State.
+`atlas.json` remains the single extension consumed by State. It is generated from
+`compositions/atlas-eyra/sources.json`; edit a listed module/composition fragment,
+then run the assembler with the pinned rela CLI installed:
+
+```sh
+"$ATLAS_CONFIG_PYTHON" rela/scripts/assemble.py
+"$ATLAS_CONFIG_PYTHON" rela/scripts/assemble.py --check
+```
+
+Each map leaf has one author (even identical duplicates fail). Whole arrays have
+one owner. The bounded assembler rejects unknown annotation keys, schema structural
+overrides, dangling fields/relations/types, ambiguous parents, overlapping flows
+and shortcut collisions. It calls pinned rela validation and the actual generic
+`AtlasState.Flows.check`, without starting an application. Optional `--actors file`
+checks an inventory obtained through Control, shaped `{kind: [keys]}`; actor facts
+are never shipped as configuration. Actor existence is also reconciled by Flow.
+
+`atlas.manifest.json` records every selected schema/JSON input and generated output
+hash. CI checks freshness; startup/images check the packaged hashes without needing
+Elixir or PyYAML in the core image. Packaging copies the same closure and generated
+extension, never work facts. Fly delivery checks both image labels/provenance and
+rela's copied schema before client smoke, with each app's own token. This is an
+internal consistency check within the existing merge-driven promotion route.
+
+`tests/profiles.py` creates disposable foundation-only and incident compositions.
+They are dependency proofs, not installed workflows. Foundation omits audit/software/
+Eyra; incident reuses foundation/audit/factory and selects independent person service
+resolution, with no Scene, Use Case or accepted_by. Its e2e uses private stores,
+Control, a GitHub stand-in and Runtime stub only. Existing populated Eyra stores
+cannot switch to these fixtures; fits must continue refusing stranded data.

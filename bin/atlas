@@ -205,6 +205,7 @@ stop_core() {
 }
 
 start_core() {
+  "${ATLAS_CONFIG_PYTHON:-python3}" "$root/rela/scripts/verify.py" "$root/rela"
   echo "atlas: starting the core from $root at $(head_now) (a first start compiles, about half a minute)..."
   mkdir -p "$state"
   nohup "$root/bin/atlas" up --env "$env" >"$log" 2>&1 </dev/null &

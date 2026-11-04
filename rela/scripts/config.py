@@ -14,6 +14,11 @@ import subprocess
 import sys
 import tempfile
 
+sys_path = str(Path(__file__).resolve().parent)
+if sys_path not in sys.path:
+    sys.path.insert(0, sys_path)
+from verify import verify
+
 try:
     import yaml
 except ImportError:
@@ -110,6 +115,9 @@ def closure(root):
 
 def package(root, dest):
     files, _ = closure(root)
+    if (Path(root) / 'atlas.manifest.json').exists():
+        provenance = verify(root)
+        files = sorted(set(files + list(provenance['inputs']) + ['atlas.json', 'atlas.manifest.json']))
     # Read/validate the entire closure before touching the destination.
     content = {name: (Path(root) / name).read_bytes() for name in files}
     for name, data in content.items():

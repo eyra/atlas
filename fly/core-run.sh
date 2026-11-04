@@ -13,4 +13,5 @@ if [ -e /data/hold ]; then
   exec sleep infinity
 fi
 
+python3 /app/rela/scripts/verify.py /app/rela
 exec /app/release/bin/atlas start
