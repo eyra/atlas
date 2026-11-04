@@ -42,11 +42,18 @@ if [ "$(machines rela "$rela_app")" -gt 0 ]; then
     held=1
     echo "deploy: $env is held (a migration is under way); deploying without health checks or smoke check"
   else
-    # 1. The description check, with this build's description beside rela's data.
+    # Resolve the whole selected closure locally before uploading anything. The deployed
+    # old image may predate Python/includes, so preflight receives an equivalent flat
+    # schema; the new image and local startup still use native includes.
+    next="$(mktemp -d)"
+    trap 'rm -rf "$next"' EXIT
+    "${ATLAS_CONFIG_PYTHON:-python3}" "$root/rela/scripts/config.py" flat > "$next/schema.yaml"
+    cp "$root/rela/data-entry.yaml" "$next/data-entry.yaml"
     as rela ssh console -q -a "$rela_app" -C "sh -c 'rm -rf /tmp/next && mkdir -p /tmp/next/scripts'" >/dev/null
-    for file in schema.yaml data-entry.yaml scripts/description.sh; do
-      as rela ssh sftp put -a "$rela_app" -m 0755 "$root/rela/$file" "/tmp/next/$file" >/dev/null
+    for file in schema.yaml data-entry.yaml; do
+      as rela ssh sftp put -a "$rela_app" "$next/$file" "/tmp/next/$file" >/dev/null
     done
+    as rela ssh sftp put -a "$rela_app" -m 0755 "$root/fly/check-fits.sh" /tmp/next/scripts/description.sh >/dev/null
     if ! orphans="$(as rela ssh console -q -a "$rela_app" \
       -C "env ATLAS_RELA_DATA=/data/rela ATLAS_RELA_BIN=/app/bin /tmp/next/scripts/description.sh fits" 2>/dev/null)"; then
       echo "deploy: this build's description no longer describes data rela $env holds on Fly:" >&2

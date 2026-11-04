@@ -3,14 +3,14 @@
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl \
+  && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-yaml \
   && rm -rf /var/lib/apt/lists/*
 
 # The rela version start-test.sh pins, for this machine (linux_amd64).
 COPY rela/scripts /app/rela/scripts
 RUN ATLAS_RELA_BIN=/app/bin /app/rela/scripts/start-test.sh install
 
-COPY rela/schema.yaml rela/data-entry.yaml /app/rela/
+COPY rela/ /app/rela/
 COPY fly/apply-move.sh fly/rela-run.sh fly/counts.sh fly/manifest.sh /app/fly/
 
 CMD ["/app/fly/rela-run.sh"]
