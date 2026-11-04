@@ -1936,9 +1936,10 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  # The fields a flow keeps its state in, on `kind`: shown in What to do, not as fields.
+  # Internal flow fields on `kind`: state is shown in What to do; bookkeeping stays hidden.
   defp state_fields(description, kind) do
-    for {_name, %{"state_field" => field} = flow} <- description["flows"] || %{},
+    for {_name, flow} <- description["flows"] || %{},
+        field <- [flow["state_field"], flow["handover_field"]],
         is_binary(field),
         kind in written_kinds(description, flow),
         do: field

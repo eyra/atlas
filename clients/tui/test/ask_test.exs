@@ -128,6 +128,22 @@ defmodule AtlasTui.AskTest do
     {_, [{:agent, %{"steps" => [%{"values" => %{"title" => "One"}}]}}]} = press(m, [:enter])
   end
 
+  test "background page updates preserve a step's draft, including an empty title" do
+    for reason <- ["hint", "reconcile"] do
+      {m, _} = asked()
+      m = Model.agent(m, plan("proposed", [step(1, "One")]))
+      {m, []} = press(m, [{:char, "e"}, :backspace, :backspace, :backspace])
+      assert m.values == %{"title" => "", "notes" => "n1"}
+
+      m = Model.message(m, Map.put(@page, "reason", reason))
+      assert m.values == %{"title" => "", "notes" => "n1"}
+      assert m.steps.editing == 1
+      {m, []} = press(m, [:ctrl_s])
+      {_, [{:agent, run}]} = press(m, [:enter])
+      assert run["steps"] == [%{"n" => 1, "values" => %{"title" => "", "notes" => "n1"}}]
+    end
+  end
+
   test "a step that cannot run is shown with why, and enter asks to drop it" do
     {m, _} = asked()
     blocked = Map.put(step(1, "One", "blocked"), "detail", "no field colour")

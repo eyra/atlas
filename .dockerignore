@@ -8,3 +8,5 @@ e2e
 clients
 tools
 docs
+
+**/__pycache__

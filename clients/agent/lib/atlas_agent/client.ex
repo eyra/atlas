@@ -35,21 +35,37 @@ defmodule AtlasAgent.Client do
     end
   end
 
+  @doc "The current turn, or the result of recording its outcome, from Control."
+  def turn(client, message \\ AtlasAgent.Protocol.message(:turn, :turn)) do
+    with :ok <- send_line(client, message) do
+      await(client, @stored_wait, fn
+        %{"op" => "turn", "error" => why} -> {:error, why}
+        %{"op" => "turn"} -> true
+        %{"op" => "page", "reason" => "stored"} -> true
+        %{"op" => "page", "reason" => "refused"} -> {:error, "State refused the outcome"}
+        _ -> false
+      end)
+    end
+  end
+
   def close(%__MODULE__{socket: socket}), do: :gen_tcp.close(socket)
 
   # The contract version this client implements; Control sends a too old one away.
-  @version AtlasBFFContract.Blocks.__schema__().version
+  @version AtlasAgent.Protocol.version()
 
   @doc "The hello this client says: its environment, what it is, and its contract version."
   def hello(env, as) do
-    hello = %{"op" => "hello", "env" => env, "client" => as, "spec" => @version}
+    hello = %{env: env, client: as, spec: @version}
 
     # The fact an agent is (an agent's key), from ATLAS_AS: it then owns what is assigned
     # to that agent and sees what to do (IS-Atlas-54). The migration is the migration.
-    case System.get_env("ATLAS_AS") do
-      who when is_binary(who) and who != "" and as != "migration" -> Map.put(hello, "as", who)
-      _ -> hello
-    end
+    props =
+      case System.get_env("ATLAS_AS") do
+        who when is_binary(who) and who != "" and as != "migration" -> Map.put(hello, :as, who)
+        _ -> hello
+      end
+
+    AtlasAgent.Protocol.message(:hello, :hello, props)
   end
 
   @doc "The page at `path`."

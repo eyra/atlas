@@ -9,6 +9,8 @@ defmodule AtlasAgent.CLI do
       atlas get  <key>                                     one item, with what hangs under it
       atlas list <kind> [--in <key>]                       the items of a kind (under <key>)
       atlas delete <key>                                   delete; refused while anything hangs under it
+      atlas turn                                          its running turn, original item and instructions
+      atlas turn end <outcome>                            store its outcome; Runtime ends the turn
       atlas tools                                          the agent's tools: Control's actions
       atlas plan --on <key or path> <request ...>          what the agent proposes; writes nothing
 
@@ -51,6 +53,9 @@ defmodule AtlasAgent.CLI do
   # from this code. `atlas help [<kind>]`, `atlas <command> [<kind>] --help`.
   # `atlas help` prints bin/atlas's own usage first, so only the kinds come from here.
   defp parse(["help" | rest]), do: {:ok, {:help, List.first(rest), false}}
+
+  defp parse(["turn"]), do: {:ok, :turn}
+  defp parse(["turn", "end", outcome]), do: {:ok, {:turn_end, outcome}}
 
   defp parse(["tools"]), do: {:ok, :tools}
 
@@ -130,6 +135,27 @@ defmodule AtlasAgent.CLI do
 
   defp run({:delete, key}, client), do: client |> AtlasAgent.delete(key) |> as(:deleted)
 
+  defp run(:turn, client) do
+    with {:ok, context} <- AtlasAgent.Client.turn(client),
+         {:ok, item} <- AtlasAgent.get(client, context["on"]) do
+      {:turn, Map.put(context, "item", item)}
+    end
+  end
+
+  defp run({:turn_end, outcome}, client) do
+    with {:ok, context} <- AtlasAgent.Client.turn(client),
+         {:ok, _} <-
+           AtlasAgent.Client.turn(
+             client,
+             AtlasAgent.Protocol.message(:turn_end, :turn_end,
+               key: context["key"],
+               outcome: outcome
+             )
+           ) do
+      {:outcome, %{"turn" => context["key"], "outcome" => outcome}}
+    end
+  end
+
   defp run(:tools, client), do: client |> AtlasAgent.Tools.list() |> as(:tools)
 
   defp run({:plan, on, request}, client) do
@@ -144,6 +170,16 @@ defmodule AtlasAgent.CLI do
   defp as(other, _what), do: other
 
   # Output
+
+  defp show({:turn, context}, true), do: json(context, 0)
+
+  defp show({:turn, context}, false),
+    do: IO.puts("Turn #{context["key"]} on #{context["on"]}\n\n" <> text(context["item"])) && 0
+
+  defp show({:outcome, outcome}, true), do: json(outcome, 0)
+
+  defp show({:outcome, outcome}, false),
+    do: IO.puts("Outcome stored for #{outcome["turn"]}: #{outcome["outcome"]}") && 0
 
   defp show({:item, item}, true), do: json(item, 0)
   defp show({:list, rows}, true), do: json(rows, 0)

@@ -476,6 +476,26 @@
       "takes": "values"
     },
     {
+      "call": "turn",
+      "name": "turn",
+      "params": [],
+      "path": "",
+      "replies": {
+        "turn": "turn_context"
+      }
+    },
+    {
+      "call": "turn_end",
+      "name": "turn_end",
+      "params": [],
+      "path": "",
+      "replies": {
+        "refused": "turn_context",
+        "stored": "view model"
+      },
+      "takes": "turn_outcome"
+    },
+    {
       "call": "hello",
       "name": "hello",
       "params": [],
@@ -895,6 +915,41 @@
     {
       "fields": [
         {
+          "name": "key",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "on",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "error",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "turn_context"
+    },
+    {
+      "fields": [
+        {
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "outcome",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "turn_outcome"
+    },
+    {
+      "fields": [
+        {
           "name": "request",
           "required": true,
           "type": "string"
@@ -1068,7 +1123,7 @@
       "returns": "view model"
     }
   ],
-  "version": "0.13.0",
+  "version": "0.14.0",
   "wire": {
     "block": "{\"id\": \"<id>\", \"type\": \"<block>\", \"props\": {...}}",
     "markup": "{\"kind\": \"<kind>\", \"start\": \"<block id>\", \"end\": \"<block id>\", \"group\": \"<id, on a piece of split markup>\", \"props\": {...}}",

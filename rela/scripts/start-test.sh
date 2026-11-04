@@ -44,8 +44,9 @@ if [ ! -x "$bin/rela-server" ] || [ "$("$bin/rela" version)" != "rela version $v
 fi
 [ "${1:-}" != install ] || exit 0
 
+"${ATLAS_CONFIG_PYTHON:-python3}" "$here/scripts/verify.py" "$here"
 mkdir -p "$data/entities" "$data/relations"
-cp "$here/schema.yaml" "$here/data-entry.yaml" "$data/"
+"${ATLAS_CONFIG_PYTHON:-python3}" "$here/scripts/config.py" copy --root "$here" --data "$data"
 "$bin/rela" --project "$data" --quiet validate
 
 # No acl.yaml and a loopback bind (on Fly: test's own private network, which only its core

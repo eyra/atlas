@@ -46,7 +46,7 @@ Change the contract, run `cd bff/contract && mix atlas.gen`, commit the contract
 
 The DSL is plain macros, not Spark: a contract of a few blocks, models and kinds of markup needs only entries, typed fields and a handful of checks, and plain macros keep it without a dependency.
 
-## View model (contract 0.13.0)
+## View model (contract 0.14.0)
 
 Control sends a view model, not a data model: its **content**, a flat list of blocks, and its **markup**, entries that cover a stretch of those blocks. Every block has an id, stable for as long as the page shows the same thing; markup points at ids, never at positions, so inserting, deleting or moving a block (or a hint that changes one) never shifts other markup.
 
@@ -100,19 +100,22 @@ Client to Control:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"hello","env":"test","client":"tui","spec":"0.13.0"}` | First message, with the contract version the client implements; an agent may add `"as"`: the key of the fact it is (`coordinator`), so it is the owner of what is assigned to it (IS-Atlas-54; `ATLAS_AS` for `atlas`). Control of another environment answers `bye` and closes; so does Control on a newer contract than the client's (or when the client says none): `This client implements contract 0.10.0; Control test speaks 0.11.0. It is too old: …`. A newer client is welcomed: it shows what it knows, the rest as fallbacks. |
+| `{"op":"hello","env":"test","client":"tui","spec":"0.14.0"}` | First message, with the contract version the client implements; an agent may add `"as"`: the key of the fact it is (`coordinator`), so it is the owner of what is assigned to it (IS-Atlas-54; `ATLAS_AS` for `atlas`). Control of another environment answers `bye` and closes; so does Control on a newer contract than the client's (or when the client says none): `This client implements contract 0.10.0; Control test speaks 0.11.0. It is too old: …`. A newer client is welcomed: it shows what it knows, the rest as fallbacks. |
 | `{"op":"open","to":"/k/<kind>/<key>"}` | Show the page at this path. |
 | `{"op":"submit","endpoint":"update","params":{"kind":"issue","key":"IS-Atlas-01"},"values":{...}}` | Submit a form or a confirm: the endpoint and params its `submit_to` or `confirm_to` (a `call`) names, one of the contract's submit endpoints (create, create_under, update, delete, link, accept, reopen); values travel as text. A client that knows only paths may send `"to"` with the endpoint's path instead. Anything else is refused, unsent. |
+| `{"op":"turn"}` | Read the agent's single running turn and its original item, using `runtime.turn`. |
+| `{"op":"turn_end","key":"<turn>","outcome":"<text>"}` | Record the current owner's nonempty outcome; Runtime reads the fact and ends the turn. |
 | `{"op":"refresh"}` | Reconcile: read the page again from State. Clients send it on an interval. |
 
 Control to client:
 
 | Message | Meaning |
 |---|---|
-| `{"op":"welcome","env":"test","spec":"0.13.0"}` | Answer to hello, with Control's contract version. |
+| `{"op":"welcome","env":"test","spec":"0.14.0"}` | Answer to hello, with Control's contract version. |
 | `{"op":"page","path","title","back","blocks","markup","reason","position","at"}` | A page: a view model (`blocks` and `markup`) with its path, title and way back. `reason` is `open`, `hint` (a change stored by anyone), `reconcile`, `stored` (your change) or `refused`. `position` is State's position the page is as of. On a page without a form, a `refused` page also has `refused`: State's reasons. When the client's user has a start page of assignments, every page has `count`: what waits for them, in the description's words, for the header. |
 | `{"op":"notice","tone":"pending\|ok\|error\|info","text","at"}` | A line for the status bar. `pending` until State answers. |
 | `{"op":"bye","text"}` | Control closes the connection. |
+| `{"op":"turn","key":"<turn>","on":"<item>"}` | Current turn context; errors have `error` instead of the keys. An outcome is acknowledged with a stored page. |
 
 Every message here is an endpoint of the contract (`defendpoint`, its call the message's `op`; ADR 0002), with what it takes and what it replies, and `blocks.json` lists them: hello, refresh, the pages' `open`, the submits, what Control sends unasked (`page` by hint, `notice`, `bye`), and the agent's `ask`, `run`, `cancel` and `stop`.
 
@@ -129,3 +132,22 @@ The page Control answers has the concrete path, such as `/k/issue/IS-Atlas-01`.
 ### The agent behind `:`
 
 A plan block comes, for now, from the agent the TUI starts (`atlas steer`), not from Control. They talk in JSON lines on its stdin and stdout: the client sends `ask` (request, the page's path), `run` (the kept steps' numbers and values), `cancel` and `stop`. The agent answers `plan` (the whole block, after every change) and `notice`. The full table is in `AtlasAgent.Steer`. The agent is a Control client of its own and writes only on `run`, only the steps it proposed. Once Runtime runs agents (SC-Atlas-02), Control sends the same block.
+
+<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0015).</sub>
+
+### Compile-time protocol payloads
+
+`use AtlasBFF.Targets.Protocol, contract: MyContract` exposes `version/0`,
+`pages/0`, `endpoints/0`, `path/2`, `match/1` and `endpoint_path/3` from
+`__schema__/0`. `payload(call, name, props)` validates an endpoint's `takes`
+and returns JSON-ready string keys, including nested models, lists and maps.
+Unknown fields, missing required values and wrong types raise `ArgumentError`;
+optional nil values are omitted. Dynamic `:values` are maps of text inputs.
+
+`message(call, name, props)` adds the `op` tag for an explicitly selected
+pathless endpoint. It cannot construct open/submit envelopes from the current
+contract and refuses endpoints with paths. The target does not infer which
+side sends an operation, dispatch replies, enforce permissions or retry writes.
+The agent uses it for hello, turn and turn_end; its existing transport and reply
+adapter remain responsible for completion and deadlines. Outcome validation,
+turn lifecycle and ownership remain server responsibilities.

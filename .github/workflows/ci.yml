@@ -22,7 +22,7 @@ jobs:
           elixir-version: "1.18"
       - name: The generator holds none of Atlas's values
         run: |
-          if grep -rniE 'AtlasBFFContract|AtlasControl|AtlasTui|submit_to|cancel_to|confirm_to|\.\./contract|bff/contract|"0\.2\.0"' lib test mix.exs; then
+          if grep -rniE 'AtlasBFFContract|AtlasControl|AtlasTui|AtlasAgent|scene|use_case|turn_outcome|submit_to|cancel_to|confirm_to|\.\./contract|bff/contract|"0\.2\.0"' lib test mix.exs; then
             echo "::error::bff/generator mentions Atlas's contract. Keep Atlas's values in bff/contract."
             exit 1
           fi
@@ -62,6 +62,7 @@ jobs:
         with:
           otp-version: "28"
           elixir-version: "1.18"
+      - run: python3 -m pip install -r ../rela/scripts/requirements.txt
       - run: mix compile --warnings-as-errors
       - run: mix format --check-formatted
       - run: mix test
@@ -113,6 +114,10 @@ jobs:
         with:
           otp-version: "28"
           elixir-version: "1.18"
+      - run: python3 -m pip install -r rela/scripts/requirements.txt
+      - run: ATLAS_RELA_BIN="$ATLAS_E2E_RELA_BIN" rela/scripts/start-test.sh install
+      - run: python3 rela/scripts/assemble.py --check
+      - run: python3 -m unittest discover -s rela/tests -v
       - run: sudo apt-get update && sudo apt-get install -y tmux lsof netcat-openbsd jq
       # rela-server, pinned in rela/scripts/start-test.sh; it downloads it when missing.
       - uses: actions/cache@v4
@@ -141,6 +146,8 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     needs: [generator, contract, beam, tui, agent, e2e]
     runs-on: ubuntu-latest
+    env:
+      ATLAS_RELA_BIN: ${{ github.workspace }}/.rela-bin
     # One deploy at a time; a newer merge waits for the running one.
     concurrency:
       group: fly-deploy-test
@@ -152,6 +159,9 @@ jobs:
           otp-version: "28"
           elixir-version: "1.18"
       - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: python3 -m pip install -r rela/scripts/requirements.txt
+      - name: Install the pinned schema validator in this deployment job
+        run: rela/scripts/start-test.sh install
       - run: sudo apt-get update && sudo apt-get install -y lsof netcat-openbsd jq
       - name: Deploy test (rela, then the core), then the smoke check
         env:
@@ -167,6 +177,8 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [generator, contract, beam, tui, agent, e2e]
     runs-on: ubuntu-latest
+    env:
+      ATLAS_RELA_BIN: ${{ github.workspace }}/.rela-bin
     # One deploy at a time; a newer merge waits for the running one.
     concurrency:
       group: fly-deploy-prod
@@ -178,6 +190,9 @@ jobs:
           otp-version: "28"
           elixir-version: "1.18"
       - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: python3 -m pip install -r rela/scripts/requirements.txt
+      - name: Install the pinned schema validator in this deployment job
+        run: rela/scripts/start-test.sh install
       - run: sudo apt-get update && sudo apt-get install -y lsof netcat-openbsd jq
       - name: Deploy prod (rela, then the core), then the smoke check
         env:

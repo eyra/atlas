@@ -28,6 +28,8 @@
 #   atlas get <key> [--json]                 one item, and what hangs under it
 #   atlas list <kind> [--json]               the items of a kind
 #   atlas delete <key> [--json]              delete; refused while anything hangs under it
+#   atlas turn [--json]                     the current turn, its item and what to do
+#   atlas turn end <outcome>                 record its outcome; Runtime ends the turn
 #   atlas tools [--json]                     the agent's tools: Control's actions, from the description
 #   atlas plan --on <key> <request>          what the agent proposes for a request on that page;
 #                      it reads through Control and writes nothing (UC-Atlas-16)
@@ -77,6 +79,10 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
+# Keep ordinary invocations on the isolated project dependency without shell setup.
+if [ -z "${ATLAS_CONFIG_PYTHON:-}" ] && [ -x "$root/.venv-config/bin/python" ]; then
+  export ATLAS_CONFIG_PYTHON="$root/.venv-config/bin/python"
+fi
 # The comment above, up to `set -euo pipefail`: the usage.
 header() { sed -n '2,/^set -euo/p' "$root/bin/atlas" | sed '$d' | sed 's/^# \{0,1\}//'; }
 usage() { header; exit 2; }
@@ -95,7 +101,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help) args+=("$1"); shift ;;
+        e2e|turn|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help) args+=("$1"); shift ;;
         *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
       esac ;;
   esac
@@ -205,6 +211,7 @@ stop_core() {
 }
 
 start_core() {
+  "${ATLAS_CONFIG_PYTHON:-python3}" "$root/rela/scripts/verify.py" "$root/rela"
   echo "atlas: starting the core from $root at $(head_now) (a first start compiles, about half a minute)..."
   mkdir -p "$state"
   nohup "$root/bin/atlas" up --env "$env" >"$log" 2>&1 </dev/null &
@@ -355,7 +362,7 @@ if [ -n "$fly_app" ]; then
     rela-status) exec "$(fly_cli)" status -a "$fly_rela_app" ;;
     rela-stop) echo "atlas: $on_fly; rela keeps running there" >&2; exit 1 ;;
     migrate-*) echo "atlas: the migrations read rela on this Mac; $on_fly. Migrate a copy: docs/guides/test-on-fly.md, \"A migration\"" >&2; exit 1 ;;
-    put|set|get|list|delete|tools|plan|steer|help|load-plan) ensure_tunnel ;;
+    turn|put|set|get|list|delete|tools|plan|steer|help|load-plan) ensure_tunnel ;;
   esac
 fi
 
@@ -438,7 +445,7 @@ case "$cmd" in
     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "atlas: add ~/.local/bin to your PATH" ;; esac
     ;;
   # The clients run in their own folders; a path the caller gives is read from where they called.
-  put|set|get|list|delete|tools|plan|steer|help)
+  turn|put|set|get|list|delete|tools|plan|steer|help)
     # `atlas help` (not --json) starts with this script's own commands; `atlas help <kind>`
     # shows that kind only.
     kind_named=""

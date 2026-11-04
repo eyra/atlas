@@ -36,17 +36,26 @@ as() { # rela|core, then a flyctl command
 }
 machines() { as "$1" status -a "$2" --json | jq '.Machines | length'; }
 
+"${ATLAS_CONFIG_PYTHON:-python3}" "$root/rela/scripts/assemble.py" --check
+
 held=""
 if [ "$(machines rela "$rela_app")" -gt 0 ]; then
   if as rela ssh console -q -a "$rela_app" -C "test -e /data/hold" 2>/dev/null; then
     held=1
     echo "deploy: $env is held (a migration is under way); deploying without health checks or smoke check"
   else
-    # 1. The description check, with this build's description beside rela's data.
+    # Resolve the whole selected closure locally before uploading anything. The deployed
+    # old image may predate Python/includes, so preflight receives an equivalent flat
+    # schema; the new image and local startup still use native includes.
+    next="$(mktemp -d)"
+    trap 'rm -rf "$next"' EXIT
+    "${ATLAS_CONFIG_PYTHON:-python3}" "$root/rela/scripts/config.py" flat > "$next/schema.yaml"
+    cp "$root/rela/data-entry.yaml" "$next/data-entry.yaml"
     as rela ssh console -q -a "$rela_app" -C "sh -c 'rm -rf /tmp/next && mkdir -p /tmp/next/scripts'" >/dev/null
-    for file in schema.yaml data-entry.yaml scripts/description.sh; do
-      as rela ssh sftp put -a "$rela_app" -m 0755 "$root/rela/$file" "/tmp/next/$file" >/dev/null
+    for file in schema.yaml data-entry.yaml; do
+      as rela ssh sftp put -a "$rela_app" "$next/$file" "/tmp/next/$file" >/dev/null
     done
+    as rela ssh sftp put -a "$rela_app" -m 0755 "$root/fly/check-fits.sh" /tmp/next/scripts/description.sh >/dev/null
     if ! orphans="$(as rela ssh console -q -a "$rela_app" \
       -C "env ATLAS_RELA_DATA=/data/rela ATLAS_RELA_BIN=/app/bin /tmp/next/scripts/description.sh fits" 2>/dev/null)"; then
       echo "deploy: this build's description no longer describes data rela $env holds on Fly:" >&2
@@ -64,6 +73,19 @@ as rela deploy "$root" --config "$root/fly/$env/rela.toml" --dockerfile "$root/f
   --remote-only --ha=false --image-label "$label" ${strategy[@]+"${strategy[@]}"}
 as core deploy "$root" --config "$root/fly/$env/core.toml" --dockerfile "$root/fly/core.Dockerfile" \
   --remote-only --ha=false --image-label "$label" ${strategy[@]+"${strategy[@]}"}
+
+# Check the actually deployed pair using each app's own token before the client smoke.
+if [ -z "$held" ]; then
+  expected="$(shasum -a 256 "$root/rela/atlas.manifest.json" | cut -d ' ' -f 1)"
+  for side in rela core; do
+    if [ "$side" = rela ]; then paired_app="$rela_app"; else paired_app="$app"; fi
+    running="$(as "$side" status -a "$paired_app" --json | jq -r '.Machines[0].image_ref.tag')"
+    [ "$running" = "$label" ] || fail "$paired_app runs $running, not $label"
+    packaged="$(as "$side" ssh console -q -a "$paired_app" -C "sha256sum /app/rela/atlas.manifest.json" | tr -d '\r' | awk '{print $1}')"
+    [ "$packaged" = "$expected" ] || fail "$paired_app has another description composition"
+  done
+  as rela ssh console -q -a "$rela_app" -C "env ATLAS_RELA_DATA=/data/rela /app/rela/scripts/description.sh same" || fail 'rela runs another schema closure'
+fi
 
 # 3. The smoke check, as the core's token.
 if [ -n "$held" ]; then

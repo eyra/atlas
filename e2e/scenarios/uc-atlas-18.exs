@@ -42,7 +42,9 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     ask.()
     at = press(t1, "Enter")
     see(t1, "Running: 1 of 3 stored")
-    by_hint(t2, row.("Watch the first step"), at)
+    # Enter starts the asynchronous run before its first write. Include that work
+    # in the bound, still below the 5-second reconcile. Later steps pause for 2s.
+    by_hint(t2, row.("Watch the first step"), at, within: 2_000)
     refute_see(t2, row.("Watch the third step"))
     see(t1, "esc stop after this step")
     see(t1, "Done: 3 of 3 stored", 10_000)

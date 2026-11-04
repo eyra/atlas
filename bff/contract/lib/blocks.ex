@@ -22,7 +22,8 @@ defmodule AtlasBFFContract.Blocks do
   # agent client is.
   # 0.13.0: failure pages, in the test environment only (IS-Atlas-23): what can be made
   # to fail on a page, and a confirm that causes one.
-  version "0.13.0"
+  # 0.14.0: the current turn and its outcome, through Control (IS-Atlas-19).
+  version "0.14.0"
 
   # Something the user can do from a block: open `to`. `key` is the key a keyboard
   # client binds it to; other clients may show it as a button.
@@ -247,6 +248,24 @@ defmodule AtlasBFFContract.Blocks do
     field :text, :string, required: true
     field :at, :string
   end
+
+  defmodel :turn_context do
+    field :key, :string
+    field :on, :string
+    field :error, :string
+  end
+
+  defmodel :turn_outcome do
+    field :key, :string, required: true
+    field :outcome, :string, required: true
+  end
+
+  defendpoint :turn, call: :turn, replies: [turn: :turn_context]
+
+  defendpoint :turn_end,
+    call: :turn_end,
+    takes: :turn_outcome,
+    replies: [stored: :view_model, refused: :turn_context]
 
   defendpoint :hello, call: :hello, takes: :hello, replies: [welcome: :welcome, bye: :bye]
 

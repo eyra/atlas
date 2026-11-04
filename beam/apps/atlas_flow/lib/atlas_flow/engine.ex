@@ -154,18 +154,53 @@ defmodule AtlasFlow.Engine do
   defp up(description, kind, key, depth) do
     parents =
       case Talk.read(kind, %{"key" => key, "plain" => true}) do
-        %{"fact" => %{"links" => links}} ->
-          for {relation, %{"parent" => true, "from" => from, "to" => [to]}} <-
-                description["relations"] || %{},
-              kind in from,
-              parent <- links[relation] || [],
-              do: {to, parent}
+        %{"fact" => %{"links" => links} = fact} ->
+          parents =
+            for {relation, %{"parent" => true, "from" => from, "to" => [to]}} <-
+                  description["relations"] || %{},
+                kind in from,
+                parent <- links[relation] || [],
+                do: {to, parent}
+
+          n = get_in(description, ["runtime", "turn"]) || %{}
+
+          ended =
+            if kind == n["kind"] and fact["values"][n["state"]] != n["running"] do
+              for to <- get_in(description, ["relations", n["on"], "to"]) || [],
+                  item <- links[n["on"]] || [],
+                  do: {to, item}
+            else
+              []
+            end
+
+          # Component changes wake open work, but do not reopen a completed fact's
+          # stopped process (including historical owners left for a migration).
+          components =
+            for {relation, %{"component" => %{}, "to" => to, "from" => from}} <-
+                  description["relations"] || %{},
+                kind in to,
+                from_kind <- from,
+                %{"facts" => facts} <- [
+                  Talk.read(from_kind, %{"linked" => %{relation => key}})
+                ],
+                item <- facts,
+                component_open?(description, from_kind, item),
+                do: {from_kind, item["key"]}
+
+          Enum.uniq(parents ++ ended ++ components)
 
         _ ->
           []
       end
 
     [{kind, key} | Enum.flat_map(parents, fn {k, p} -> up(description, k, p, depth - 1) end)]
+  end
+
+  defp component_open?(description, kind, fact) do
+    case Definition.for_kind(description, kind) do
+      {_name, flow} -> open?(flow, fact)
+      nil -> true
+    end
   end
 
   # A fact that is done by itself alone (what hangs under it can only reopen work its own

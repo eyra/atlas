@@ -1,0 +1,180 @@
+{
+  "todo": {
+    "title": "What to do",
+    "why": "Why",
+    "instructions": "How",
+    "answers": "Answers"
+  },
+  "runtime": {
+    "turn": {
+      "kind": "turn",
+      "key": "TU-{on}-{n}",
+      "on": "turn_on",
+      "by": "turn_by",
+      "state": "state",
+      "running": "running",
+      "ended": "ended",
+      "machine": "machine",
+      "lease": "lease_until",
+      "activity": "activity",
+      "why": "why",
+      "ended_at": "ended_at",
+      "outcome": "outcome"
+    },
+    "agent": {
+      "cannot_run": "cannot_run"
+    }
+  },
+  "start": {
+    "assigned": {
+      "relation": "assigned_to",
+      "title": "Assigned to you",
+      "count": "{count} assigned to you"
+    },
+    "open": {
+      "title": "Open work",
+      "empty": "Nothing is open: no fact is assigned to anyone, and nothing is expected."
+    }
+  },
+  "relations": {
+    "assigned_to": {
+      "actions": {
+        "change": {
+          "label": "Hand to\u2026",
+          "key": "h",
+          "with": [
+            "deadline"
+          ],
+          "cause": "handed to {to} by {by}"
+        }
+      }
+    }
+  },
+  "entities": {
+    "person": {
+      "top": false,
+      "primary": "name",
+      "create": {
+        "ask": [
+          "name"
+        ],
+        "id": {
+          "from": "name",
+          "pattern": "^\\s*([A-Za-z][A-Za-z0-9]*)",
+          "template": "{1}",
+          "lower": true,
+          "error": "name must start with a letter, e.g. Melle"
+        }
+      }
+    },
+    "assignment": {
+      "top": false,
+      "by_hand": "update",
+      "late": {
+        "after": "deadline",
+        "while": "expected",
+        "label": "late"
+      },
+      "primary": "of",
+      "create": {
+        "ask": [
+          "of"
+        ],
+        "id": {
+          "from": "of",
+          "pattern": "^(.+)$",
+          "template": "AS-{1}",
+          "error": "of must be the key of the fact it belongs to"
+        }
+      },
+      "properties": {
+        "expected": {
+          "set_by": [
+            "flow",
+            "migration"
+          ]
+        },
+        "handover": {
+          "set_by": [
+            "flow"
+          ]
+        }
+      }
+    },
+    "turn": {
+      "top": false,
+      "by_hand": false,
+      "order": "newest",
+      "properties": {
+        "state": {
+          "set_by": [
+            "runtime"
+          ]
+        },
+        "machine": {
+          "set_by": [
+            "runtime"
+          ]
+        },
+        "lease_until": {
+          "set_by": [
+            "runtime"
+          ],
+          "label": "Lease until"
+        },
+        "activity": {
+          "set_by": [
+            "runtime"
+          ]
+        },
+        "why": {
+          "set_by": [
+            "runtime"
+          ]
+        },
+        "ended_at": {
+          "set_by": [
+            "runtime"
+          ],
+          "label": "Ended at"
+        },
+        "outcome": {
+          "set_by": [
+            "turn_owner"
+          ],
+          "multiline": true
+        }
+      }
+    },
+    "agent": {
+      "properties": {
+        "cannot_run": {
+          "set_by": [
+            "runtime"
+          ],
+          "label": "Cannot run"
+        }
+      },
+      "top": false,
+      "counts": [
+        {
+          "relation": "assigned_to",
+          "text": "{count} assigned"
+        }
+      ],
+      "primary": "name",
+      "create": {
+        "ask": [
+          "name"
+        ],
+        "id": {
+          "from": "name",
+          "pattern": "^\\s*([A-Za-z][A-Za-z0-9]*)",
+          "template": "{1}",
+          "lower": true,
+          "error": "name must start with a letter, e.g. Coordinator"
+        }
+      }
+    }
+  }
+}

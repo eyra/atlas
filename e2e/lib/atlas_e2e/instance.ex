@@ -72,6 +72,7 @@ defmodule AtlasE2E.Instance do
         "machine" => "e2e",
         "agents" => %{
           "runner" => %{"port" => "stub"},
+          "breaker" => %{"port" => "stub"},
           "tester" => %{"port" => "stub", "max_seconds" => 15}
         },
         "stub_dir" => Path.join(dir, "stub"),

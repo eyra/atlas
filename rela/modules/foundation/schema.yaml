@@ -1,0 +1,143 @@
+# Complete definitions; included paths are relative to the selected root.
+types:
+  turn_state:
+    values:
+    - running
+    - ended
+    labels:
+      running: Running
+      ended: Ended
+entities:
+  person:
+    label: Person
+    plural: people
+    id_type: manual
+    description: 'Someone who works with Atlas. The id is short and lower case, made from
+
+      the name, e.g. melle.
+
+      '
+    properties:
+      name:
+        type: string
+        required: true
+        description: As it is shown
+  agent:
+    label: Agent
+    plural: agents
+    id_type: manual
+    description: 'An agent that works with Atlas. The id is short and lower case, made from the
+
+      name, e.g. coordinator.
+
+      '
+    properties:
+      name:
+        type: string
+        required: true
+        description: As it is shown
+      cannot_run:
+        type: string
+        description: Where and since when it cannot run, and why (3 crashes in 10 minutes); Runtime writes
+          and clears it (IS-Atlas-18)
+  assignment:
+    label: Assignment
+    plural: assignments
+    id_type: manual
+    id_prefix: AS-
+    description: 'What belongs to being assigned, for one fact: who it is assigned to and what
+
+      they are expected to do. Made and deleted with the fact; its id is AS- and the
+
+      fact''s, e.g. AS-UC-Atlas-01.
+
+      '
+    properties:
+      of:
+        type: string
+        required: true
+        description: The key of the fact it belongs to
+      expected:
+        type: string
+        description: What its owner is expected to do next; Flow writes it (IS-Atlas-53)
+      deadline:
+        type: datetime
+        description: When it should be done by; optional, it only marks it late (IS-Atlas-14)
+      handover:
+        type: string
+        description: A deferred automatic handover; Flow keeps it until the running owner ends its turn
+      flow_state:
+        type: string
+        description: The state of its flow it is in; Flow writes it (IS-Atlas-54)
+  turn:
+    label: Turn
+    plural: turns
+    id_type: manual
+    id_prefix: TU-
+    description: 'One stretch in which an agent acts on one item: started by Runtime for the item''s
+
+      owner, kept while the agent shows activity (its lease), ended when the agent ends
+
+      it, goes silent, crashes, runs too long, or no longer owns the item.
+
+      '
+    properties:
+      state:
+        type: turn_state
+        required: true
+        description: Running or ended
+      machine:
+        type: string
+        required: true
+        description: The machine whose Runtime runs it
+      lease_until:
+        type: datetime
+        description: 'Until when the turn holds its lease: the agent''s last activity plus the silence
+          limit'
+      activity:
+        type: string
+        description: The agent's last activity Runtime saw
+      why:
+        type: string
+        description: Why it ended
+      ended_at:
+        type: datetime
+        description: When it ended
+      outcome:
+        type: string
+        description: The agent's fact about what it did; Runtime reads it and ends the turn
+relations:
+  assigned_to:
+    label: assigned to
+    description: Who is next in line to do something with it; one, a person or an agent.
+    from:
+    - assignment
+    to:
+    - person
+    - agent
+    max_outgoing: 1
+    inverse:
+      id: assignments
+      label: assignments
+  turn_on:
+    label: 'on'
+    description: The item the turn acts on.
+    from:
+    - turn
+    to:
+    - assignment
+    max_outgoing: 1
+    inverse:
+      id: turns
+      label: turns
+  turn_by:
+    label: by
+    description: The agent that acts in the turn.
+    from:
+    - turn
+    to:
+    - agent
+    max_outgoing: 1
+    inverse:
+      id: turns_by
+      label: turns

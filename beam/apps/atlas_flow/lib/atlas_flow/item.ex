@@ -79,9 +79,9 @@ defmodule AtlasFlow.Item do
       parents = parent_relations(description, state.kind)
       children = children(parents, description, state.key)
       {current, vars} = Definition.state_of(flow, fact, children, parents)
-      move(state, description, {name, flow}, fact, current, vars)
+      result = move(state, description, {name, flow}, fact, current, vars)
 
-      if current["done"],
+      if current["done"] == true and result != :held,
         do: :stop,
         else: {:wait, Definition.every(current || %{}, state.every)}
     else
@@ -101,7 +101,7 @@ defmodule AtlasFlow.Item do
   defp move(state, description, {name, flow}, fact, current, vars) do
     case written(description, flow, state.kind, fact) do
       {:ok, kind, target} ->
-        write(state, name, flow, kind, target, current, vars)
+        write(state, description, name, flow, kind, target, current, vars)
 
       {:missing, relation} ->
         Logger.warning("flow #{name}: #{state.key} has no #{relation} to write on; tried again")
@@ -126,7 +126,7 @@ defmodule AtlasFlow.Item do
 
   defp written(_description, _flow, kind, fact), do: {:ok, kind, fact}
 
-  defp write(state, name, flow, kind, fact, current, vars) do
+  defp write(state, description, name, flow, kind, fact, current, vars) do
     expected = Definition.expected(current, vars)
     field = flow["field"]
 
@@ -142,13 +142,34 @@ defmodule AtlasFlow.Item do
     # it stays.
     moved? = values != %{} and blank(fact["values"][field]) != nil
 
-    owner? =
-      if (relation && (get_in(fact, ["links", relation]) || []) != List.wrap(owner)) and
-           (moved? or not by_hand?(fact, relation)),
-         do: owner_exists(current),
-         else: :no
+    held_field = flow["handover_field"]
+    owners = get_in(fact, ["links", relation]) || []
+    origin = get_in(fact, ["origins", relation, "position"])
+    pending = pending(fact, held_field)
+    deferred? = pending["from"] == owners and pending["position"] == origin
+    cancelled? = pending != %{} and not deferred?
 
-    links = if owner? == :yes, do: %{relation => List.wrap(owner)}, else: %{}
+    wanted? =
+      relation != nil and owners != List.wrap(owner) and
+        (moved? or deferred? or (not cancelled? and not by_hand?(fact, relation)))
+
+    owner? = if wanted?, do: owner_exists(current), else: :no
+
+    hold? =
+      wanted? and current["done"] != true and held_field != nil and
+        running?(description, fact["key"], owners)
+
+    links = if owner? == :yes and not hold?, do: %{relation => List.wrap(owner)}, else: %{}
+
+    held_value =
+      if hold? or (wanted? and deferred? and owner? != :yes),
+        do: JSON.encode!(%{"from" => owners, "position" => origin}),
+        else: ""
+
+    values =
+      if held_field && to_string(fact["values"][held_field]) != held_value,
+        do: Map.put(values, held_field, held_value),
+        else: values
 
     # The state's name, so a page can show its owner what to do (`state_field`). Written
     # with the rest, and alone when only it differs; it never counts as a move by itself.
@@ -168,7 +189,12 @@ defmodule AtlasFlow.Item do
           "values" => values,
           "version" => nil,
           "by" => "flow",
-          "cause" => cause(name, current, owner)
+          "cause" => cause(name, current, owner),
+          "was" =>
+            Map.merge(
+              Map.new(Map.keys(values), &{&1, fact["values"][&1]}),
+              Map.new(Map.keys(links), &{&1, fact["links"][&1] || []})
+            )
         }
 
         content = if links == %{}, do: content, else: Map.put(content, "links", links)
@@ -183,6 +209,39 @@ defmodule AtlasFlow.Item do
 
       true ->
         :ok
+    end
+
+    if hold?, do: :held, else: :ok
+  end
+
+  defp pending(_fact, nil), do: %{}
+
+  defp pending(fact, field) do
+    case JSON.decode(fact["values"][field] || "") do
+      {:ok, %{} = value} -> value
+      _ -> %{}
+    end
+  end
+
+  # Unknown State availability preserves the owner and durable deferred handover.
+  defp running?(_description, _key, []), do: false
+
+  defp running?(description, key, owners) do
+    case get_in(description, ["runtime", "turn"]) do
+      %{"kind" => kind} = n ->
+        case Talk.read(kind, %{"linked" => %{n["on"] => key}, "plain" => true}) do
+          %{"facts" => turns} ->
+            Enum.any?(turns, fn turn ->
+              turn["values"][n["state"]] == n["running"] and
+                Enum.any?(get_in(turn, ["links", n["by"]]) || [], &(&1 in owners))
+            end)
+
+          _ ->
+            true
+        end
+
+      _ ->
+        false
     end
   end
 
