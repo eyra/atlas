@@ -17,8 +17,8 @@ kill_timeout = "10s"
   initial_size = "1gb"
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "256mb"
+  size = "performance-1x"
+  memory = "2048mb"
 
 [checks.rela]
   type = "http"
