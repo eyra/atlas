@@ -68,7 +68,7 @@ Nobody else sees the part. `atlas get` shows it to a client that is the owner: a
 | Step | Keys / command | What you should see |
 |---|---|---|
 | A use case to test | a use case whose issues are all done (its pull requests merged); Flow makes it yours | On Assigned to you: `UC-Atlas-NN  …  Test it · since … · Flow test_and_accept: all under it is completed → melle`. |
-| Its page | `↵` on it | **What to do: Test it** first, with Why, How (`Try the test below, then accept it.`), **Melle can test** with the text from its description, and **Answers** `a Accept`. |
+| Its page | `↵` on it | **What to do: Test it** first, with Why, How (`Try the test below, then accept it, or reject it with a note.`), **Melle can test** with the text from its description, and **Answers** `a Accept   f Reject` (IS-Atlas-56). |
 | Not yours | a fact the coordinator owns | No What to do part. |
 | An agent's | `ATLAS_AS=coordinator atlas get IS-Atlas-NN --env test` on an open issue | `What to do: Build it`, `Why: …`, `How: Build it in one pull request and get that merged; link the pull request to it.`, before the issue itself. Without `ATLAS_AS`, no such part. |
 
