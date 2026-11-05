@@ -318,6 +318,10 @@ defmodule AtlasTui.Model do
   # Keys
 
   def key(model, :ctrl_c), do: {model, [:quit]}
+
+  def key(%{console: %{legend: legend}} = model, key) when legend != nil,
+    do: AtlasTui.Interactions.key(model, key)
+
   def key(%{closed: true} = model, _key), do: {model, [:quit]}
 
   def key(%{console: console} = model, key) when console != nil,

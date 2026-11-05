@@ -17,6 +17,8 @@ defmodule AtlasTui.Console do
             active: nil,
             selections: %{},
             projection: nil,
+            legend: nil,
+            viewport: {100, 30},
             action_error: nil,
             generation: 0
 

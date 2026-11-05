@@ -118,6 +118,9 @@ defmodule AtlasTui.View do
 
   # Body
 
+  defp body(%Model{console: %{legend: legend}} = model, width, room) when legend != nil,
+    do: AtlasTui.LegendView.render(model, width, room)
+
   defp body(%Model{connected: false, closed: false}, _width, _room) do
     [
       [],
@@ -140,6 +143,7 @@ defmodule AtlasTui.View do
   # room exactly, each part scrolled on its own; a part that is cut says so itself.
   defp laid_out(model, width, room) do
     if model.connected and model.blocks != [] and model.plan == nil and
+         !(model.console && model.console.legend) and
          Model.parts(model) != [],
        do: parts(content(model), model, width, room),
        else: plain_layout(model, width, room)
@@ -783,11 +787,14 @@ defmodule AtlasTui.View do
   # Footer
 
   # The help, or the request line while `:` is open.
+  defp footer_help(%Model{console: %{legend: legend}}, _help) when legend != nil, do: []
+
   defp footer_help(%Model{console: console, ask: text}, _help)
        when console != nil and is_binary(text),
        do: [[{:bold, " Request "}, {:plain, text}, {:cursor, " "}]]
 
-  defp footer_help(%Model{console: console}, _help) when console != nil, do: []
+  defp footer_help(%Model{console: console} = model, _help) when console != nil,
+    do: AtlasTui.LegendView.affordance(model)
 
   defp footer_help(%Model{ask: text}, _help) when is_binary(text),
     do: [
