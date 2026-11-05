@@ -216,9 +216,29 @@ defmodule AtlasBFF.Wire do
       |> Map.new()
       |> Map.merge(envelope.select)
 
+    fields = Map.merge(Map.get(envelope, :required, %{}), Map.get(envelope, :optional, %{}))
+
+    message =
+      Enum.reduce(fields, message, fn {key, type}, acc ->
+        case Map.fetch(acc, key) do
+          {:ok, value} -> Map.put(acc, key, normalize!(value, type, models))
+          :error -> acc
+        end
+      end)
+
     check!(envelope, message, models)
     message
   end
+
+  defp normalize!(values, {:list, type}, models) when is_list(values),
+    do: Enum.map(values, &normalize!(&1, type, models))
+
+  defp normalize!(value, type, models) when is_map_key(models, type),
+    do: AtlasBFF.Targets.Protocol.value!(models, type, value)
+
+  # Existing primitives and opaque/primitive-map fields keep their wire semantics;
+  # check! validates them below, including the original string-key requirement.
+  defp normalize!(value, _, _), do: value
 
   def classify(wires, name, channel, message, models \\ %{})
 
@@ -276,7 +296,7 @@ defmodule AtlasBFF.Wire do
     do: is_list(v) and Enum.all?(v, &typed?(&1, type, models))
 
   defp typed?(v, type, models) do
-    AtlasBFF.Targets.Protocol.value!(models, type, v)
+    AtlasBFF.Targets.Protocol.validate_value!(models, type, v)
     true
   rescue
     ArgumentError -> false

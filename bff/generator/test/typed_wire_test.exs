@@ -67,4 +67,54 @@ defmodule AtlasBFF.TypedWireTest do
       AtlasBFF.Wire.validate!(%{schema() | protocol: [wire, other]})
     end
   end
+
+  test "optional envelope models and model lists normalize while primitive maps keep legacy keys" do
+    wire = hd(schema().protocol)
+
+    request =
+      Map.put(wire.request, :optional, %{
+        "items" => {:list, :identity},
+        "other" => :identity,
+        "tags" => {:map, :string}
+      })
+
+    wire = %{wire | request: request}
+    models = Map.new(schema().models, &{&1.name, &1.fields})
+
+    message =
+      AtlasBFF.Wire.encode!(
+        wire,
+        %{
+          target: [key: "one"],
+          items: [[key: "two"], %{key: "three"}],
+          other: [key: "four"],
+          tags: %{"tag" => "value"}
+        },
+        models
+      )
+
+    assert message["target"] == %{"key" => "one"}
+    assert message["items"] == [%{"key" => "two"}, %{"key" => "three"}]
+    assert message["other"] == %{"key" => "four"}
+
+    assert {:ok, :inspect_one, ^message} =
+             AtlasBFF.Wire.decode_request(
+               [wire],
+               :sample,
+               JSON.decode!(JSON.encode!(message)),
+               models
+             )
+
+    assert {:invalid, _} =
+             AtlasBFF.Wire.decode_request(
+               [wire],
+               :sample,
+               %{message | "items" => [["key", "two"]]},
+               models
+             )
+
+    assert_raise ArgumentError, fn ->
+      AtlasBFF.Wire.encode!(wire, %{target: [key: "one"], tags: %{tag: "value"}}, models)
+    end
+  end
 end
