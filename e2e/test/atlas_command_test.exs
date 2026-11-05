@@ -51,6 +51,20 @@ defmodule AtlasE2E.AtlasCommandTest do
     assert {_, 2} = atlas(["env", "--env="])
   end
 
+  test "surface selection belongs to the TUI and never reserves a generic property name" do
+    assert {out, 2} = atlas(["tui", "--surface", "unknown"])
+    assert out =~ "unknown TUI surface"
+    # Environment disagreement stops before any connection or command executes.
+    # A generic create option named surface must reach that guard unchanged.
+    assert {out, 1} =
+             atlas(
+               ["put", "widget", "--surface", "dark", "--env", "prod"],
+               [{"ATLAS_ENV_FILE", private_file("test")}]
+             )
+
+    assert out =~ "is for test, not prod"
+  end
+
   test "the end-to-end test refuses prod" do
     assert {out, 1} = atlas(["e2e", "--env", "prod"])
     assert out =~ "never on prod"

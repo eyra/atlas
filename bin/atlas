@@ -99,17 +99,21 @@ while [ $# -gt 0 ]; do
     --env) [ -n "${2:-}" ] || no_env; env="$2"; shift 2 ;;
     --env=?*) env="${1#--env=}"; shift ;;
     --env=) no_env ;;
-    --surface)
-      [ "$cmd" = tui ] && [ -n "${2:-}" ] || usage
-      case "$2" in console|legacy) ;; *) echo "atlas: unknown TUI surface $2" >&2; usage ;; esac
-      args+=("--surface" "$2"); shift 2 ;;
-    --surface=*)
-      [ "$cmd" = tui ] || usage
-      case "${1#--surface=}" in console|legacy) ;; *) echo "atlas: unknown TUI surface ${1#--surface=}" >&2; usage ;; esac
-      args+=("$1"); shift ;;
     *)
       case "$cmd" in
         e2e|turn|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help) args+=("$1"); shift ;;
+        tui)
+          case "$1" in
+            --surface)
+              [ -n "${2:-}" ] || usage
+              case "$2" in console|legacy) ;; *) echo "atlas: unknown TUI surface $2" >&2; usage ;; esac
+              args+=("--surface" "$2"); shift 2 ;;
+            --surface=*)
+              case "${1#--surface=}" in console|legacy) ;; *) echo "atlas: unknown TUI surface ${1#--surface=}" >&2; usage ;; esac
+              args+=("$1"); shift ;;
+            -h|--help) usage ;;
+            *) echo "atlas: unknown option $1" >&2; usage ;;
+          esac ;;
         *) case "$1" in -h|--help) usage ;; *) echo "atlas: unknown option $1" >&2; usage ;; esac ;;
       esac ;;
   esac
