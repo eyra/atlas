@@ -286,6 +286,7 @@ defmodule AtlasTui.App do
 
   defp draw(state) do
     {width, height} = size()
+    state = %{state | model: AtlasTui.Legend.resize(state.model, width, height)}
     state.model |> View.render(width, height, state.reconcile) |> View.to_ansi() |> IO.write()
     state
   end

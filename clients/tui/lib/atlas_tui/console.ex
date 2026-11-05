@@ -17,6 +17,8 @@ defmodule AtlasTui.Console do
             active: nil,
             selections: %{},
             projection: nil,
+            legend: nil,
+            viewport: {100, 30},
             action_error: nil,
             generation: 0
 
@@ -118,58 +120,65 @@ defmodule AtlasTui.Console do
   def receive(model, %{"op" => "page"} = message) do
     console = model.console
 
-    cond do
-      console.expected && message["path"] != console.expected &&
-          !(console.phase == :ready && message["reason"] == "open" && path?(message["path"])) ->
-        {model, []}
+    {updated, effects} =
+      cond do
+        console.expected && message["path"] != console.expected &&
+            !(console.phase == :ready && message["reason"] == "open" && path?(message["path"])) ->
+          {model, []}
 
-      console.restoring and message["path"] == model.path ->
-        # Replace the server page/actions but retain every actual editor value and
-        # focus coordinate. No draft is reconstructed from default field values.
-        {model, message} = AtlasTui.Interactions.install(model, message)
-        updated = Model.message(model, message)
+        console.restoring and message["path"] == model.path ->
+          # Replace the server page/actions but retain every actual editor value and
+          # focus coordinate. No draft is reconstructed from default field values.
+          {model, message} = AtlasTui.Interactions.install(model, message)
+          updated = Model.message(model, message)
 
-        updated = %{
-          updated
-          | values: model.values,
-            focus: model.focus,
-            cursor: model.cursor,
-            ask: model.ask,
-            plan: model.plan,
-            steps: model.steps
-        }
+          updated = %{
+            updated
+            | values: model.values,
+              focus: model.focus,
+              cursor: model.cursor,
+              ask: model.ask,
+              plan: model.plan,
+              steps: model.steps
+          }
 
-        {sync_active(%{
-           updated
-           | console: %{updated.console | phase: :ready, expected: nil, restoring: false}
-         }), []}
+          {sync_active(%{
+             updated
+             | console: %{updated.console | phase: :ready, expected: nil, restoring: false}
+           }), []}
 
-      draft?(model) and message["path"] == model.path and
-          message["reason"] in ["hint", "reconcile"] ->
-        {model, message} = AtlasTui.Interactions.install(model, message)
-        updated = Model.message(model, message)
+        draft?(model) and message["path"] == model.path and
+            message["reason"] in ["hint", "reconcile"] ->
+          {model, message} = AtlasTui.Interactions.install(model, message)
+          updated = Model.message(model, message)
 
-        {sync_active(%{updated | values: model.values, focus: model.focus, cursor: model.cursor}),
-         []}
+          {sync_active(%{
+             updated
+             | values: model.values,
+               focus: model.focus,
+               cursor: model.cursor
+           }), []}
 
-      true ->
-        model = remember_selection(model)
-        {model, message} = AtlasTui.Interactions.install(model, message)
-        updated = Model.message(model, message)
+        true ->
+          model = remember_selection(model)
+          {model, message} = AtlasTui.Interactions.install(model, message)
+          updated = Model.message(model, message)
 
-        selected =
-          if message["path"] != model.path,
-            do: restored_selection(updated),
-            else: stable_selection(model, updated)
+          selected =
+            if message["path"] != model.path,
+              do: restored_selection(updated),
+              else: stable_selection(model, updated)
 
-        updated = %{
-          updated
-          | selected: selected,
-            console: %{updated.console | phase: :ready, expected: nil, restoring: false}
-        }
+          updated = %{
+            updated
+            | selected: selected,
+              console: %{updated.console | phase: :ready, expected: nil, restoring: false}
+          }
 
-        {sync_active(updated), []}
-    end
+          {sync_active(updated), []}
+      end
+
+    {AtlasTui.Legend.reconcile(updated), effects}
   end
 
   def receive(model, %{"op" => "bye"} = message) do

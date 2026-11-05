@@ -4,10 +4,13 @@ defmodule AtlasTui.Interactions do
   binding selection and action identity. The renderer adds local focus and shell
   revision checks to reject captured events after its own state changes.
   """
-  alias AtlasTui.{Blocks, Console, Model}
+  alias AtlasTui.{Blocks, Console, Legend, Model}
   alias AtlasBFFContract.Console, as: Contract
 
-  def context(model) do
+  def context(%{console: %{legend: legend}}) when legend != nil, do: "legend"
+  def context(model), do: content_context(model)
+
+  def content_context(model) do
     cond do
       Model.step_form(model) ->
         "step_form"
@@ -44,7 +47,8 @@ defmodule AtlasTui.Interactions do
       model.console
       | projection: projection,
         generation: model.console.generation + 1,
-        action_error: error
+        action_error: error,
+        legend: if(projection && page["path"] == model.path, do: model.console.legend, else: nil)
     }
 
     names = Contract.presentation_names()
@@ -57,8 +61,10 @@ defmodule AtlasTui.Interactions do
     {%{model | console: console}, content}
   end
 
-  def active(model) do
-    case Contract.active(model.console.projection, current(model)) do
+  def active(model), do: active_for(model, context(model))
+
+  def active_for(model, context) do
+    case Contract.active(model.console.projection, %{current(model) | context: context}) do
       {:ok, actions} -> actions
       _ -> []
     end
@@ -78,22 +84,51 @@ defmodule AtlasTui.Interactions do
 
   def dispatch(model, event) do
     valid =
-      model.connected && model.console.phase == :ready && is_nil(model.console.expected) &&
+      is_nil(model.console.expected) &&
         event[:focus] == focus(model) && event[:shell_revision] == shell_revision(model)
 
     resolved = if valid, do: Contract.resolve(model.console.projection, event, current(model))
 
     case resolved do
-      {:ok, action} -> execute(model, action["props"]["operation"], action["props"]["label"])
-      _ -> {model, []}
+      {:ok, action} ->
+        operation = action["props"]["operation"]
+
+        local =
+          operation["name"] == "legend_open" or
+            (model.console.legend != nil and
+               operation["name"] in ~w(legend_close scroll_up scroll_down page_previous page_next))
+
+        if local || (model.connected && model.console.phase == :ready),
+          do: execute(model, operation, action["props"]["label"]),
+          else: {model, []}
+
+      _ ->
+        {model, []}
     end
   end
 
   def key(model, key) do
     case capture(model, key) do
-      nil -> Model.literal(model, key)
+      nil -> if(model.console.legend, do: {model, []}, else: Model.literal(model, key))
       event -> dispatch(model, event)
     end
+  end
+
+  defp execute(model, %{"name" => "legend_open"}, _label), do: {Legend.open(model), []}
+  defp execute(model, %{"name" => "legend_close"}, _label), do: {Legend.close(model), []}
+
+  defp execute(%{console: %{legend: legend}} = model, %{"name" => operation}, _label)
+       when legend != nil and
+              operation in ["scroll_up", "scroll_down", "page_previous", "page_next"] do
+    updated =
+      case operation do
+        "scroll_up" -> Legend.scroll(model, -1)
+        "scroll_down" -> Legend.scroll(model, 1)
+        "page_previous" -> Legend.page(model, -1)
+        "page_next" -> Legend.page(model, 1)
+      end
+
+    {updated, []}
   end
 
   defp execute(model, %{"name" => "tab_next"}, _label), do: Console.cycle(model, 1)
