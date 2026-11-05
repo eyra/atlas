@@ -19,6 +19,8 @@
 #   atlas e2e [uc-atlas-01 ...]  the end-to-end test, on a private test instance of its own
 #   atlas runtime       start this machine's Runtime node (local runtime.json required)
 #   atlas runtime-stop, atlas runtime-status
+#   atlas playground init|stop <private-dir>   private stub prototype (IS125)
+#   atlas attach breaker --prototype <private-dir>   independent terminal viewer
 #   atlas rela-status, atlas rela-stop
 #
 #   atlas help [<kind>] [--json]    the agents' commands, and every kind from rela's description:
@@ -79,6 +81,10 @@ while [ -L "$src" ]; do
   case "$target" in /*) src="$target" ;; *) src="$(dirname "$src")/$target" ;; esac
 done
 root="$(cd "$(dirname "$src")/.." && pwd -P)"
+# Explicit private prototype routes: never resolve an environment or open a Fly tunnel.
+case "${1:-}" in
+  playground|attach) exec /usr/bin/python3 "$root/tools/runtime-playground/launch.py" "$@" ;;
+esac
 # Keep ordinary invocations on the isolated project dependency without shell setup.
 if [ -z "${ATLAS_CONFIG_PYTHON:-}" ] && [ -x "$root/.venv-config/bin/python" ]; then
   export ATLAS_CONFIG_PYTHON="$root/.venv-config/bin/python"
