@@ -148,7 +148,7 @@ defmodule AtlasTui.Interactions do
   defp selected_identity(model) do
     rows =
       Enum.flat_map(Enum.zip(model.ids, model.blocks), fn
-        {id, %Blocks.List{rows: rows}} -> Enum.map(rows || [], &{id, &1.id, &1.to})
+        {id, %Blocks.List{rows: rows}} -> Enum.map(rows || [], &{id, &1.id || &1.to, &1.to})
         _ -> []
       end)
 
@@ -215,7 +215,7 @@ defmodule AtlasTui.Interactions do
         text?(on, 128) and text?(row, 128) and
           Enum.any?(page["blocks"], fn block ->
             block["id"] == on and block["type"] == "list" and
-              Enum.any?(block["props"]["rows"] || [], &(&1["id"] == row))
+              Enum.any?(block["props"]["rows"] || [], &((&1["id"] || &1["to"]) == row))
           end)
 
       on != nil ->

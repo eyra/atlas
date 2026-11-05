@@ -354,6 +354,20 @@ defmodule AtlasTui.Model do
   def literal(model, _key), do: {model, []}
 
   @doc "Finite Console operations; callers resolve a current declared action first."
+  def operation(model, "list_next"), do: operation(model, "move_next")
+  def operation(model, "list_previous"), do: operation(model, "move_previous")
+  def operation(model, "scroll_up"), do: operation(model, "page_previous")
+  def operation(model, "scroll_down"), do: operation(model, "page_next")
+  def operation(model, "submit"), do: operation(model, "submit_form")
+  def operation(model, "cancel"), do: operation(model, "cancel_form")
+
+  def operation(model, "open_selected") do
+    case Enum.at(rows(model), model.selected) do
+      nil -> {model, []}
+      row -> AtlasTui.Console.navigate(model, row.to)
+    end
+  end
+
   def operation(model, "move_next"),
     do:
       {%{model | selected: min(model.selected + 1, max(length(rows(model)) - 1, 0)), scroll: nil},
