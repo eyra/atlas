@@ -40,24 +40,26 @@ def observe_status(root, environment, request, inspect_process=None):
     except (OSError, ValueError):
         return dict(status, basis='unreadable_configuration', message='local Runtime configuration is unavailable or malformed')
     try:
-        pid = int((base/'runtime.pid').read_text())
-        if pid <= 1:
-            raise ValueError('invalid PID')
+        record = (base/'runtime.pid').read_text()
     except FileNotFoundError:
         return dict(status, state='absent', basis='no_pid_record', message='no retained local Runtime PID; remote availability is not queried')
     except (OSError, ValueError):
         return dict(status, state='stale', basis='invalid_pid_record', message='retained PID record is invalid or unreadable; ownership not established')
-    # Reuse the independently reviewed OS inspector. Do not use its stop helper or
-    # IS91's signal/group path, and do not infer health from executable names.
+    # Reuse the shared pure PID parser before invoking any inspector. Its native
+    # boundary independently checks pid_t bounds too; no stop path is used here.
+    spec = importlib.util.spec_from_file_location('atlas_process_identity', Path(root)/'tools/runtime-playground/launch.py')
+    inspector = importlib.util.module_from_spec(spec)
+    previous = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(inspector)
+    finally:
+        sys.dont_write_bytecode = previous
+    try:
+        pid = inspector.parse_pid(record)
+    except ValueError:
+        return dict(status, state='stale', basis='invalid_pid_record', message='retained PID is malformed or outside supported pid_t bounds; no inspection performed')
     if inspect_process is None:
-        spec = importlib.util.spec_from_file_location('atlas_process_identity', Path(root)/'tools/runtime-playground/launch.py')
-        inspector = importlib.util.module_from_spec(spec)
-        previous = sys.dont_write_bytecode
-        try:
-            sys.dont_write_bytecode = True
-            spec.loader.exec_module(inspector)
-        finally:
-            sys.dont_write_bytecode = previous
         inspect_process = inspector.process_identity
     try:
         identity = inspect_process(pid)
