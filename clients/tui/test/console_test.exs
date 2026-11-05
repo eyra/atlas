@@ -168,9 +168,10 @@ defmodule AtlasTui.ConsoleTest do
     {model, []} = Model.key(model, {:char, "!"})
     assert model.values["title"] == "server default!"
     model = %{model | cursor: {0, 4}, focus: 1}
-    disconnected = Model.disconnected(model)
+    disconnected = %{Model.disconnected(model) | closed: true}
     assert screen(disconnected) =~ "stale shell"
     pending = handshake(disconnected)
+    refute pending.closed
     assert pending.values == model.values
     assert pending.path == model.path
 

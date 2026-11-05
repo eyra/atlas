@@ -55,6 +55,7 @@ defmodule AtlasTui.Console do
       {%{
          model
          | connected: true,
+           closed: false,
            notice: nil,
            console: %{model.console | phase: :compatibility, error: nil}
        }, []}
