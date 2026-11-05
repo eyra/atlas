@@ -1,0 +1,45 @@
+{
+  "candidate": {
+    "package": "@anthropic-ai/claude-code",
+    "version": "2.1.280",
+    "platform": "darwin-arm64",
+    "native_bytes": 217254576,
+    "native_sha256": "387a5c5dcdbb815085edf0baf79591f9d8894efe922bceaf3d75b1b08055229d",
+    "executed": false
+  },
+  "protocol": {
+    "package": "@anthropic-ai/claude-agent-sdk",
+    "version": "0.3.280",
+    "repository_commit": "58d2e4b81bdca2c6ce10e6e5db22ad7acdc1d58c",
+    "tarball": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.280.tgz",
+    "integrity": "sha512-aIQSTKcCJcOgi125GAGQaNZUYgxbEBQwV2Ac+Utp0+gGUjIEWjTqz4B8kXr9XjkcCTYiRUMTDsXPAUfIcBDjnw==",
+    "sdk_types_sha256": "b7ac9c0ed0db5c1792a5394e72c75d69d85f4ce9edc0279487ec55d32eabfa76",
+    "sdk_bundle_sha256": "ef4c2c0fc286d8c7dab7771516cf95206f9f670e99e74dc62f245b7fc8224955"
+  },
+  "sources": [
+    {
+      "url": "https://github.com/anthropics/claude-agent-sdk-typescript/blob/58d2e4b81bdca2c6ce10e6e5db22ad7acdc1d58c/CHANGELOG.md",
+      "claim": "0.3.280 parity and verbatimPrompts"
+    },
+    {
+      "url": "https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.280",
+      "claim": "SDKUserMessage.client_composed/uuid/session_id; SDKUserMessageReplay.isReplay; result/assistant UUID correlation; streamInput adds client_composed for verbatimPrompts"
+    },
+    {
+      "url": "https://code.claude.com/docs/en/cli-reference",
+      "claim": "rolling documentation only; replay-user-messages is echo acknowledgment, not a pinned durable receipt"
+    }
+  ],
+  "verdict": {
+    "guidance": "unsupported",
+    "native_execution_verified": false,
+    "source_derived_literal_transport": true,
+    "source_derived_uuid_correlation": true,
+    "gaps": [
+      "native_durable_admission_lookup",
+      "native_restart_dedup",
+      "native_durable_consumption_lookup"
+    ],
+    "fixtures": "synthetic field projections, not captured native transcripts"
+  }
+}
