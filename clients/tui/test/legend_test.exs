@@ -295,6 +295,99 @@ defmodule AtlasTui.LegendTest do
     assert press(updated, :esc).values == m.values
   end
 
+  test "refresh losing the last declared closer dismisses safely and can recover" do
+    for variant <- [:disabled, :removed, :scope] do
+      context = if variant == :scope, do: "browse", else: "form"
+      m = model(page(context))
+
+      m = %{
+        m
+        | values: %{"title" => "human draft", "notes" => "untouched"},
+          cursor: {0, 3},
+          focus: 1
+      }
+
+      opened = press(m, {:char, if(context == "form", do: "l", else: "?")})
+      captured = Interactions.capture(opened, :esc)
+      assert captured != nil
+      fresh = page(context, [], "r2") |> Map.put("reason", "hint")
+
+      fresh =
+        case variant do
+          :removed ->
+            fresh
+            |> update_in(["blocks"], &Enum.reject(&1, fn a -> a["id"] == "close" end))
+            |> update_in(
+              ["markup"],
+              &Enum.map(&1, fn group ->
+                if group["start"] == "close", do: %{group | "start" => "up"}, else: group
+              end)
+            )
+
+          _ ->
+            update_in(fresh, ["blocks"], fn blocks ->
+              Enum.map(blocks, fn a ->
+                if a["id"] == "close" do
+                  if variant == :disabled,
+                    do: put_in(a, ["props", "available"], false),
+                    else:
+                      update_in(
+                        a,
+                        ["props", "scope"],
+                        &Map.merge(&1, %{"on" => "list", "row" => "W2"})
+                      )
+                else
+                  a
+                end
+              end)
+            end)
+        end
+
+      {updated, []} = Console.receive(opened, fresh)
+      assert updated.console.projection != nil
+      assert updated.console.action_error == nil
+      assert updated.console.legend == nil
+      assert updated.focus == opened.focus
+      assert updated.cursor == opened.cursor
+      assert updated.selected == opened.selected
+      if context == "form", do: assert(updated.values == opened.values)
+      assert updated.console.generation > opened.console.generation
+      assert Interactions.dispatch(updated, captured) == {updated, []}
+
+      {restored, []} =
+        Console.receive(updated, Map.put(page(context, [], "r3"), "reason", "hint"))
+
+      reopened = press(restored, {:char, if(context == "form", do: "l", else: "?")})
+      assert reopened.console.legend != nil
+      assert press(reopened, :esc).console.legend == nil
+    end
+  end
+
+  test "actual Control projection cannot retain a modal after Close becomes unavailable" do
+    actual =
+      __DIR__ |> Path.join("fixtures/console-actions.json") |> File.read!() |> JSON.decode!()
+
+    opened = model(actual) |> press({:char, "?"})
+    captured = Interactions.capture(opened, :esc)
+
+    fresh =
+      actual
+      |> Map.put("reason", "hint")
+      |> update_in(["blocks"], fn blocks ->
+        Enum.map(blocks, fn a ->
+          if get_in(a, ["props", "operation", "name"]) == "legend_close",
+            do: put_in(a, ["props", "available"], false),
+            else: a
+        end)
+      end)
+
+    {updated, []} = Console.receive(opened, fresh)
+    assert updated.console.projection != nil
+    assert Legend.closer(updated) == nil
+    assert updated.console.legend == nil
+    assert Interactions.dispatch(updated, captured) == {updated, []}
+  end
+
   test "read-only overlay can close after disconnect using its last declared binding" do
     m = model(page("form")) |> press({:char, "l"}) |> Model.disconnected()
     closed = press(m, :esc)

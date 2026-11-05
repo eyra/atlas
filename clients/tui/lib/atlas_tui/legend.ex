@@ -27,6 +27,11 @@ defmodule AtlasTui.Legend do
       | console: %{model.console | legend: nil, generation: model.console.generation + 1}
     }
 
+  # Recheck against the installed content and restored row/focus, not the old page.
+  # Availability/scope may remove the final escape route from a valid projection.
+  def reconcile(%{console: %{legend: nil}} = model), do: model
+  def reconcile(model), do: if(closer(model), do: model, else: close(model))
+
   def groups(model) do
     source = Interactions.content_context(model)
     projection = model.console.projection
