@@ -51,6 +51,20 @@ defmodule AtlasControl.Console do
          ])}
       ]
 
+      groups =
+        Enum.map(groups, fn {context, title, actions} ->
+          if context in ["browse", "legend"] do
+            {context, title, actions}
+          else
+            help =
+              if context in ["form", "step_form", "ask"],
+                do: [],
+                else: [command("Keys", ["?"], "legend_open")]
+
+            {context, title, actions ++ help ++ [command("Quit", ["Ctrl+C"], "quit")]}
+          end
+        end)
+
       groups = settle_aliases(groups)
       total = Enum.sum(for {_, _, actions} <- groups, do: length(actions))
 
@@ -86,9 +100,10 @@ defmodule AtlasControl.Console do
               "actions_revision" => revision
             })
 
-          if byte_size(JSON.encode!(result)) <= @max_bytes,
-            do: {:ok, result},
-            else: {:error, "Console projection exceeds byte limit"}
+          case Contract.compile(result) do
+            {:ok, _projection} -> {:ok, result}
+            {:error, _} -> {:error, "Invalid Console action scope or bindings"}
+          end
         else
           _ -> {:error, "Invalid Console action projection"}
         end
@@ -140,20 +155,21 @@ defmodule AtlasControl.Console do
   end
 
   defp view_actions(blocks) do
-    Enum.flat_map(blocks, fn block ->
+    Stream.flat_map(blocks, fn block ->
       props = block["props"] || %{}
       on = block["id"]
-      actions = Enum.map(props["actions"] || [], &source_action(&1, on))
-      links = Enum.map(props["links"] || [], &source_link(&1, on, nil))
+      actions = Stream.map(props["actions"] || [], &source_action(&1, on))
+      links = Stream.map(props["links"] || [], &source_link(&1, on, nil))
       rows = props["rows"] || []
 
       row_links =
-        Enum.flat_map(rows, fn row ->
-          Enum.map(row["links"] || [], &source_link(&1, on, row["id"] || row["to"]))
+        Stream.flat_map(rows, fn row ->
+          Stream.map(row["links"] || [], &source_link(&1, on, row["id"] || row["to"]))
         end)
 
-      actions ++ links ++ row_links
+      Stream.concat([actions, links, row_links])
     end)
+    |> Enum.take(@max_actions + 1)
   end
 
   defp source_action(source, on) do
@@ -182,25 +198,29 @@ defmodule AtlasControl.Console do
     cancel = if context == "step_form", do: "step_cancel", else: "cancel"
     label = if form, do: form["props"]["submit_label"], else: "Keep changes"
 
-    [
-      command(label, ["Ctrl+S"], submit, on: on),
-      command("Cancel", ["Esc"], cancel, on: on),
-      command("Next field", ["Tab"], "focus_next", on: on),
-      command("Previous field", ["Shift+Tab"], "focus_previous", on: on)
-    ] ++
-      Enum.map(
-        [
-          {"Enter", "form_enter"},
-          {"Up", "input_up"},
-          {"Down", "input_down"},
-          {"Left", "input_left"},
-          {"Right", "input_right"},
-          {"Home", "input_home"},
-          {"End", "input_end"},
-          {"Backspace", "input_backspace"}
-        ],
-        fn {key, op} -> command(key, [key], op, on: on) end
-      )
+    if context == "form" and form == nil do
+      []
+    else
+      [
+        command(label, ["Ctrl+S"], submit, on: on),
+        command("Cancel", ["Esc"], cancel, on: on),
+        command("Next field", ["Tab"], "focus_next", on: on),
+        command("Previous field", ["Shift+Tab"], "focus_previous", on: on)
+      ] ++
+        Enum.map(
+          [
+            {"Enter", "form_enter"},
+            {"Up", "input_up"},
+            {"Down", "input_down"},
+            {"Left", "input_left"},
+            {"Right", "input_right"},
+            {"Home", "input_home"},
+            {"End", "input_end"},
+            {"Backspace", "input_backspace"}
+          ],
+          fn {key, op} -> command(key, [key], op, on: on) end
+        )
+    end
   end
 
   defp confirmation(blocks) do

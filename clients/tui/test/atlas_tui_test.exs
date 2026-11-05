@@ -769,14 +769,19 @@ defmodule AtlasTuiTest do
     assert text =~ ~r/First\s*\n\s+Test it · since/
   end
 
-  test "the view knows every block and kind of markup in Control's contract" do
+  test "the legacy view knows every ordinary block and kind of markup" do
     schema = AtlasBFFContract.Blocks.__schema__()
     known = View.known()
+    console = AtlasBFFContract.Console.presentation_names()
 
+    # Console is explicitly negotiated and rendered by its own client presentation.
+    # Keep full catalogue coverage for the ordinary, unnegotiated legacy view.
     for %{name: name} <- schema.blocks,
+        Atom.to_string(name) not in console.blocks,
         do: assert(Atom.to_string(name) in known.blocks, "the TUI does not draw block #{name}")
 
     for %{name: name} <- schema.markup,
+        Atom.to_string(name) not in console.markup,
         do: assert(Atom.to_string(name) in known.markup, "the TUI does not know markup #{name}")
   end
 end

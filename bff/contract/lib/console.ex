@@ -5,6 +5,14 @@ defmodule AtlasBFFContract.Console do
   @tokens ~w(Tab Shift+Tab Up Down Left Right Home End PageUp PageDown Enter Esc Backspace Space Ctrl+C Ctrl+S)
   @local ~w(list_next list_previous open_selected scroll_up scroll_down submit cancel tab_next tab_previous move_next move_previous select_first select_last page_next page_previous part_next part_previous back refresh quit legend_open legend_close focus_next focus_previous submit_form cancel_form form_enter input_up input_down input_left input_right input_home input_end input_backspace ask_send ask_cancel plan_cancel plan_run plan_toggle plan_edit plan_previous plan_next plan_stop plan_close step_save step_cancel)
 
+  defdelegate compile(page), to: AtlasBFFContract.Console.Projection
+  defdelegate active(projection, current), to: AtlasBFFContract.Console.Projection
+  defdelegate bindings(projection, current), to: AtlasBFFContract.Console.Projection
+  defdelegate capture(projection, token, current), to: AtlasBFFContract.Console.Projection
+  defdelegate resolve(projection, event, current), to: AtlasBFFContract.Console.Projection
+
+  def presentation_names, do: %{blocks: ["console_action"], markup: ["legend"]}
+
   def contexts, do: @contexts
   def named_keys, do: @tokens
   def operations, do: @local ++ ~w(open open_url agent_ask)
@@ -12,7 +20,8 @@ defmodule AtlasBFFContract.Console do
   def key?(key) when is_binary(key),
     do:
       key in @tokens or
-        (String.valid?(key) and String.length(key) == 1 and String.printable?(key))
+        (String.valid?(key) and String.length(key) == 1 and String.printable?(key) and
+           not String.match?(key, ~r/[\x00-\x1f\x7f]/))
 
   def key?(_), do: false
 
@@ -28,10 +37,41 @@ defmodule AtlasBFFContract.Console do
 
     required != [] and Map.keys(op) -- (required ++ optional) == [] and
       Enum.all?(required, &text?(op[&1], 2_048)) and
-      Enum.all?(optional, &(not Map.has_key?(op, &1) or text?(op[&1], 128)))
+      Enum.all?(optional, &(not Map.has_key?(op, &1) or text?(op[&1], 128))) and
+      destination?(name, op)
   end
 
   def operation?(_), do: false
+
+  defp destination?("open", op) do
+    schema = AtlasBFFContract.Blocks.__schema__()
+
+    if String.starts_with?(op["to"], "/") do
+      case AtlasBFF.Paths.match(schema.pages, op["to"]) do
+        {:ok, name, params} ->
+          Enum.all?(Map.values(params), &(is_binary(&1) and String.valid?(&1) and &1 != "")) and
+            AtlasBFF.Paths.build(schema.pages, name, params) == op["to"]
+
+        _ ->
+          false
+      end
+    else
+      false
+    end
+  end
+
+  defp destination?("open_url", op) do
+    case URI.new(op["url"]) do
+      {:ok, uri} ->
+        uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" and
+          not String.match?(op["url"], ~r/[\s\x00-\x1f\x7f]/)
+
+      _ ->
+        false
+    end
+  end
+
+  defp destination?(_, _), do: true
 
   defp text?(value, max),
     do:
