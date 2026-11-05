@@ -23,8 +23,14 @@ At the prompt: `start`, `stop`, `status`, `mode active`, `mode idle`, `mode sile
 `mode crash-once`, `mode crash`, `reconnect`, `detach`. These are generated typed
 controls, never conversational guidance. Repeated start is idempotent. Attaching,
 closing, detaching or reconnecting a viewer never starts/stops another worker.
-Reconnect is bounded to five local attempts. The client displays real status
-events and correlated control replies, including explicit errors.
+Reconnect is bounded to five local attempts. The client checks outer, status and
+execution worker identities against its selected environment/machine/worker before
+displaying events or replies; optional error targets are checked when present.
+Probe mode uses the same binding. Terminal result/error IDs are consumed once;
+duplicate, unknown and late replies are rejected. At most eight requests may be
+outstanding, with visible backpressure and ten-second expiry. Expiry or reconnect
+leaves outstanding outcomes unknown; controls are never automatically replayed.
+Status events neither complete requests nor extend their deadlines.
 
 Idle keeps renewing its lease; silence ends the turn after eight seconds; maximum
 duration is 120 seconds. Runtime replaces eligible ended turns using its existing
@@ -47,11 +53,18 @@ Stop the complete private instance from another terminal:
 bin/atlas playground stop /tmp/my-runtime-playground
 ```
 
-The launcher verifies its retained PIDs against this exact private directory.
+The launcher retains OS argv and process-start identities in `processes.json` and
+checks each retained PID's role, exact canonical instance arguments, executable,
+owner and birth identity before signalling. Prefix collisions, PID reuse, missing
+metadata and ambiguous/stale records refuse stop; it never discovers replacement
+processes. This metadata is required for newly initialized instances. An older
+frozen instance is not upgraded or retrofitted by this launcher.
 Private Rela data, State ledger, `events.jsonl`, `server.log` and PID files stay in
 that directory. No Fly tunnel, production/test environment file, shared service or
 resource is touched. `probe DIR status` under `atlas playground` provides a typed
 JSON result for inspection. Run the bounded private integration proof with
-`python3 tools/runtime-playground/test_playground.py`; it is also in the e2e suite.
+`python3 tools/runtime-playground/test_playground.py`; it is also in the e2e suite,
+alongside mocked stop regressions, actual Client/probe peer fixtures and deterministic
+session deadline/bound tests. The latter start no Runtime or worker.
 
 <sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0027).</sub>

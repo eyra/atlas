@@ -327,27 +327,117 @@ end
 defmodule RuntimePlayground.Client do
   alias AtlasBFFContract.Runtime.Protocol, as: Wire
 
+  defmodule Session do
+    @moduledoc false
+    alias AtlasBFFContract.Runtime.Protocol, as: Wire
+    @limit 8
+    @timeout 10_000
+    def limit, do: @limit
+    def timeout, do: @timeout
+    def new(target), do: %{target: target, pending: %{}}
+
+    def request(session, words, now) do
+      if map_size(session.pending) >= @limit do
+        {:error, :backpressure, session}
+      else
+        id = Integer.to_string(System.unique_integer([:positive]))
+
+        case Wire.cli(words, %{id: id, target: session.target}) do
+          {:ok, name, frame} ->
+            entry = %{name: name, expires: now + @timeout}
+            {:ok, frame, put_in(session, [:pending, id], entry)}
+
+          {:invalid, why} ->
+            {:error, why, session}
+        end
+      end
+    end
+
+    def expire(session, now) do
+      {expired, remaining} =
+        Enum.split_with(session.pending, fn {_, entry} -> entry.expires <= now end)
+
+      {%{session | pending: Map.new(remaining)}, Enum.map(expired, &elem(&1, 0))}
+    end
+
+    def wait(session, now) do
+      Enum.reduce(session.pending, 1000, fn {_, entry}, wait ->
+        min(wait, max(entry.expires - now, 0))
+      end)
+    end
+
+    def accept(session, bytes, now) do
+      case Wire.decode_event_json(bytes) do
+        {:ok, _, frame} ->
+          if bound?(frame, session.target),
+            do: {:ok, :event, frame, session},
+            else: {:invalid, "event target mismatch", session}
+
+        _ ->
+          accept_reply(session, bytes, now)
+      end
+    end
+
+    defp accept_reply(session, bytes, now) do
+      with {:ok, %{"id" => id}} <- JSON.decode(bytes),
+           %{name: name, expires: expires} when expires > now <- session.pending[id],
+           {:ok, kind, frame} <- Wire.decode_reply_json(name, bytes) do
+        if bound?(frame, session.target) do
+          {:ok, kind, frame, %{session | pending: Map.delete(session.pending, id)}}
+        else
+          {:invalid, "reply target mismatch", session}
+        end
+      else
+        _ -> {:invalid, "malformed, expired, duplicate or unknown reply", session}
+      end
+    end
+
+    defp bound?(%{"op" => "error"} = frame, target),
+      do: not Map.has_key?(frame, "target") or frame["target"] == target
+
+    defp bound?(frame, target) do
+      frame["target"] == target and frame["status"]["target"] == target and
+        Enum.all?(frame["status"]["turns"], &(&1["execution"]["worker"] == target))
+    end
+  end
+
   def run(mode, dir, worker, words) do
     target = %{"environment" => "private", "machine" => "runtime-playground", "worker" => worker}
     {:ok, socket} = connect(dir, 5)
+    session = Session.new(target)
 
     if mode == "probe" do
-      {name, id} = send_command(socket, words, target)
-      {:ok, bytes} = :gen_tcp.recv(socket, 0, 10_000)
-
-      case Wire.decode_reply_json(name, bytes) do
-        {:ok, _, %{"id" => ^id} = reply} -> IO.puts(JSON.encode!(reply))
-        other -> raise "invalid control response: #{inspect(other)}"
-      end
+      {:ok, session} = issue(socket, words, session)
+      probe(socket, session)
     else
       IO.puts(
-        "\nRuntime Playground · UC46 / IS125 · PRIVATE STUB\nActual Runtime + Bus + State + Flow; no model or guidance support.\nWorker lifecycle is independent of this viewer.\nCommands: start | stop | status | mode active/idle/silent/crash-once/crash\n          reconnect | detach (leaves worker running)\nPrivate files: #{dir}\n"
+        "\nRuntime Playground · UC46 / IS125 · PRIVATE STUB\nActual Runtime + Bus + State + Flow; no model or guidance support.\nWorker lifecycle is independent of this viewer.\nCommands: start | stop | status | mode active/idle/silent/crash-once/crash\n          reconnect | detach (leaves worker running)\nAt most 8 outstanding requests; replies expire after 10 seconds (outcome unknown).\nPrivate files: #{dir}\n"
       )
 
       parent = self()
       spawn_link(fn -> input(parent) end)
-      {name, id} = send_command(socket, ["attach"], target)
-      loop(socket, dir, target, %{id => name})
+      {:ok, session} = issue(socket, ["attach"], session)
+      loop(socket, dir, session)
+    end
+  end
+
+  defp probe(socket, session) do
+    wait = Session.wait(session, now())
+
+    case :gen_tcp.recv(socket, 0, wait) do
+      {:ok, bytes} ->
+        case Session.accept(session, bytes, now()) do
+          {:ok, :event, _, next} -> probe(socket, next)
+          {:ok, _, frame, _} -> IO.puts(JSON.encode!(frame))
+          {:invalid, why, _} -> raise "invalid control response: #{why}"
+        end
+
+      {:error, :timeout} ->
+        {next, expired} = Session.expire(session, now())
+        if expired != [], do: raise("request expired; outcome unknown"), else: probe(socket, next)
+
+      {:error, why} ->
+        raise "control connection failed: #{why}; outcome unknown"
     end
   end
 
@@ -371,9 +461,6 @@ defmodule RuntimePlayground.Client do
 
   defp input(parent) do
     case IO.gets("runtime> ") do
-      :eof ->
-        send(parent, {:command, ["detach"]})
-
       line when is_binary(line) ->
         send(parent, {:command, String.split(line)})
         input(parent)
@@ -383,87 +470,93 @@ defmodule RuntimePlayground.Client do
     end
   end
 
-  defp send_command(socket, words, target) do
-    id = Integer.to_string(System.unique_integer([:positive]))
+  defp issue(socket, words, session) do
+    case Session.request(session, words, now()) do
+      {:ok, frame, next} ->
+        case :gen_tcp.send(socket, JSON.encode!(frame) <> "\n") do
+          :ok -> {:ok, next}
+          {:error, why} -> {:error, why, session}
+        end
 
-    case Wire.cli(words, %{id: id, target: target}) do
-      {:ok, name, request} ->
-        :ok = :gen_tcp.send(socket, JSON.encode!(request) <> "\n")
-        {name, id}
-
-      {:invalid, why} ->
-        raise ArgumentError, why
+      other ->
+        other
     end
   end
 
-  defp loop(socket, dir, target, pending) do
+  defp loop(socket, dir, session) do
+    {session, expired} = Session.expire(session, now())
+    for id <- expired, do: IO.puts("EXPIRED request #{id}; outcome unknown")
     :inet.setopts(socket, active: :once)
 
     receive do
       {:command, ["detach"]} ->
-        send_command(socket, ["detach"], target)
+        issue(socket, ["detach"], session)
         :gen_tcp.close(socket)
-        IO.puts("Detached. Worker lifecycle unchanged.")
+        IO.puts("Detached. Worker lifecycle unchanged; any outstanding outcomes remain unknown.")
 
       {:command, ["reconnect"]} ->
-        reconnect(socket, dir, target)
+        reconnect(socket, dir, session)
 
       {:command, []} ->
-        loop(socket, dir, target, pending)
+        loop(socket, dir, session)
 
       {:command, words} ->
-        try do
-          {name, id} = send_command(socket, words, target)
-          loop(socket, dir, target, Map.put(pending, id, name))
-        rescue
-          e in ArgumentError ->
-            IO.puts(Exception.message(e))
-            loop(socket, dir, target, pending)
+        case issue(socket, words, session) do
+          {:ok, next} ->
+            loop(socket, dir, next)
+
+          {:error, :backpressure, next} ->
+            IO.puts("BACKPRESSURE: 8 requests outstanding; wait for replies or expiry")
+            loop(socket, dir, next)
+
+          {:error, why, next} ->
+            IO.puts("Command not sent: #{inspect(why)}")
+            loop(socket, dir, next)
         end
 
       {:tcp, ^socket, bytes} ->
-        case Wire.decode_event_json(bytes) do
-          {:ok, _, event} ->
-            show(event["status"])
+        case Session.accept(session, bytes, now()) do
+          {:ok, :error, frame, next} ->
+            IO.puts("ERROR " <> inspect(frame["error"]))
+            loop(socket, dir, next)
 
-          _ ->
-            # Decode against the correlated command; never interpret an event as a reply.
-            case JSON.decode(bytes) do
-              {:ok, %{"id" => id}} when is_map_key(pending, id) ->
-                case Wire.decode_reply_json(pending[id], bytes) do
-                  {:ok, :result, reply} -> show(reply["status"])
-                  {:ok, :error, reply} -> IO.puts("ERROR " <> inspect(reply["error"]))
-                  invalid -> IO.puts("INVALID " <> inspect(invalid))
-                end
+          {:ok, _, frame, next} ->
+            show(frame["status"])
+            loop(socket, dir, next)
 
-              _ ->
-                IO.puts("Uncorrelated/malformed response")
-            end
+          {:invalid, why, next} ->
+            IO.puts("INVALID " <> why)
+            loop(socket, dir, next)
         end
 
-        loop(socket, dir, target, pending)
-
       {:tcp_closed, ^socket} ->
-        reconnect(socket, dir, target)
+        reconnect(socket, dir, session)
 
       {:tcp_error, ^socket, _} ->
-        reconnect(socket, dir, target)
+        reconnect(socket, dir, session)
+    after
+      Session.wait(session, now()) -> loop(socket, dir, session)
     end
   end
 
-  defp reconnect(socket, dir, target) do
+  defp reconnect(socket, dir, session) do
     :gen_tcp.close(socket)
-    IO.puts("Reconnecting (at most five attempts; no lifecycle command)...")
+
+    IO.puts(
+      "Reconnecting (at most five attempts; no lifecycle command). #{map_size(session.pending)} outstanding outcomes unknown; controls are not replayed."
+    )
 
     case connect(dir, 5) do
       {:ok, next} ->
-        {name, id} = send_command(next, ["attach"], target)
-        loop(next, dir, target, %{id => name})
+        {:ok, fresh} = issue(next, ["attach"], Session.new(session.target))
+        loop(next, dir, fresh)
 
       {:error, why} ->
         IO.puts("Disconnected: #{why}. Worker was not stopped.")
     end
   end
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp show(status) do
     IO.puts(
