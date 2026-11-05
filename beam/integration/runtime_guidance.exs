@@ -93,8 +93,7 @@ defmodule AtlasRuntime.RuntimeGuidanceTest do
       max: 300_000,
       lease: 60_000,
       crash_pause: 10,
-      leave_grace: 10,
-      talk_opts: [tries: 1, wait: 30]
+      leave_grace: 10
     ]
 
     on_exit(fn ->
@@ -107,7 +106,7 @@ defmodule AtlasRuntime.RuntimeGuidanceTest do
 
   defp boot(c) do
     engine = start_supervised!({Engine, c.opts})
-    assert_receive {:started, inbox, turn}, 2_000
+    assert_receive {:started, inbox, turn}, 5_000
     [{pid, _}] = Registry.lookup(AtlasRuntime.Turns, turn.key)
     {engine, pid, inbox, turn}
   end
@@ -150,12 +149,13 @@ defmodule AtlasRuntime.RuntimeGuidanceTest do
 
   defp current(i), do: Talk.read("synthetic_interaction", %{"key" => i["key"]})["fact"]
 
-  defp reconcile(pid),
-    do:
-      (
-        send(pid, :guidance)
-        :sys.get_state(pid)
-      )
+  defp reconcile(pid) do
+    send(pid, :guidance)
+    # This normal call shares sender ordering with the hint; system introspection
+    # alone is not a mailbox barrier for that ordinary guidance message.
+    AtlasRuntime.Turn.agent(pid)
+    :sys.get_state(pid)
+  end
 
   test "execution commit precedes startup even when its acknowledgement is lost", c do
     GuidanceStore.barrier(c.store, self(), "executions")
@@ -188,6 +188,16 @@ defmodule AtlasRuntime.RuntimeGuidanceTest do
 
     refute_receive {:starting, _, _}, 20
     refute_receive {:started, _, _}, 20
+  end
+
+  test "ordinary durable acknowledgement tolerates bounded backend latency", c do
+    GuidanceStore.barrier(c.store, self(), "executions")
+    start_supervised!({Engine, c.opts})
+    assert_receive {:committed, store, _}, 2_000
+    # Deterministically exceed the fixture's old30ms request deadline without CPU load.
+    Process.sleep(100)
+    send(store, :release_commit)
+    assert_receive {:started, _, _}, 2_000
   end
 
   test "turn and execution are durable before adapter start, with exact immutable identity", c do

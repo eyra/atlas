@@ -11,6 +11,6 @@ defmodule AtlasE2E.RuntimeGuidanceTest do
       )
 
     assert status == 0, out
-    assert out =~ "20 tests, 0 failures"
+    assert out =~ "21 tests, 0 failures"
   end
 end
