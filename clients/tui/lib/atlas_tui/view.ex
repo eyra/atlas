@@ -34,8 +34,8 @@ defmodule AtlasTui.View do
   """
   def known,
     do: %{
-      blocks: ~w(list item form confirm plan),
-      markup: ~w(part section highlight)
+      blocks: ~w(list item form confirm plan console_action),
+      markup: ~w(part section highlight legend)
     }
 
   @doc "The screen: exactly `height` lines of plain segments."
@@ -62,7 +62,10 @@ defmodule AtlasTui.View do
 
     # The footer: help (on more lines when it does not fit on one), a rule, the notice and
     # the status line. A page longer than its room adds scrolling to the help.
-    room_for = fn help -> max(height - length(header) - 3 - length(help), 1) end
+    room_for = fn help ->
+      max(height - length(header) - 3 - length(footer_help(model, help)), 1)
+    end
+
     short = help_lines(help(model, false), width)
     {lines, long} = laid_out(model, width, room_for.(short))
     help = help_lines(help(model, long), width)
@@ -780,6 +783,10 @@ defmodule AtlasTui.View do
   # Footer
 
   # The help, or the request line while `:` is open.
+  defp footer_help(%Model{console: console, ask: text}, _help)
+       when console != nil and is_binary(text),
+       do: [[{:bold, " Request "}, {:plain, text}, {:cursor, " "}]]
+
   defp footer_help(%Model{console: console}, _help) when console != nil, do: []
 
   defp footer_help(%Model{ask: text}, _help) when is_binary(text),

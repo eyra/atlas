@@ -28,9 +28,9 @@ defmodule AtlasTui.Console do
     Protocol.request(:hello, %{
       "env" => model.env,
       "client" => "tui",
-      "spec" => Protocol.version()
+      "spec" => Protocol.version(),
+      "surface" => "console"
     })
-    |> Map.put("surface", "console")
   end
 
   def disconnected(model) do
@@ -118,7 +118,8 @@ defmodule AtlasTui.Console do
     console = model.console
 
     cond do
-      console.expected && message["path"] != console.expected ->
+      console.expected && message["path"] != console.expected &&
+          !(console.phase == :ready && message["reason"] == "open" && path?(message["path"])) ->
         {model, []}
 
       console.restoring and message["path"] == model.path ->

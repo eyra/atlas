@@ -47,70 +47,87 @@ defmodule AtlasTui.ConsoleTransportTest do
   end
 
   defp content(path) do
-    if path == "/k/widget/new" do
-      %{
-        "op" => "page",
-        "path" => path,
-        "title" => "New widget",
-        "reason" => "open",
-        "blocks" => [
-          %{
-            "id" => "form",
-            "type" => "form",
-            "props" => %{
-              "title" => "New widget",
-              "inputs" => [
-                %{"name" => "title", "label" => "Title", "kind" => "text", "value" => ""}
-              ],
-              "submit_label" => "Save",
-              "submit_to" => %{"endpoint" => "create", "params" => %{"kind" => "widget"}}
+    page =
+      if path == "/k/widget/new" do
+        %{
+          "op" => "page",
+          "path" => path,
+          "title" => "New widget",
+          "reason" => "open",
+          "blocks" => [
+            %{
+              "id" => "form",
+              "type" => "form",
+              "props" => %{
+                "title" => "New widget",
+                "inputs" => [
+                  %{"name" => "title", "label" => "Title", "kind" => "text", "value" => ""}
+                ],
+                "submit_label" => "Save",
+                "submit_to" => %{"endpoint" => "create", "params" => %{"kind" => "widget"}}
+              }
+            },
+            action("focus", "Tab", "focus_next"),
+            action("back-focus", "Shift+Tab", "focus_previous")
+          ],
+          "markup" => [
+            %{
+              "kind" => "legend",
+              "start" => "focus",
+              "end" => "back-focus",
+              "props" => %{"title" => "Editing", "context" => "form"}
             }
-          },
-          action("focus", "Tab", "focus_next"),
-          action("back-focus", "Shift+Tab", "focus_previous")
-        ],
-        "markup" => [
-          %{
-            "kind" => "legend",
-            "start" => "focus",
-            "end" => "back-focus",
-            "props" => %{"title" => "Editing", "context" => "form"}
-          }
-        ]
-      }
-    else
-      %{
-        "op" => "page",
-        "path" => path,
-        "title" => "Widgets",
-        "reason" => "open",
-        "blocks" => [
-          %{
-            "id" => "list",
-            "type" => "list",
-            "props" => %{
-              "title" => "Widgets",
-              "rows" => [
-                %{"id" => "W1", "label" => "First widget", "to" => "/k/widget/W1"},
-                %{"id" => "W2", "label" => "Second widget", "to" => "/k/widget/W2"}
-              ]
+          ]
+        }
+      else
+        %{
+          "op" => "page",
+          "path" => path,
+          "title" => "Widgets",
+          "reason" => "open",
+          "blocks" => [
+            %{
+              "id" => "list",
+              "type" => "list",
+              "props" => %{
+                "title" => "Widgets",
+                "rows" => [
+                  %{"id" => "W1", "label" => "First widget", "to" => "/k/widget/W1"},
+                  %{"id" => "W2", "label" => "Second widget", "to" => "/k/widget/W2"}
+                ]
+              }
+            },
+            action("next", "Tab", "tab_next"),
+            action("previous", "Shift+Tab", "tab_previous"),
+            action("down", "Down", "move_next"),
+            action("new", "n", "open", %{"to" => "/k/widget/new"})
+          ],
+          "markup" => [
+            %{
+              "kind" => "legend",
+              "start" => "next",
+              "end" => "new",
+              "props" => %{"title" => "Navigation", "context" => "browse"}
             }
-          },
-          action("next", "Tab", "tab_next"),
-          action("previous", "Shift+Tab", "tab_previous"),
-          action("down", "Down", "list_next"),
-          action("new", "n", "open", %{"to" => "/k/widget/new"})
-        ],
-        "markup" => [
-          %{
-            "kind" => "legend",
-            "start" => "next",
-            "end" => "new",
-            "props" => %{"title" => "Navigation", "context" => "browse"}
-          }
-        ]
-      }
-    end
+          ]
+        }
+      end
+
+    context = if path == "/k/widget/new", do: "form", else: "browse"
+
+    update_in(page["blocks"], fn blocks ->
+      Enum.map(blocks, fn
+        %{"type" => "console_action"} = action ->
+          put_in(action, ["props", "scope"], %{
+            "page" => path,
+            "revision" => "fixture",
+            "context" => context
+          })
+
+        block ->
+          block
+      end)
+    end)
   end
 
   defp shell(target) do

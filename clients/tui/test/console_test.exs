@@ -257,6 +257,15 @@ defmodule AtlasTui.ConsoleTest do
   end
 
   defp declared(page, context, actions) do
+    actions =
+      Enum.map(actions, fn action ->
+        put_in(action, ["props", "scope"], %{
+          "page" => page["path"],
+          "revision" => "fixture",
+          "context" => context
+        })
+      end)
+
     page
     |> Map.update!("blocks", &(&1 ++ actions))
     |> Map.put("markup", [
@@ -274,7 +283,7 @@ defmodule AtlasTui.ConsoleTest do
       declared(page(), "browse", [
         action("next", "Tab", "tab_next"),
         action("previous", "Shift+Tab", "tab_previous"),
-        action("down", "Down", "list_next")
+        action("down", "Down", "move_next")
       ])
 
     {model, []} = Console.receive(ready(), page)
@@ -293,7 +302,7 @@ defmodule AtlasTui.ConsoleTest do
 
   test "captured action cannot execute after page, context, row, availability or connection changes" do
     alias AtlasTui.Interactions
-    projected = declared(page(), "browse", [action("down", "Down", "list_next")])
+    projected = declared(page(), "browse", [action("down", "Down", "move_next")])
     {model, []} = Console.receive(ready(), projected)
     event = Interactions.capture(model, :down)
     assert event.id == "down"
@@ -309,11 +318,11 @@ defmodule AtlasTui.ConsoleTest do
     end
 
     disabled =
-      declared(page(), "browse", [action("down", "Down", "list_next", %{"available" => false})])
+      declared(page(), "browse", [action("down", "Down", "move_next", %{"available" => false})])
 
     {disabled, []} = Console.receive(model, disabled)
     assert Model.key(disabled, :down) == {disabled, []}
-    replaced = declared(page("/k/part"), "browse", [action("down", "Down", "list_next")])
+    replaced = declared(page("/k/part"), "browse", [action("down", "Down", "move_next")])
     {replaced, []} = Console.receive(model, replaced)
     assert Interactions.dispatch(replaced, event) == {replaced, []}
     refute screen(model) =~ "console_action"
@@ -373,5 +382,146 @@ defmodule AtlasTui.ConsoleTest do
 
     assert preserved.path == detail.path
     assert preserved.console.active == nil
+  end
+
+  test "typed confirm actions submit the supplied call and cancel restores the declared target" do
+    confirm = %{
+      "op" => "page",
+      "path" => "/k/widget/W1/delete",
+      "reason" => "open",
+      "blocks" => [
+        %{
+          "id" => "question",
+          "type" => "confirm",
+          "props" => %{
+            "title" => "Delete widget?",
+            "text" => "Confirm",
+            "confirm_to" => %{
+              "endpoint" => "delete",
+              "params" => %{"kind" => "widget", "key" => "W1"}
+            },
+            "cancel_to" => "/k/widget/W1"
+          }
+        }
+      ]
+    }
+
+    confirm =
+      declared(confirm, "confirm", [
+        action("yes", "y", "submit_form"),
+        action("no", "Esc", "cancel_form")
+      ])
+
+    {model, []} = Console.receive(ready(), confirm)
+
+    assert {_,
+            [{:send, %{"op" => "submit", "endpoint" => "delete", "params" => %{"key" => "W1"}}}]} =
+             Model.key(model, {:char, "y"})
+
+    assert {_, [{:send, %{"op" => "open", "to" => "/k/widget/W1"}}]} = Model.key(model, :esc)
+    assert Model.key(model, :tab) == {model, []}
+  end
+
+  test "typed ask and plan contexts execute only declared actions while preserving literal text" do
+    alias AtlasTui.Interactions
+
+    ask_page =
+      declared(page(), "ask", [
+        action("send", "Enter", "ask_send"),
+        action("cancel", "Esc", "ask_cancel")
+      ])
+
+    {model, []} = Console.receive(ready(), ask_page)
+    model = %{model | ask: "make parts"}
+    {model, []} = Model.key(model, {:char, "?"})
+    assert screen(model) =~ "Request make parts?"
+    refute screen(model) =~ "↵ ask the agent"
+    assert Interactions.context(model) == "ask"
+
+    {planning, [{:agent, %{"op" => "ask", "request" => "make parts?"}}]} =
+      Model.key(model, :enter)
+
+    assert Interactions.context(planning) == "plan_planning"
+
+    proposed_page =
+      declared(page(), "plan_proposed", [
+        action("run", "Enter", "plan_run"),
+        action("edit", "e", "plan_edit")
+      ])
+
+    {planning, []} = Console.receive(planning, proposed_page)
+
+    plan = %{
+      "op" => "plan",
+      "block" => %{
+        "type" => "plan",
+        "props" => %{
+          "title" => "Proposed",
+          "request" => "make parts?",
+          "state" => "proposed",
+          "steps" => [
+            %{
+              "n" => 1,
+              "label" => "Create",
+              "state" => "proposed",
+              "inputs" => [
+                %{"name" => "title", "label" => "Title", "kind" => "text", "value" => "One"}
+              ]
+            }
+          ]
+        }
+      }
+    }
+
+    proposed = Model.agent(planning, plan)
+    assert Interactions.context(proposed) == "plan_proposed"
+    {editing, []} = Model.key(proposed, {:char, "e"})
+    assert Interactions.context(editing) == "step_form"
+    assert editing.values["title"] == "One"
+
+    step_page =
+      declared(page(), "step_form", [
+        action("save", "Ctrl+S", "step_save"),
+        action("cancel", "Esc", "step_cancel")
+      ])
+
+    {editing, []} = Console.receive(editing, Map.put(step_page, "reason", "hint"))
+    {editing, []} = Model.key(editing, {:char, "!"})
+    assert editing.values["title"] == "One!"
+    {saved, []} = Model.key(editing, :ctrl_s)
+    assert saved.steps.editing == nil
+    assert saved.steps.values[1]["title"] == "One!"
+    assert Interactions.context(saved) == "plan_proposed"
+  end
+
+  test "unknown operations, tokens and inconsistent scopes disable projection visibly" do
+    for {field, value} <- [
+          {"operation", %{"name" => "system_eval"}},
+          {"keys", ["NoSuchKey"]},
+          {"scope", %{"page" => "/k/part", "revision" => "r", "context" => "browse"}}
+        ] do
+      projected = declared(page(), "browse", [action("next", "Tab", "tab_next")])
+      projected = put_in(projected, ["blocks", Access.at(1), "props", field], value)
+      {model, []} = Console.receive(ready(), projected)
+      assert model.console.projection == nil
+      assert screen(model) =~ "Unsupported or invalid Console actions"
+      assert Model.key(model, :tab) == {model, []}
+    end
+
+    conflict =
+      declared(page(), "browse", [
+        action("a", "Tab", "tab_next"),
+        action("b", "Tab", "tab_previous")
+      ])
+
+    {model, []} = Console.receive(ready(), conflict)
+    assert model.console.projection == nil
+  end
+
+  test "canonical response to a declared generic deep link is accepted after navigation" do
+    {pending, [{:send, %{"to" => "/k/_/W1"}}]} = Console.navigate(ready(), "/k/_/W1")
+    {opened, []} = Console.receive(pending, page("/k/widget/W1"))
+    assert opened.path == "/k/widget/W1"
+    assert opened.console.active == "widgets"
   end
 end

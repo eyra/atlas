@@ -351,75 +351,140 @@ defmodule AtlasTui.Model do
     end
   end
 
-  def literal(model, :backspace) do
-    cond do
-      model.ask != nil -> ask_key(model, model.ask, :backspace)
-      form = step_form(model) -> step_form_key(model, form, :backspace)
-      form = form(model) -> form_key(model, form, :backspace)
-      true -> {model, []}
-    end
-  end
-
   def literal(model, _key), do: {model, []}
 
   @doc "Finite Console operations; callers resolve a current declared action first."
-  def operation(model, "list_next"),
+  def operation(model, "move_next"),
     do:
       {%{model | selected: min(model.selected + 1, max(length(rows(model)) - 1, 0)), scroll: nil},
        []}
 
-  def operation(model, "list_previous"),
+  def operation(model, "move_previous"),
     do: {%{model | selected: max(model.selected - 1, 0), scroll: nil}, []}
 
-  def operation(model, "open_selected") do
-    case Enum.at(rows(model), model.selected) do
-      nil -> {model, []}
-      row -> AtlasTui.Console.navigate(model, row.to)
-    end
-  end
+  def operation(model, "select_first"), do: {%{model | selected: 0, scroll: nil}, []}
+
+  def operation(model, "select_last"),
+    do: {%{model | selected: max(length(rows(model)) - 1, 0), scroll: nil}, []}
 
   def operation(model, "back"), do: AtlasTui.Console.navigate(model, model.back)
   def operation(model, "refresh"), do: {model, [{:send, %{"op" => "refresh"}}]}
   def operation(model, "quit"), do: {model, [:quit]}
 
-  def operation(model, "scroll_up"),
-    do: {%{model | scroll: max((model.scroll || 0) - @scroll_step, 0)}, []}
+  def operation(model, name) when name in ["page_next", "page_previous"] do
+    by = if name == "page_next", do: @scroll_step, else: -@scroll_step
 
-  def operation(model, "scroll_down"),
-    do: {%{model | scroll: (model.scroll || 0) + @scroll_step}, []}
+    case part(model) do
+      nil -> {%{model | scroll: max((model.scroll || 0) + by, 0)}, []}
+      part -> {scroll_part(model, part, by), []}
+    end
+  end
 
-  def operation(model, operation) when operation in ["focus_next", "focus_previous"] do
+  def operation(model, name) when name in ["part_next", "part_previous"] do
+    count = length(parts(model))
+
+    if count > 0 do
+      step = if name == "part_next", do: 1, else: -1
+      {%{model | part: Integer.mod((part(model) || 0) + step, count)}, []}
+    else
+      {model, []}
+    end
+  end
+
+  def operation(model, name) when name in ["focus_next", "focus_previous"] do
     case step_form(model) || form(model) do
       nil ->
         {model, []}
 
       form ->
-        step = if operation == "focus_next", do: 1, else: -1
+        step = if name == "focus_next", do: 1, else: -1
         focus = Integer.mod(model.focus + step, length(focusable(form)))
         {focus_to(model, focus), []}
     end
   end
 
-  def operation(model, "submit") do
+  def operation(model, "submit_form") do
     cond do
-      form = step_form(model) -> step_form_key(model, form, :ctrl_s)
       form = form(model) -> submit(model, form.submit_to, model.values)
       confirm = confirm(model) -> submit(model, confirm.confirm_to, %{})
       true -> {model, []}
     end
   end
 
-  def operation(model, "cancel") do
+  def operation(model, "cancel_form") do
     cond do
-      form = step_form(model) -> step_form_key(model, form, :esc)
-      model.ask != nil -> {%{model | ask: nil}, []}
       form = form(model) -> AtlasTui.Console.navigate(model, form.cancel_to)
       confirm = confirm(model) -> AtlasTui.Console.navigate(model, confirm.cancel_to)
       true -> {model, []}
     end
   end
 
-  def operation(model, _unknown), do: {model, []}
+  def operation(model, "form_enter"), do: editor_operation(model, :enter)
+  def operation(model, "input_up"), do: editor_operation(model, :up)
+  def operation(model, "input_down"), do: editor_operation(model, :down)
+  def operation(model, "input_left"), do: editor_operation(model, :left)
+  def operation(model, "input_right"), do: editor_operation(model, :right)
+  def operation(model, "input_home"), do: editor_operation(model, :home)
+  def operation(model, "input_end"), do: editor_operation(model, :end)
+  def operation(model, "input_backspace"), do: editor_operation(model, :backspace)
+
+  def operation(%{ask: text} = model, "ask_send") when is_binary(text),
+    do: ask_key(model, text, :enter)
+
+  def operation(model, "ask_cancel"), do: {%{model | ask: nil}, []}
+
+  def operation(%{plan: %Plan{state: state}} = model, "plan_cancel")
+      when state in ["planning", "proposed"],
+      do: close_plan(model, [{:agent, %{"op" => "cancel"}}])
+
+  def operation(%{plan: %Plan{state: "proposed"}} = model, "plan_run"), do: run(model)
+
+  def operation(%{plan: %Plan{state: "proposed"}} = model, "plan_toggle"),
+    do: plan_key(model, model.plan, {:char, " "})
+
+  def operation(%{plan: %Plan{state: "proposed"}} = model, "plan_edit"),
+    do: plan_key(model, model.plan, {:char, "e"})
+
+  def operation(%{plan: %Plan{}} = model, "plan_previous"), do: plan_key(model, model.plan, :up)
+  def operation(%{plan: %Plan{}} = model, "plan_next"), do: plan_key(model, model.plan, :down)
+
+  def operation(%{plan: %Plan{state: "running"}} = model, "plan_stop"),
+    do: plan_key(model, model.plan, :esc)
+
+  def operation(%{plan: %Plan{state: state}} = model, "plan_close")
+      when state not in ["planning", "running", "proposed"],
+      do: close_plan(model, [])
+
+  def operation(model, "step_save") do
+    case step_form(model) do
+      nil -> {model, []}
+      form -> step_form_key(model, form, :ctrl_s)
+    end
+  end
+
+  def operation(model, "step_cancel") do
+    case step_form(model) do
+      nil -> {model, []}
+      form -> step_form_key(model, form, :esc)
+    end
+  end
+
+  # IS121 supplies legend presentation. Unknown/unimplemented operations do not run.
+  def operation(model, _unknown),
+    do: {%{model | notice: %{tone: "error", text: "Action unavailable in this Console"}}, []}
+
+  defp editor_operation(model, key) do
+    cond do
+      model.ask != nil -> ask_key(model, model.ask, key)
+      form = step_form(model) -> step_form_key(model, form, key)
+      form = form(model) -> form_key(model, form, key)
+      true -> {model, []}
+    end
+  end
+
+  def external(model, url), do: open_url(model, url)
+  def agent_action(model, _label, nil), do: {%{model | ask: ""}, []}
+  def agent_action(model, label, intent), do: ask_agent(model, label, intent)
 
   # The request line: type, enter asks the agent about the page you are on, esc closes.
   defp ask_key(model, text, key) do
