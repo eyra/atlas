@@ -436,27 +436,40 @@ defmodule AtlasTui.View do
         style = if selected, do: :selected, else: :bold
         marker = if selected, do: " › ", else: "   "
         id = if row.id in [nil, ""], do: "", else: cut(row.id, max(div(inner, 3), 1)) <> "  "
-        label_room = max(inner - String.length(id), 1)
-        labels = Text.wrap(row.label || "", label_room)
+        prefix = marker <> id
+        stacked = String.length(prefix) >= width
+        label_prefix = if stacked, do: "", else: prefix
+        label_room = max(width - String.length(label_prefix), 1)
+        labels = list_wrap(row.label || "", label_room)
 
         title =
           labels
           |> Enum.with_index()
           |> Enum.map(fn {line, n} ->
             prefix =
-              if n == 0, do: marker <> id, else: "   " <> String.duplicate(" ", String.length(id))
+              if n == 0,
+                do: label_prefix,
+                else: String.duplicate(" ", String.length(label_prefix))
 
             [{style, prefix <> line}]
           end)
 
-        detail =
-          for line <- Text.wrap(row.detail || "", inner), line != "", do: [{:dim, "   " <> line}]
+        indent = String.duplicate(" ", min(3, max(width - 1, 0)))
 
-        title ++ detail
+        detail =
+          for line <- list_wrap(row.detail || "", width - String.length(indent)),
+              line != "",
+              do: [{:dim, indent <> line}]
+
+        identity = if stacked, do: Enum.map(list_wrap(prefix, width), &[{style, &1}]), else: []
+        identity ++ title ++ detail
       end)
 
+    indent = String.duplicate(" ", min(3, max(width - 1, 0)))
+
     empty =
-      for line <- Text.wrap(list.empty || "Nothing here.", inner), do: [{:dim, "   " <> line}]
+      for line <- list_wrap(list.empty || "Nothing here.", width - String.length(indent)),
+          do: [{:dim, indent <> line}]
 
     separator = [[{:border, " " <> String.duplicate("─", max(width - 2, 0))}]]
 
@@ -601,6 +614,17 @@ defmodule AtlasTui.View do
 
   defp block(%Fallback{type: type}, _at, _model, _width, _room),
     do: [[{:dim, "   (a #{type || "?"} block this TUI cannot show)"}]]
+
+  # List prefixes and part frames can leave fewer than ten columns. Use the
+  # actual budget; Text.wrap's reading/editor defaults remain unchanged.
+  defp list_wrap(text, width) do
+    text
+    |> String.split("\n")
+    |> Enum.flat_map(fn line ->
+      for {start, length} <- Text.rows(line, max(width, 1)),
+          do: line |> String.slice(start, length) |> String.trim_trailing()
+    end)
+  end
 
   @step_marks %{
     "proposed" => {:ok, "[✓]"},

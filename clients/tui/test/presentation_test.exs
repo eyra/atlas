@@ -122,4 +122,72 @@ defmodule AtlasTui.PresentationTest do
     |> Enum.zip([0.2126, 0.7152, 0.0722])
     |> Enum.sum_by(fn {value, weight} -> value * weight end)
   end
+
+  defp narrow_content(width, framed, label, detail) do
+    m = model()
+    row = %AtlasTui.Blocks.Row{id: "ID12345", label: label, detail: detail, to: "/k/widget/one"}
+
+    markup =
+      if framed,
+        do: [
+          %{
+            "kind" => "part",
+            "start" => "items",
+            "end" => "items",
+            "value" => %AtlasTui.Blocks.Part{title: "Part", role: "related"}
+          }
+        ],
+        else: []
+
+    m = %{
+      m
+      | blocks: [%AtlasTui.Blocks.List{title: "Items", rows: [row]}],
+        ids: ["items"],
+        markup: markup,
+        console: %{m.console | shell: nil},
+        updated: nil
+    }
+
+    rows = View.render(m, width, 160, 5)
+    title = for row <- rows, {style, text} <- row, style == :selected, into: "", do: text
+
+    metadata =
+      for row <- rows,
+          {style, text} <- row,
+          style == :dim and String.starts_with?(text, "   "),
+          into: "",
+          do: text
+
+    {String.replace(title, ~r/[\s›A-Z0-9…]/u, ""), String.replace(metadata, ~r/\s/u, "")}
+  end
+
+  test "narrow bare and framed lists preserve entire title and metadata in reading order" do
+    label = "abcdefghijklmnopqrstuvwxyz"
+    detail = "lowercase metadata stays complete"
+
+    for {width, framed} <- [
+          {19, false},
+          {20, false},
+          {38, true},
+          {20, true},
+          {12, false},
+          {8, false},
+          {5, false}
+        ] do
+      {visible_title, visible_detail} = narrow_content(width, framed, label, detail)
+      assert visible_title == label, "#{width} columns framed=#{framed}"
+      assert visible_detail =~ String.replace(detail, " ", "")
+    end
+  end
+
+  test "narrow wrapping preserves multibyte and combining graphemes" do
+    label = "éàñøüéíçáößőűæœ"
+    detail = "éàñøü éíçáöß őűæœ"
+
+    for {width, framed} <- [{19, false}, {20, true}, {8, false}] do
+      {visible_title, visible_detail} = narrow_content(width, framed, label, detail)
+      assert visible_title == label
+      assert visible_detail =~ String.replace(detail, " ", "")
+    end
+  end
 end
