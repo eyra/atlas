@@ -23,7 +23,7 @@ defmodule AtlasTui.App do
   @reconnect 2_000
   @root Path.expand("../../../..", __DIR__)
 
-  def run(env, settings) do
+  def run(env, settings, surface \\ "console") do
     with {:error, reason} <- :shell.start_interactive({:noshell, :raw}) do
       IO.puts(:stderr, "atlas: the TUI needs a terminal (#{inspect(reason)})")
       System.halt(1)
@@ -38,7 +38,11 @@ defmodule AtlasTui.App do
     :timer.send_interval(reconcile * 1_000, :reconcile)
 
     state = %{
-      model: %{Model.new(env) | console: Console.new()},
+      model:
+        if(surface == "legacy",
+          do: Model.new(env),
+          else: %{Model.new(env) | console: Console.new()}
+        ),
       settings: settings,
       reconcile: reconcile,
       socket: nil,
@@ -84,7 +88,11 @@ defmodule AtlasTui.App do
       {:tcp, socket, line} when socket == state.socket ->
         case JSON.decode(line) do
           {:ok, message} ->
-            {model, effects} = Console.receive(state.model, message)
+            {model, effects} =
+              if state.model.console,
+                do: Console.receive(state.model, message),
+                else: {Model.message(state.model, message), []}
+
             loop(draw(effects(%{state | model: model}, effects)))
 
           _ ->
@@ -147,14 +155,22 @@ defmodule AtlasTui.App do
         )
 
       :reconcile ->
-        {model, effects} = Console.refresh(state.model)
-        state = effects(%{state | model: model}, effects)
+        if state.model.console do
+          {model, outgoing} = Console.refresh(state.model)
+          state = effects(%{state | model: model}, outgoing)
 
-        if state.socket && model.connected && model.console.phase == :ready &&
-             !Console.draft?(model),
-           do: send_line(state, %{"op" => "refresh"})
+          if state.socket && model.connected && model.console.phase == :ready &&
+               !Console.draft?(model),
+             do: send_line(state, %{"op" => "refresh"})
 
-        loop(state)
+          loop(state)
+        else
+          if state.socket && state.model.connected && !Model.form(state.model) &&
+               !Model.step_form(state.model),
+             do: send_line(state, %{"op" => "refresh"})
+
+          loop(state)
+        end
     end
   end
 
@@ -231,8 +247,23 @@ defmodule AtlasTui.App do
     case :gen_tcp.connect(host, port, options, 2_000) do
       {:ok, socket} ->
         state = %{state | socket: socket, model: Model.disconnected(state.model)}
-        send_line(state, Console.hello(state.model))
-        Process.send_after(self(), {:handshake_timeout, socket}, 5_000)
+
+        if state.model.console do
+          send_line(state, Console.hello(state.model))
+          Process.send_after(self(), {:handshake_timeout, socket}, 5_000)
+        else
+          send_line(
+            state,
+            AtlasTui.Protocol.request(:hello, %{
+              "env" => state.model.env,
+              "client" => "tui",
+              "spec" => AtlasTui.Protocol.version()
+            })
+          )
+
+          if state.model.path, do: send_line(state, %{"op" => "open", "to" => state.model.path})
+        end
+
         state
 
       {:error, _} ->

@@ -97,6 +97,7 @@ defmodule AtlasTui.Interactions do
         %{
           id: action["id"],
           generation: model.console.generation,
+          shell_revision: shell_revision(model),
           context: context(model),
           focus: focus(model),
           path: model.path,
@@ -114,6 +115,7 @@ defmodule AtlasTui.Interactions do
     current =
       model.connected && model.console.phase == :ready && is_nil(model.console.expected) &&
         event.generation == model.console.generation && event.context == context(model) &&
+        event.shell_revision == shell_revision(model) &&
         event.path == model.path && event.selected == selected_identity(model) &&
         event.focus == focus(model)
 
@@ -178,6 +180,8 @@ defmodule AtlasTui.Interactions do
   end
 
   defp focus(model), do: {model.focus, model.part, model.steps.selected, model.steps.editing}
+  defp shell_revision(%{console: %{shell: nil}}), do: nil
+  defp shell_revision(model), do: model.console.shell["revision"]
 
   defp range(ids, start, finish) do
     with from when is_integer(from) <- Enum.find_index(ids, &(&1 == start)),

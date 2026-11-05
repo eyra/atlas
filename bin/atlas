@@ -99,6 +99,14 @@ while [ $# -gt 0 ]; do
     --env) [ -n "${2:-}" ] || no_env; env="$2"; shift 2 ;;
     --env=?*) env="${1#--env=}"; shift ;;
     --env=) no_env ;;
+    --surface)
+      [ "$cmd" = tui ] && [ -n "${2:-}" ] || usage
+      case "$2" in console|legacy) ;; *) echo "atlas: unknown TUI surface $2" >&2; usage ;; esac
+      args+=("--surface" "$2"); shift 2 ;;
+    --surface=*)
+      [ "$cmd" = tui ] || usage
+      case "${1#--surface=}" in console|legacy) ;; *) echo "atlas: unknown TUI surface ${1#--surface=}" >&2; usage ;; esac
+      args+=("$1"); shift ;;
     *)
       case "$cmd" in
         e2e|turn|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help) args+=("$1"); shift ;;
@@ -395,7 +403,7 @@ case "$cmd" in
     stty -ixon 2>/dev/null || true
     cd "$root/clients/tui"
     status=0
-    mix atlas.tui --env "$env" || status=$?
+    mix atlas.tui --env "$env" ${args[@]+"${args[@]}"} || status=$?
     [ -n "$saved" ] && stty "$saved" 2>/dev/null || true
     exit $status
     ;;

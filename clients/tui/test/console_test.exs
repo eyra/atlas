@@ -558,4 +558,18 @@ defmodule AtlasTui.ConsoleTest do
     assert Model.key(model, {:char, "o"}) == {model, []}
     {_, [{:send, %{"to" => "/k/part/P1"}}]} = Model.key(%{model | selected: 2}, {:char, "o"})
   end
+
+  test "captured tab action expires on an independent shell revision change" do
+    alias AtlasTui.Interactions
+    projected = declared(page(), "browse", [action("next", "Tab", "tab_next")])
+    {model, []} = Console.receive(ready(), projected)
+    event = Interactions.capture(model, :tab)
+    {pending, [_]} = Console.refresh(model)
+    {same, []} = Console.receive(pending, boot())
+    assert {_, [{:send, %{"to" => "/k/part"}}]} = Interactions.dispatch(same, event)
+    {pending, [_]} = Console.refresh(model)
+    {changed, []} = Console.receive(pending, Map.put(boot(), "revision", "changed"))
+    assert Interactions.dispatch(changed, event) == {changed, []}
+    assert changed.console.generation == model.console.generation
+  end
 end
