@@ -13,6 +13,7 @@ defmodule AtlasBFF.Wire do
 
   def validate!(schema) do
     wires = Map.get(schema, :protocol, [])
+    models = Map.new(Map.get(schema, :models, []), &{&1.name, &1.fields})
     names = Enum.map(wires, & &1.name)
     ensure!(length(names) == length(Enum.uniq(names)), "duplicate wire descriptor")
 
@@ -20,7 +21,7 @@ defmodule AtlasBFF.Wire do
       ensure!(identifier?(wire.name) and identifier?(wire.channel), "invalid wire name/channel")
 
       ensure!(
-        Map.keys(wire) -- [:name, :channel, :direction, :request, :replies] == [],
+        Map.keys(wire) -- [:name, :channel, :direction, :request, :replies, :cli] == [],
         "unknown wire metadata"
       )
 
@@ -33,7 +34,7 @@ defmodule AtlasBFF.Wire do
           "unknown request metadata"
         )
 
-        envelope!(wire.request)
+        envelope!(wire.request, models)
       end
 
       reply_names = Enum.map(wire.replies, & &1.name)
@@ -48,7 +49,7 @@ defmodule AtlasBFF.Wire do
           "unknown reply metadata"
         )
 
-        envelope!(reply)
+        envelope!(reply, models)
         ensure!(reply.effect in [:complete, :progress, :error, :terminal], "invalid reply effect")
         ensure!(Map.get(reply, :requires, []) -- reply_names == [], "unknown required reply")
 
@@ -67,6 +68,16 @@ defmodule AtlasBFF.Wire do
       if wire.direction == :request,
         do: ensure!(Enum.any?(wire.replies, &(&1.effect == :complete)), "no completion reply")
 
+      if command = wire[:cli] do
+        ensure!(wire.direction == :request, "CLI binding requires a request")
+
+        ensure!(
+          is_list(command) and command != [] and
+            Enum.all?(command, &(is_binary(&1) and &1 != "")),
+          "invalid CLI binding"
+        )
+      end
+
       disjoint!(wire.replies)
 
       pushes =
@@ -79,6 +90,10 @@ defmodule AtlasBFF.Wire do
       disjoint!(
         for w <- wires, w.channel == channel and w.direction == :push, r <- w.replies, do: r
       )
+
+      commands = for w <- wires, w.channel == channel and w[:cli], do: w.cli
+      ensure!(length(commands) == length(Enum.uniq(commands)), "duplicate CLI binding")
+      disjoint!(for w <- wires, w.channel == channel and w.direction != :push, do: w.request)
     end
 
     if wires != [] do
@@ -114,7 +129,7 @@ defmodule AtlasBFF.Wire do
 
   defp identifier?(value), do: is_atom(value) and value not in [nil, true, false]
 
-  defp envelope!(envelope) do
+  defp envelope!(envelope, models) do
     select = Map.get(envelope, :select, %{})
     present = Map.get(envelope, :present, [])
     absent = Map.get(envelope, :absent, [])
@@ -142,13 +157,14 @@ defmodule AtlasBFF.Wire do
     )
 
     for key <- [:required, :optional], {name, type} <- Map.get(envelope, key, %{}) do
-      ensure!(is_binary(name) and valid_type?(type), "invalid envelope field")
+      ensure!(is_binary(name) and valid_type?(type, models), "invalid envelope field")
     end
   end
 
-  defp valid_type?(type) when type in [:string, :integer, :boolean, :map, :list], do: true
-  defp valid_type?({:map, type}), do: type in [:string, :integer, :boolean]
-  defp valid_type?(_), do: false
+  defp valid_type?(type, _) when type in [:string, :integer, :boolean, :map, :list], do: true
+  defp valid_type?({:map, type}, _), do: type in [:string, :integer, :boolean]
+  defp valid_type?({:list, type}, models), do: valid_type?(type, models)
+  defp valid_type?(type, models), do: Map.has_key?(models, type)
 
   defp disjoint!([]), do: :ok
 
@@ -183,12 +199,14 @@ defmodule AtlasBFF.Wire do
     wire
   end
 
-  def encode!(wire, props) do
+  def encode!(wire, props, models \\ %{}), do: encode_envelope!(wire.request, props, models)
+
+  defp encode_envelope!(envelope, props, models) do
     message = Map.new(props, fn {k, v} -> {to_string(k), v} end)
 
     known =
-      Map.keys(Map.get(wire.request, :required, %{})) ++
-        Map.keys(Map.get(wire.request, :optional, %{}))
+      Map.keys(Map.get(envelope, :required, %{})) ++
+        Map.keys(Map.get(envelope, :optional, %{}))
 
     ensure!(Map.keys(message) -- known == [], "unknown envelope fields")
 
@@ -196,13 +214,15 @@ defmodule AtlasBFF.Wire do
       message
       |> Enum.reject(fn {_, v} -> is_nil(v) end)
       |> Map.new()
-      |> Map.merge(wire.request.select)
+      |> Map.merge(envelope.select)
 
-    check!(wire.request, message)
+    check!(envelope, message, models)
     message
   end
 
-  def classify(wires, name, channel, message) when is_map(message) do
+  def classify(wires, name, channel, message, models \\ %{})
+
+  def classify(wires, name, channel, message, models) when is_map(message) do
     wire = descriptor!(wires, name, channel)
 
     pushes =
@@ -214,7 +234,7 @@ defmodule AtlasBFF.Wire do
 
       reply ->
         try do
-          check!(reply, message)
+          check!(reply, message, models)
           {:reply, reply}
         rescue
           e in ArgumentError -> {:invalid, Exception.message(e)}
@@ -222,7 +242,7 @@ defmodule AtlasBFF.Wire do
     end
   end
 
-  def classify(_, _, _, _), do: {:invalid, "expected an object"}
+  def classify(_, _, _, _, _), do: {:invalid, "expected an object"}
 
   defp matches?(selector, message) do
     Enum.all?(selector.select, fn {k, v} -> message[k] == v end) and
@@ -230,26 +250,113 @@ defmodule AtlasBFF.Wire do
       Enum.all?(Map.get(selector, :absent, []), &(not Map.has_key?(message, &1)))
   end
 
-  defp check!(envelope, message) do
+  defp check!(envelope, message, models) do
     for {key, type} <- Map.get(envelope, :required, %{}) do
       ensure!(
-        Map.has_key?(message, key) and typed?(message[key], type),
+        Map.has_key?(message, key) and typed?(message[key], type, models),
         "missing or invalid #{key}"
       )
     end
 
     for {key, type} <- Map.get(envelope, :optional, %{}),
         Map.has_key?(message, key) and message[key] != nil do
-      ensure!(typed?(message[key], type), "invalid #{key}")
+      ensure!(typed?(message[key], type, models), "invalid #{key}")
     end
   end
 
-  defp typed?(v, :string), do: is_binary(v)
-  defp typed?(v, :integer), do: is_integer(v)
-  defp typed?(v, :boolean), do: is_boolean(v)
-  defp typed?(v, :map), do: is_map(v)
-  defp typed?(v, :list), do: is_list(v)
+  defp typed?(v, :map, _), do: is_map(v)
+  defp typed?(v, :list, _), do: is_list(v)
 
-  defp typed?(v, {:map, type}),
-    do: is_map(v) and Enum.all?(v, fn {k, x} -> is_binary(k) and typed?(x, type) end)
+  defp typed?(v, {:map, type}, models),
+    do:
+      is_map(v) and
+        Enum.all?(v, fn {key, value} -> is_binary(key) and typed?(value, type, models) end)
+
+  defp typed?(v, {:list, type}, models),
+    do: is_list(v) and Enum.all?(v, &typed?(&1, type, models))
+
+  defp typed?(v, type, models) do
+    AtlasBFF.Targets.Protocol.value!(models, type, v)
+    true
+  rescue
+    ArgumentError -> false
+  end
+
+  @doc "Validate and identify an incoming request, without executing it. Unknown frames fail closed."
+  def decode_request(wires, channel, message, models) when is_map(message) do
+    candidates =
+      Enum.filter(
+        wires,
+        &(&1.channel == channel and &1.direction != :push and matches?(&1.request, message))
+      )
+
+    decode_candidates(Enum.map(candidates, &{&1.name, &1.request}), message, models)
+  end
+
+  def decode_request(_, _, _, _), do: {:invalid, "expected an object"}
+
+  def decode_event(wires, channel, message, models) when is_map(message) do
+    candidates =
+      for w <- wires,
+          w.channel == channel and w.direction == :push,
+          r <- w.replies,
+          matches?(r, message),
+          do: {w.name, r}
+
+    decode_candidates(candidates, message, models)
+  end
+
+  def decode_event(_, _, _, _), do: {:invalid, "expected an object"}
+
+  def decode_reply(wires, name, channel, message, models) when is_map(message) do
+    wire = descriptor!(wires, name, channel)
+    candidates = for r <- wire.replies, matches?(r, message), do: {r.name, r}
+    decode_candidates(candidates, message, models)
+  end
+
+  def decode_reply(_, _, _, _, _), do: {:invalid, "expected an object"}
+
+  defp decode_candidates([{name, envelope}], message, models) do
+    known =
+      Map.keys(envelope.select) ++
+        Map.keys(envelope[:required] || %{}) ++ Map.keys(envelope[:optional] || %{})
+
+    ensure!(Map.keys(message) -- known == [], "unknown envelope fields")
+    check!(envelope, message, models)
+    {:ok, name, message}
+  rescue
+    e in ArgumentError -> {:invalid, Exception.message(e)}
+  end
+
+  defp decode_candidates([], _, _), do: {:invalid, "unknown message or protocol version"}
+  defp decode_candidates(_, _, _), do: {:invalid, "ambiguous message"}
+
+  def reply!(wires, name, variant, props, channel, models) do
+    wire =
+      Enum.find(wires, &(&1.name == name and &1.channel == channel)) ||
+        raise(ArgumentError, "unknown wire")
+
+    envelope =
+      Enum.find(wire.replies, &(&1.name == variant)) || raise(ArgumentError, "unknown reply")
+
+    encode_envelope!(envelope, props, models)
+  end
+
+  def event!(wires, name, props, channel, models) do
+    wire =
+      Enum.find(wires, &(&1.name == name and &1.channel == channel and &1.direction == :push)) ||
+        raise(ArgumentError, "unknown event")
+
+    [envelope] = wire.replies
+    encode_envelope!(envelope, props, models)
+  end
+
+  def cli(wires, channel, words, props, models) do
+    case Enum.find(wires, &(&1.channel == channel and &1[:cli] == words)) do
+      nil -> {:invalid, "unknown command"}
+      wire -> {:ok, wire.name, encode!(wire, props, models)}
+    end
+  rescue
+    e in ArgumentError -> {:invalid, Exception.message(e)}
+  end
 end

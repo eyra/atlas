@@ -28,11 +28,69 @@ defmodule AtlasBFF.Targets.Protocol do
 
       def request(name, props \\ %{}, channel \\ unquote(opts[:channel])) do
         wire = AtlasBFF.Wire.descriptor!(@protocol_wires, name, channel)
-        AtlasBFF.Wire.encode!(wire, props)
+        AtlasBFF.Wire.encode!(wire, props, @protocol_models)
       end
 
       def classify(name, message, channel \\ unquote(opts[:channel])),
-        do: AtlasBFF.Wire.classify(@protocol_wires, name, channel, message)
+        do: AtlasBFF.Wire.classify(@protocol_wires, name, channel, message, @protocol_models)
+
+      def models, do: @protocol_models
+
+      def model(name, props),
+        do: AtlasBFF.Targets.Protocol.payload!(@protocol_models, name, props)
+
+      def decode_request(message, channel \\ unquote(opts[:channel])),
+        do: AtlasBFF.Wire.decode_request(@protocol_wires, channel, message, @protocol_models)
+
+      def decode_event(message, channel \\ unquote(opts[:channel])),
+        do: AtlasBFF.Wire.decode_event(@protocol_wires, channel, message, @protocol_models)
+
+      def decode_reply(name, message, channel \\ unquote(opts[:channel])),
+        do: AtlasBFF.Wire.decode_reply(@protocol_wires, name, channel, message, @protocol_models)
+
+      def reply(name, variant, props, channel \\ unquote(opts[:channel])),
+        do: AtlasBFF.Wire.reply!(@protocol_wires, name, variant, props, channel, @protocol_models)
+
+      def event(name, props, channel \\ unquote(opts[:channel])),
+        do: AtlasBFF.Wire.event!(@protocol_wires, name, props, channel, @protocol_models)
+
+      def commands(channel \\ unquote(opts[:channel])),
+        do:
+          Enum.filter(@protocol_wires, &(&1.channel == channel and &1[:cli]))
+          |> Enum.map(&%{name: &1.name, words: &1.cli})
+
+      def cli(words, props, channel \\ unquote(opts[:channel])),
+        do: AtlasBFF.Wire.cli(@protocol_wires, channel, words, props, @protocol_models)
+
+      def encode_request(name, props, channel \\ unquote(opts[:channel])),
+        do: request(name, props, channel) |> JSON.encode!()
+
+      def encode_reply(name, variant, props, channel \\ unquote(opts[:channel])),
+        do: reply(name, variant, props, channel) |> JSON.encode!()
+
+      def encode_event(name, props, channel \\ unquote(opts[:channel])),
+        do: event(name, props, channel) |> JSON.encode!()
+
+      def decode_reply_json(name, bytes, channel \\ unquote(opts[:channel])) do
+        case JSON.decode(bytes) do
+          {:ok, message} -> decode_reply(name, message, channel)
+          {:error, _} -> {:invalid, "malformed JSON"}
+        end
+      end
+
+      def decode_event_json(bytes, channel \\ unquote(opts[:channel])) do
+        case JSON.decode(bytes) do
+          {:ok, message} -> decode_event(message, channel)
+          {:error, _} -> {:invalid, "malformed JSON"}
+        end
+      end
+
+      def decode_request_json(bytes, channel \\ unquote(opts[:channel])) do
+        case JSON.decode(bytes) do
+          {:ok, message} -> decode_request(message, channel)
+          {:error, _} -> {:invalid, "malformed JSON"}
+        end
+      end
 
       def endpoint_path(call, name, params \\ %{}) do
         endpoint = AtlasBFF.Targets.Protocol.endpoint!(@protocol_endpoints, call, name)
@@ -89,19 +147,19 @@ defmodule AtlasBFF.Targets.Protocol do
   defp model!(_models, name, _fields, _props),
     do: raise(ArgumentError, "#{name} must be an object")
 
-  defp value!(_models, :string, value) when is_binary(value), do: value
-  defp value!(_models, :integer, value) when is_integer(value), do: value
-  defp value!(_models, :boolean, value) when is_boolean(value), do: value
+  def value!(_models, :string, value) when is_binary(value), do: value
+  def value!(_models, :integer, value) when is_integer(value), do: value
+  def value!(_models, :boolean, value) when is_boolean(value), do: value
 
-  defp value!(models, {:list, type}, values) when is_list(values),
+  def value!(models, {:list, type}, values) when is_list(values),
     do: Enum.map(values, &value!(models, type, &1))
 
-  defp value!(models, {:map, type}, values) when is_map(values),
+  def value!(models, {:map, type}, values) when is_map(values),
     do: Map.new(values, fn {key, value} -> {to_string(key), value!(models, type, value)} end)
 
-  defp value!(models, type, value) when is_map_key(models, type),
+  def value!(models, type, value) when is_map_key(models, type),
     do: model!(models, type, Map.fetch!(models, type), value)
 
-  defp value!(_models, type, value),
+  def value!(_models, type, value),
     do: raise(ArgumentError, "expected #{inspect(type)}, got: #{inspect(value)}")
 end
