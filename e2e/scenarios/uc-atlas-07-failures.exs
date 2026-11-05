@@ -196,7 +196,9 @@ scenario "UC-Atlas-07: failure actions in the test TUI, each seen as it recovers
     Process.sleep(6_000)
     home(t1)
 
-    for turn <- turns.(i, use_case), do: {_, 0, _} = atlas(i, ["delete", turn["key"]])
+    # Fenced turns belong to Runtime, never Control. Teardown owns only this private
+    # fixture backend and stops its Runtime before removing ended fixture records.
+    AtlasE2E.Instance.cleanup_turn_fixtures(i, Enum.map(turns.(i, use_case), & &1["key"]))
     for key <- [use_case, scene], do: {_, 0, _} = atlas(i, ["delete", key])
     gone(t1, "A scene that fails")
   end

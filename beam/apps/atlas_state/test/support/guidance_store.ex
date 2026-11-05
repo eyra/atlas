@@ -23,6 +23,7 @@ defmodule AtlasState.GuidanceStore do
   def mutations(pid), do: Agent.get(pid, & &1.mutations)
 
   def barrier(pid, owner), do: Agent.update(pid, &%{&1 | barrier: owner})
+  def barrier(pid, owner, plural), do: Agent.update(pid, &%{&1 | barrier: {owner, plural}})
   def delete_barrier(pid, owner), do: Agent.update(pid, &Map.put(&1, :delete_barrier, owner))
 
   defp facts(s) do
@@ -76,15 +77,29 @@ defmodule AtlasState.GuidanceStore do
         own = Map.put(own, key, %{"properties" => props, "links" => links})
         File.write!(s.path, JSON.encode!(Map.put(all, plural, own)), [:sync])
 
-        if s.barrier do
-          send(s.barrier, {:committed, self(), key})
-
-          receive do
-            :release_commit -> :ok
+        owner =
+          case s.barrier do
+            {owner, ^plural} -> owner
+            {_owner, _other} -> nil
+            owner -> owner
           end
-        end
 
-        {{:ok, []}, %{s | barrier: nil}}
+        faults =
+          if owner do
+            send(owner, {:committed, self(), key})
+
+            receive do
+              :release_commit ->
+                s.faults
+
+              {:release_commit, {:fail_get, plural, key, reason}} ->
+                Map.put(s.faults, {plural, key}, reason)
+            end
+          else
+            s.faults
+          end
+
+        {{:ok, []}, %{s | barrier: if(owner, do: nil, else: s.barrier), faults: faults}}
       end
     end)
   end

@@ -32,6 +32,16 @@ defmodule AtlasRuntime.Agent.FakeInbox do
 
   def start(_, _), do: {:error, :invalid_identity}
   @impl true
+  def describe(_turn, _opts), do: {:ok, descriptor()}
+  @impl true
+  def accept(pid, request, deadline), do: GenServer.call(pid, {:accept, request, deadline})
+  @impl true
+  def close_input(pid), do: close_attempt(pid)
+  @impl true
+  def recover_input(turn, opts),
+    do: start(turn, Keyword.merge(opts, initialize: false, recovery: true))
+
+  @impl true
   def stop(pid), do: GenServer.stop(pid)
   @impl true
   def capabilities(pid), do: GenServer.call(pid, :capabilities)
@@ -64,17 +74,33 @@ defmodule AtlasRuntime.Agent.FakeInbox do
          {:ok, stat} <- File.stat(dir),
          lock = {__MODULE__, node(), stat.major_device, stat.minor_device, stat.inode},
          :yes <- :global.register_name(lock, self()) do
-      case open(dir, scope, target, Keyword.get(opts, :initialize, false), physical_id(stat)) do
+      case open(
+             dir,
+             scope,
+             target,
+             Keyword.get(opts, :initialize, false),
+             physical_id(stat),
+             Keyword.get(opts, :recovery, false)
+           ) do
         {:ok, table, meta, binding} ->
+          seal = Keyword.get(opts, :recovery, false) and meta.active == target
+
+          if seal do
+            # Recovery must never activate a successor or accept new input.
+            sync(table, [{:meta, %{meta | closed: true}}, {{:closed, meta.active}, true}])
+          end
+
           {:ok,
            %{
              table: table,
-             meta: meta,
+             meta: if(seal, do: %{meta | closed: true}, else: meta),
              owner: owner,
              lock: lock,
              binding: binding,
              barrier: Keyword.get(opts, :barrier),
-             failed: false
+             failed: false,
+             owner_ref: Process.monitor(owner),
+             recovery: Keyword.get(opts, :recovery, false)
            }}
 
         {:error, reason} ->
@@ -93,7 +119,7 @@ defmodule AtlasRuntime.Agent.FakeInbox do
     if File.dir?(dir), do: :ok, else: {:error, :uncertain}
   end
 
-  defp open(dir, scope, target, initialize, directory_id) do
+  defp open(dir, scope, target, initialize, directory_id, recovery) do
     file = Path.join(dir, "inbox.dets")
     marker = Path.join(dir, "identity.json")
     new? = initialize and File.ls!(dir) == []
@@ -113,7 +139,7 @@ defmodule AtlasRuntime.Agent.FakeInbox do
          {:ok, table} <-
            :dets.open_file(make_ref(), file: String.to_charlist(file), repair: false) do
       result =
-        with {:ok, meta} <- load(table, scope, target, new?),
+        with {:ok, meta} <- load(table, scope, target, new?, recovery),
              {:ok, opened_id} <- named_file_id(file) do
           binding = %{
             directory: dir,
@@ -172,20 +198,23 @@ defmodule AtlasRuntime.Agent.FakeInbox do
 
   defp ensure_binding!(state), do: true = binding_intact?(state.binding)
 
-  defp load(table, scope, target, true) do
+  defp load(table, scope, target, true, false) do
     meta = %{version: 1, scope: scope, active: target, closed: false}
     sync(table, {:meta, meta})
     {:ok, meta}
   end
 
-  defp load(table, scope, target, false) do
+  defp load(table, scope, target, false, recovery) do
     with [{:meta, %{version: 1, scope: ^scope} = meta}] <- :dets.lookup(table, :meta),
          true <- intact?(table, meta) do
       cond do
         meta.active == target ->
           {:ok, meta}
 
-        meta.closed and :dets.lookup(table, {:closed, target}) == [] ->
+        recovery and :dets.lookup(table, {:closed, target}) == [{{:closed, target}, true}] ->
+          {:ok, meta}
+
+        not recovery and meta.closed and :dets.lookup(table, {:closed, target}) == [] ->
           meta = %{meta | active: target, closed: false}
           sync(table, {:meta, meta})
           {:ok, meta}
@@ -225,6 +254,19 @@ defmodule AtlasRuntime.Agent.FakeInbox do
   end
 
   @impl true
+  def handle_info({:DOWN, ref, :process, _, _}, %{owner_ref: ref} = state) do
+    # Owner loss seals admission; restarting Runtime may only query this history.
+    try do
+      ensure_binding!(state)
+      if not state.recovery, do: operation(:close_attempt, state)
+    rescue
+      _ -> :uncertain
+    end
+
+    {:stop, :normal, state}
+  end
+
+  @impl true
   def terminate(_, state) do
     :dets.close(state.table)
     :global.unregister_name(state.lock)
@@ -244,20 +286,23 @@ defmodule AtlasRuntime.Agent.FakeInbox do
     :exit, _ -> {:reply, {:error, :uncertain}, %{state | failed: true}}
   end
 
-  defp operation(:capabilities, state) do
-    {{:ok,
-      %{
-        "capability_version" => "1",
-        "harness" => "private_fake",
-        "harness_version" => "1",
-        "configured_model" => nil,
-        "reported_model" => nil,
-        "queued_input" => true,
-        "durable_accept_query" => true,
-        "consumption_evidence" => true,
-        "literal_text" => true
-      }}, state}
+  defp descriptor do
+    %{
+      "capability_version" => "1",
+      "harness" => "private_fake",
+      "harness_version" => "1",
+      "configured_model" => nil,
+      "reported_model" => nil,
+      "queued_input" => true,
+      "durable_accept_query" => true,
+      "consumption_evidence" => true,
+      "literal_text" => true
+    }
   end
+
+  defp operation(:capabilities, state), do: {{:ok, descriptor()}, state}
+
+  defp operation(:close_attempt, %{recovery: true} = state), do: {:ok, state}
 
   defp operation(:close_attempt, state) do
     meta = %{state.meta | closed: true}
@@ -265,14 +310,16 @@ defmodule AtlasRuntime.Agent.FakeInbox do
     {:ok, %{state | meta: meta}}
   end
 
-  defp operation({:accept, request}, state) do
+  defp operation({:accept, request}, state), do: operation({:accept, request, nil}, state)
+
+  defp operation({:accept, request, deadline}, state) do
     result =
       with :ok <- Input.validate(request),
            :ok <- environment(request, state) do
         case :dets.lookup(state.table, {:input, request["interaction"]}) do
           [{_, %{request: ^request, evidence: evidence}}] -> {:ok, evidence}
           [_] -> {:error, :conflict}
-          [] -> admit(state, request)
+          [] -> admit(state, request, deadline)
         end
       end
 
@@ -305,31 +352,36 @@ defmodule AtlasRuntime.Agent.FakeInbox do
 
   defp active?(request, state),
     do:
-      not state.meta.closed and Map.drop(identity(request), ["interaction"]) == state.meta.active
+      not state.recovery and not state.meta.closed and
+        Map.drop(identity(request), ["interaction"]) == state.meta.active
 
-  defp admit(state, request) do
+  defp admit(state, request, deadline) do
     if active?(request, state) do
       barrier(state, :before_accept, request)
       ensure_binding!(state)
 
-      evidence = %{
-        "identity" => identity(request),
-        "stage" => "admitted",
-        "admission_id" => evidence_id(),
-        "consumption_id" => nil
-      }
-
-      record = %{request: request, evidence: evidence}
-      # Reserve room for consumption proof before admission becomes durable.
-      largest = put_in(record, [:evidence, "consumption_id"], String.duplicate("x", 24))
-
-      if byte_size(JSON.encode!(largest)) <= 32_768 do
-        sync(state.table, {{:input, request["interaction"]}, record})
-        barrier(state, :after_accept, request)
-        ensure_binding!(state)
-        {:ok, evidence}
+      if is_integer(deadline) and System.system_time(:millisecond) >= deadline do
+        {:error, :stale}
       else
-        {:error, :record_too_large}
+        evidence = %{
+          "identity" => identity(request),
+          "stage" => "admitted",
+          "admission_id" => evidence_id(),
+          "consumption_id" => nil
+        }
+
+        record = %{request: request, evidence: evidence}
+        # Reserve room for consumption proof before admission becomes durable.
+        largest = put_in(record, [:evidence, "consumption_id"], String.duplicate("x", 24))
+
+        if byte_size(JSON.encode!(largest)) <= 32_768 do
+          sync(state.table, {{:input, request["interaction"]}, record})
+          barrier(state, :after_accept, request)
+          ensure_binding!(state)
+          {:ok, evidence}
+        else
+          {:error, :record_too_large}
+        end
       end
     else
       {:error, :stale}
