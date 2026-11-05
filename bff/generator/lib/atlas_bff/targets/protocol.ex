@@ -127,6 +127,9 @@ defmodule AtlasBFF.Targets.Protocol do
   def payload!(models, name, props), do: model!(models, name, Map.fetch!(models, name), props)
 
   defp model!(models, name, fields, props) when is_map(props) or is_list(props) do
+    if is_list(props) and not Enum.all?(props, &(is_tuple(&1) and tuple_size(&1) == 2)),
+      do: raise(ArgumentError, "#{name} must be an object or field pairs")
+
     props = Map.new(props, fn {key, value} -> {to_string(key), value} end)
     known = Enum.map(fields, &Atom.to_string(&1.name))
 
@@ -162,4 +165,34 @@ defmodule AtlasBFF.Targets.Protocol do
 
   def value!(_models, type, value),
     do: raise(ArgumentError, "expected #{inspect(type)}, got: #{inspect(value)}")
+
+  @doc false
+  def validate_value!(models, type, value) do
+    # Incoming JSON objects cannot use the constructor's field-pair coercion.
+    object_shape!(models, type, value)
+    value!(models, type, value)
+    :ok
+  end
+
+  defp object_shape!(models, type, value) when is_map_key(models, type) do
+    if not is_map(value) or not Enum.all?(Map.keys(value), &is_binary/1),
+      do: raise(ArgumentError, "#{type} must be a string-keyed object")
+
+    for field <- Map.fetch!(models, type),
+        nested = value[Atom.to_string(field.name)],
+        not is_nil(nested),
+        do: object_shape!(models, field.type, nested)
+  end
+
+  defp object_shape!(models, {:list, type}, values) when is_list(values),
+    do: Enum.each(values, &object_shape!(models, type, &1))
+
+  defp object_shape!(models, {:map, type}, values) when is_map(values) do
+    if not Enum.all?(Map.keys(values), &is_binary/1),
+      do: raise(ArgumentError, "expected string-keyed map")
+
+    Enum.each(values, fn {_, value} -> object_shape!(models, type, value) end)
+  end
+
+  defp object_shape!(_, _, _), do: :ok
 end
