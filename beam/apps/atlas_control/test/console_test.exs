@@ -146,4 +146,18 @@ defmodule AtlasControl.ConsoleTest do
 
     assert FakeStore.sent() == []
   end
+
+  test "selecting Console never grants an agent person-only mutation authority", %{port: port} do
+    FakeStore.put("W-1", %{"title" => "One"})
+    FakeStore.put("ada", %{"name" => "Ada"}, "member")
+    Application.put_env(:atlas_control, :tui_user, "ada")
+    on_exit(fn -> Application.delete_env(:atlas_control, :tui_user) end)
+    s = connect(port, %{"surface" => "console", "client" => "agent"})
+    assert %{"op" => "welcome", "surface" => "console"} = read(s)
+    read(s)
+    put(s, %{"op" => "submit", "to" => "/k/widget/W-1/set/approved_by", "values" => %{}})
+    assert %{"op" => "notice", "text" => text} = read(s)
+    assert text =~ "only a member approves"
+    assert FakeStore.sent() == []
+  end
 end
