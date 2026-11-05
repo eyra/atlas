@@ -1,0 +1,230 @@
+defmodule AtlasTui.ConsoleTransportTest do
+  use ExUnit.Case, async: false
+  alias AtlasTui.Protocol
+
+  @moduletag timeout: 30_000
+  @moduletag skip: is_nil(System.find_executable("tmux"))
+
+  defp send_message(socket, message), do: :gen_tcp.send(socket, [JSON.encode!(message), "\n"])
+
+  defp read(socket) do
+    {:ok, line} = :gen_tcp.recv(socket, 0, 5_000)
+    JSON.decode!(line)
+  end
+
+  defp tmux(server, args) do
+    {output, 0} = System.cmd("tmux", ["-L", server | args], stderr_to_stdout: true)
+    output
+  end
+
+  defp see(server, expected, attempts \\ 100) do
+    screen = tmux(server, ["capture-pane", "-p", "-t", "console"])
+
+    cond do
+      String.contains?(screen, expected) ->
+        screen
+
+      attempts == 0 ->
+        flunk("Expected #{inspect(expected)} on screen:\n#{screen}")
+
+      true ->
+        Process.sleep(30)
+        see(server, expected, attempts - 1)
+    end
+  end
+
+  defp action(id, key, name, extra \\ %{}) do
+    %{
+      "id" => id,
+      "type" => "console_action",
+      "props" => %{
+        "label" => id,
+        "keys" => [key],
+        "operation" => Map.merge(%{"name" => name}, extra),
+        "available" => true
+      }
+    }
+  end
+
+  defp content(path) do
+    if path == "/k/widget/new" do
+      %{
+        "op" => "page",
+        "path" => path,
+        "title" => "New widget",
+        "reason" => "open",
+        "blocks" => [
+          %{
+            "id" => "form",
+            "type" => "form",
+            "props" => %{
+              "title" => "New widget",
+              "inputs" => [
+                %{"name" => "title", "label" => "Title", "kind" => "text", "value" => ""}
+              ],
+              "submit_label" => "Save",
+              "submit_to" => %{"endpoint" => "create", "params" => %{"kind" => "widget"}}
+            }
+          },
+          action("focus", "Tab", "focus_next"),
+          action("back-focus", "Shift+Tab", "focus_previous")
+        ],
+        "markup" => [
+          %{
+            "kind" => "legend",
+            "start" => "focus",
+            "end" => "back-focus",
+            "props" => %{"title" => "Editing", "context" => "form"}
+          }
+        ]
+      }
+    else
+      %{
+        "op" => "page",
+        "path" => path,
+        "title" => "Widgets",
+        "reason" => "open",
+        "blocks" => [
+          %{
+            "id" => "list",
+            "type" => "list",
+            "props" => %{
+              "title" => "Widgets",
+              "rows" => [
+                %{"id" => "W1", "label" => "First widget", "to" => "/k/widget/W1"},
+                %{"id" => "W2", "label" => "Second widget", "to" => "/k/widget/W2"}
+              ]
+            }
+          },
+          action("next", "Tab", "tab_next"),
+          action("previous", "Shift+Tab", "tab_previous"),
+          action("down", "Down", "list_next"),
+          action("new", "n", "open", %{"to" => "/k/widget/new"})
+        ],
+        "markup" => [
+          %{
+            "kind" => "legend",
+            "start" => "next",
+            "end" => "new",
+            "props" => %{"title" => "Navigation", "context" => "browse"}
+          }
+        ]
+      }
+    end
+  end
+
+  defp shell(target) do
+    %{
+      "op" => "boot",
+      "title" => "Atlas Console",
+      "env" => "test",
+      "spec" => Protocol.version(),
+      "revision" => "fixture",
+      "initial_to" => target,
+      "tabs" => [
+        %{"id" => "widgets", "label" => "Widgets", "to" => "/k/widget"},
+        %{"id" => "parts", "label" => "Parts", "to" => "/k/part"},
+        %{"id" => "work", "label" => "Open work", "to" => "/k/work"}
+      ]
+    }
+  end
+
+  defp handshake(socket, target) do
+    assert %{"op" => "hello", "surface" => "console", "env" => "test"} = read(socket)
+    # No immediate reconnect open is sent before welcome/compatibility/boot.
+    assert {:error, :timeout} = :gen_tcp.recv(socket, 0, 60)
+
+    send_message(socket, %{
+      "op" => "welcome",
+      "surface" => "console",
+      "env" => "test",
+      "spec" => Protocol.version()
+    })
+
+    send_message(socket, content("/"))
+    assert %{"op" => "boot"} = read(socket)
+    send_message(socket, shell(target))
+    assert %{"op" => "open", "to" => ^target} = read(socket)
+    send_message(socket, content(target))
+  end
+
+  test "native app negotiates boot, draws tabs, cycles, resizes and reconnects a real edited draft" do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [
+        :binary,
+        packet: :line,
+        active: false,
+        ip: {127, 0, 0, 1},
+        reuseaddr: true
+      ])
+
+    {:ok, {_, port}} = :inet.sockname(listener)
+    server = "atlas-console-#{System.unique_integer([:positive])}"
+
+    on_exit(fn ->
+      :gen_tcp.close(listener)
+      System.cmd("tmux", ["-L", server, "kill-server"], stderr_to_stdout: true)
+    end)
+
+    settings = %{"control" => %{"host" => "127.0.0.1", "port" => port}, "reconcile_seconds" => 60}
+    expression = "AtlasTui.App.run(\"test\", #{inspect(settings)})"
+    # Only the freshly compiled client and a loopback fixture server run here.
+    args = [
+      "new-session",
+      "-d",
+      "-s",
+      "console",
+      "-x",
+      "90",
+      "-y",
+      "24",
+      "env ELIXIR_ERL_OPTIONS='+S 2:2' mix run -e '#{expression}'"
+    ]
+
+    tmux(server, args)
+    {:ok, socket} = :gen_tcp.accept(listener, 10_000)
+    handshake(socket, "/k/widget")
+    see(server, "▸ Widgets")
+    tmux(server, ["send-keys", "-t", "console", "Down"])
+    see(server, "› W2")
+    tmux(server, ["send-keys", "-t", "console", "BTab"])
+    assert %{"op" => "open", "to" => "/k/work"} = read(socket)
+    send_message(socket, content("/k/work"))
+    see(server, "▸ Open work")
+    tmux(server, ["resize-window", "-t", "console", "-x", "20", "-y", "24"])
+    narrow = see(server, "▸ Open work")
+    assert narrow =~ "‹"
+    tmux(server, ["resize-window", "-t", "console", "-x", "90", "-y", "24"])
+    tmux(server, ["send-keys", "-t", "console", "Tab"])
+    assert %{"op" => "open", "to" => "/k/widget"} = read(socket)
+    send_message(socket, content("/k/widget"))
+    wide = see(server, "▸ Widgets")
+    tmux(server, ["send-keys", "-t", "console", "n"])
+    assert %{"op" => "open", "to" => "/k/widget/new"} = read(socket)
+    send_message(socket, content("/k/widget/new"))
+    see(server, "New widget")
+    tmux(server, ["send-keys", "-t", "console", "-l", "draft? intact"])
+    see(server, "draft? intact")
+    :gen_tcp.close(socket)
+    see(server, "stale shell")
+    {:ok, reconnected} = :gen_tcp.accept(listener, 5_000)
+    handshake(reconnected, "/k/widget/new")
+    restored = see(server, "draft? intact")
+    assert restored =~ "▸ Widgets"
+    refute restored =~ "Home"
+
+    if folder = System.get_env("ATLAS_CONSOLE_PROOF") do
+      File.mkdir_p!(folder)
+
+      for {name, screen} <- [
+            {"native-wide", wide},
+            {"native-narrow", narrow},
+            {"native-restored-draft", restored}
+          ],
+          do: File.write!(Path.join(folder, "#{name}.txt"), screen)
+    end
+
+    tmux(server, ["send-keys", "-t", "console", "C-c"])
+    :gen_tcp.close(reconnected)
+  end
+end

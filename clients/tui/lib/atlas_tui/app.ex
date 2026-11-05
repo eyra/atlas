@@ -14,7 +14,7 @@ defmodule AtlasTui.App do
     environment's other logs.
   """
 
-  alias AtlasTui.{Keys, Model, View}
+  alias AtlasTui.{Console, Keys, Model, View}
 
   # How long a lone escape byte waits for the rest of a key's sequence (`\e[B` is Down)
   # before it counts as Escape: `escape_ms` in the settings. The input is read a byte at
@@ -38,7 +38,7 @@ defmodule AtlasTui.App do
     :timer.send_interval(reconcile * 1_000, :reconcile)
 
     state = %{
-      model: Model.new(env),
+      model: %{Model.new(env) | console: Console.new()},
       settings: settings,
       reconcile: reconcile,
       socket: nil,
@@ -81,15 +81,45 @@ defmodule AtlasTui.App do
       {:flush, _old} ->
         loop(state)
 
-      {:tcp, _socket, line} ->
+      {:tcp, socket, line} when socket == state.socket ->
         case JSON.decode(line) do
-          {:ok, message} -> loop(draw(%{state | model: Model.message(state.model, message)}))
-          _ -> loop(state)
+          {:ok, message} ->
+            {model, effects} = Console.receive(state.model, message)
+            loop(draw(effects(%{state | model: model}, effects)))
+
+          _ ->
+            loop(state)
         end
 
-      {:tcp_closed, _socket} ->
+      {:tcp_closed, socket} when socket == state.socket ->
         Process.send_after(self(), :reconnect, @reconnect)
         loop(draw(%{state | socket: nil, model: Model.disconnected(state.model)}))
+
+      {:boot_timeout, socket, serial} when socket == state.socket ->
+        if state.model.console.boot_pending && state.model.console.boot_serial == serial do
+          loop(draw(connection_timeout(state, "Console boot timed out")))
+        else
+          loop(state)
+        end
+
+      {:handshake_timeout, socket} when socket == state.socket ->
+        if state.model.console.phase in [:welcome, :compatibility] do
+          loop(draw(connection_timeout(state, "Console handshake timed out")))
+        else
+          loop(state)
+        end
+
+      {:boot_timeout, _socket, _serial} ->
+        loop(state)
+
+      {:handshake_timeout, _socket} ->
+        loop(state)
+
+      {:tcp, _old_socket, _line} ->
+        loop(state)
+
+      {:tcp_closed, _old_socket} ->
+        loop(state)
 
       :resized ->
         loop(draw(state))
@@ -117,8 +147,11 @@ defmodule AtlasTui.App do
         )
 
       :reconcile ->
-        if state.socket && state.model.connected && !Model.form(state.model) &&
-             !Model.step_form(state.model),
+        {model, effects} = Console.refresh(state.model)
+        state = effects(%{state | model: model}, effects)
+
+        if state.socket && model.connected && model.console.phase == :ready &&
+             !Console.draft?(model),
            do: send_line(state, %{"op" => "refresh"})
 
         loop(state)
@@ -136,22 +169,36 @@ defmodule AtlasTui.App do
       if state.agent, do: Port.close(state.agent)
       :ok
     else
-      state =
-        Enum.reduce(effects, state, fn
-          {:send, message}, state ->
-            send_line(state, message)
-            state
-
-          {:open_url, url}, state ->
-            AtlasTui.Browser.open(url, state.settings)
-            state
-
-          {:agent, message}, state ->
-            to_agent(state, message)
-        end)
+      state = effects(state, effects)
 
       keys(state, rest)
     end
+  end
+
+  defp effects(state, effects) do
+    Enum.reduce(effects, state, fn
+      {:send, %{"op" => "boot"} = message}, state ->
+        send_line(state, message)
+
+        Process.send_after(
+          self(),
+          {:boot_timeout, state.socket, state.model.console.boot_serial},
+          5_000
+        )
+
+        state
+
+      {:send, message}, state ->
+        send_line(state, message)
+        state
+
+      {:open_url, url}, state ->
+        AtlasTui.Browser.open(url, state.settings)
+        state
+
+      {:agent, message}, state ->
+        to_agent(state, message)
+    end)
   end
 
   # The agent, started when it is first needed.
@@ -183,22 +230,22 @@ defmodule AtlasTui.App do
 
     case :gen_tcp.connect(host, port, options, 2_000) do
       {:ok, socket} ->
-        state = %{state | socket: socket}
-
-        send_line(state, %{
-          "op" => "hello",
-          "env" => state.model.env,
-          "client" => "tui",
-          "spec" => AtlasTui.Blocks.version()
-        })
-
-        if state.model.path, do: send_line(state, %{"op" => "open", "to" => state.model.path})
+        state = %{state | socket: socket, model: Model.disconnected(state.model)}
+        send_line(state, Console.hello(state.model))
+        Process.send_after(self(), {:handshake_timeout, socket}, 5_000)
         state
 
       {:error, _} ->
         Process.send_after(self(), :reconnect, @reconnect)
         %{state | socket: nil, model: Model.disconnected(state.model)}
     end
+  end
+
+  defp connection_timeout(state, reason) do
+    if state.socket, do: :gen_tcp.close(state.socket)
+    Process.send_after(self(), :reconnect, @reconnect)
+    model = Model.disconnected(state.model)
+    %{state | socket: nil, model: %{model | console: %{model.console | error: reason}}}
   end
 
   defp send_line(%{socket: nil}, _message), do: :ok

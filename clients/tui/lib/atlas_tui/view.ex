@@ -40,6 +40,8 @@ defmodule AtlasTui.View do
 
   @doc "The screen: exactly `height` lines of plain segments."
   def render(%Model{} = model, width, height, reconcile_seconds) do
+    width = max(width, 1)
+    height = max(height, 1)
     # What waits for the user, on every page: Control's words for it.
     count = if model.count, do: " · " <> model.count, else: ""
 
@@ -55,6 +57,8 @@ defmodule AtlasTui.View do
       ],
       [{:dim, String.duplicate("─", width)}]
     ]
+
+    header = if model.console, do: AtlasTui.ConsoleView.header(model, width), else: header
 
     # The footer: help (on more lines when it does not fit on one), a rule, the notice and
     # the status line. A page longer than its room adds scrolling to the help.
@@ -74,11 +78,11 @@ defmodule AtlasTui.View do
       footer_help(model, help) ++
         [
           [{:dim, String.duplicate("─", width)}],
-          notice(model),
+          console_notice(model),
           status(model, reconcile_seconds)
         ]
 
-    Enum.map(header ++ body ++ footer, &fit(&1, width))
+    Enum.map(Enum.take(header ++ body ++ footer, height), &fit(&1, width))
   end
 
   @doc "The screen as plain text, for tests and evidence."
@@ -765,15 +769,24 @@ defmodule AtlasTui.View do
 
   defp window(lines, _model, _room), do: lines
 
+  defp console_notice(%Model{console: %{error: error}}) when is_binary(error),
+    do: [{:error, " Console: " <> error <> " · retrying boot"}]
+
+  defp console_notice(model), do: notice(model)
+
   # Footer
 
   # The help, or the request line while `:` is open.
+  defp footer_help(%Model{console: console}, _help) when console != nil, do: []
+
   defp footer_help(%Model{ask: text}, _help) when is_binary(text),
     do: [
       [{:bold, " : "}, {:plain, text}, {:cursor, " "}, {:dim, "   ↵ ask the agent   esc close"}]
     ]
 
   defp footer_help(_model, help), do: Enum.map(help, &[{:dim, " " <> &1}])
+
+  defp help(%Model{console: console}, _long) when console != nil, do: ""
 
   defp help(model, long) do
     cond do

@@ -23,7 +23,8 @@ defmodule AtlasTui.Model do
 
   @scroll_step 10
 
-  defstruct env: nil,
+  defstruct console: nil,
+            env: nil,
             connected: false,
             path: nil,
             title: "",
@@ -162,7 +163,8 @@ defmodule AtlasTui.Model do
   # A page about one fact opens at its top, even when a list under it has a selected row.
   defp first_scroll(blocks), do: if(Enum.any?(blocks, &match?(%Item{}, &1)), do: 0, else: nil)
 
-  def disconnected(model), do: %{model | connected: false}
+  def disconnected(%{console: nil} = model), do: %{model | connected: false}
+  def disconnected(model), do: AtlasTui.Console.disconnected(model)
 
   # A list keeps the selected row when it is redrawn, even if rows moved.
   defp keep_selection(_model, false), do: 0
@@ -317,6 +319,10 @@ defmodule AtlasTui.Model do
 
   def key(model, :ctrl_c), do: {model, [:quit]}
   def key(%{closed: true} = model, _key), do: {model, [:quit]}
+
+  def key(%{console: console} = model, key) when console != nil,
+    do: AtlasTui.Interactions.key(model, key)
+
   def key(%{ask: text} = model, key) when is_binary(text), do: ask_key(model, text, key)
 
   def key(%{plan: %Plan{}} = model, key) do
@@ -334,6 +340,86 @@ defmodule AtlasTui.Model do
       true -> browse_key(model, key)
     end
   end
+
+  @doc "Literal editor input; Console commands are dispatched only from BFF actions."
+  def literal(model, {:char, _} = key) do
+    cond do
+      model.ask != nil -> ask_key(model, model.ask, key)
+      form = step_form(model) -> step_form_key(model, form, key)
+      form = form(model) -> form_key(model, form, key)
+      true -> {model, []}
+    end
+  end
+
+  def literal(model, :backspace) do
+    cond do
+      model.ask != nil -> ask_key(model, model.ask, :backspace)
+      form = step_form(model) -> step_form_key(model, form, :backspace)
+      form = form(model) -> form_key(model, form, :backspace)
+      true -> {model, []}
+    end
+  end
+
+  def literal(model, _key), do: {model, []}
+
+  @doc "Finite Console operations; callers resolve a current declared action first."
+  def operation(model, "list_next"),
+    do:
+      {%{model | selected: min(model.selected + 1, max(length(rows(model)) - 1, 0)), scroll: nil},
+       []}
+
+  def operation(model, "list_previous"),
+    do: {%{model | selected: max(model.selected - 1, 0), scroll: nil}, []}
+
+  def operation(model, "open_selected") do
+    case Enum.at(rows(model), model.selected) do
+      nil -> {model, []}
+      row -> AtlasTui.Console.navigate(model, row.to)
+    end
+  end
+
+  def operation(model, "back"), do: AtlasTui.Console.navigate(model, model.back)
+  def operation(model, "refresh"), do: {model, [{:send, %{"op" => "refresh"}}]}
+  def operation(model, "quit"), do: {model, [:quit]}
+
+  def operation(model, "scroll_up"),
+    do: {%{model | scroll: max((model.scroll || 0) - @scroll_step, 0)}, []}
+
+  def operation(model, "scroll_down"),
+    do: {%{model | scroll: (model.scroll || 0) + @scroll_step}, []}
+
+  def operation(model, operation) when operation in ["focus_next", "focus_previous"] do
+    case step_form(model) || form(model) do
+      nil ->
+        {model, []}
+
+      form ->
+        step = if operation == "focus_next", do: 1, else: -1
+        focus = Integer.mod(model.focus + step, length(focusable(form)))
+        {focus_to(model, focus), []}
+    end
+  end
+
+  def operation(model, "submit") do
+    cond do
+      form = step_form(model) -> step_form_key(model, form, :ctrl_s)
+      form = form(model) -> submit(model, form.submit_to, model.values)
+      confirm = confirm(model) -> submit(model, confirm.confirm_to, %{})
+      true -> {model, []}
+    end
+  end
+
+  def operation(model, "cancel") do
+    cond do
+      form = step_form(model) -> step_form_key(model, form, :esc)
+      model.ask != nil -> {%{model | ask: nil}, []}
+      form = form(model) -> AtlasTui.Console.navigate(model, form.cancel_to)
+      confirm = confirm(model) -> AtlasTui.Console.navigate(model, confirm.cancel_to)
+      true -> {model, []}
+    end
+  end
+
+  def operation(model, _unknown), do: {model, []}
 
   # The request line: type, enter asks the agent about the page you are on, esc closes.
   defp ask_key(model, text, key) do
