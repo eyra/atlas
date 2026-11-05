@@ -743,6 +743,106 @@
           "name": "machine",
           "required": true,
           "type": "string"
+        }
+      ],
+      "name": "runtime_machine"
+    },
+    {
+      "fields": [
+        {
+          "name": "machine",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "json",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_machine_status_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "local_status",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "local_start",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "local_stop",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "remote_status",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_machine_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "basis",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "capabilities",
+          "required": true,
+          "type": "runtime_machine_capabilities"
+        },
+        {
+          "name": "pid",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "process_present",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "name": "log",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_status"
+    },
+    {
+      "fields": [
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
         },
         {
           "name": "worker",
@@ -1619,6 +1719,57 @@
     }
   ],
   "protocol": [
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_status_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_status_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_status",
+          "version": "0.1.0"
+        }
+      }
+    },
     {
       "channel": "runtime",
       "cli": [
