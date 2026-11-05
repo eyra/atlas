@@ -57,6 +57,13 @@ defmodule AtlasState.Guidance do
           "key" => identity(["interaction", AtlasBus.environment(), actor, client_key])
         })
 
+      %{"turn" => turn, "attempt" => attempt}
+      when role == "execution" and is_binary(turn) and is_binary(attempt) and
+             turn != "" and attempt != "" ->
+        read(rela, description, role, %{
+          "key" => identity(["execution", AtlasBus.environment(), turn, attempt])
+        })
+
       %{"execution" => execution} when role == "interaction" and is_binary(execution) ->
         read_page(rela, description, role, {"execution", execution}, content)
 

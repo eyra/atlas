@@ -104,6 +104,19 @@ defmodule AtlasState.GuidanceTest do
       "consumption_evidence" => true
     }
 
+  test "execution lookup is bounded to exact environment turn and attempt", c do
+    assert {"answer", %{"fact" => fact}, _} =
+             request("execution", %{"turn" => "run-a", "attempt" => "attempt-a"}, class: "read")
+
+    assert fact == c.execution
+
+    assert {"answer", %{"code" => "not_found"}, _} =
+             request("execution", %{"turn" => "run-a", "attempt" => "different"}, class: "read")
+
+    assert {"answer", %{"code" => "exact_identity_required"}, _} =
+             request("execution", %{}, class: "read")
+  end
+
   defp interaction(ex),
     do: %{
       "op" => "submit_interaction",
@@ -156,7 +169,14 @@ defmodule AtlasState.GuidanceTest do
     do:
       Task.async(fn ->
         :ok = AtlasBus.attach(endpoint)
-        request(role, content, opts)
+
+        try do
+          request(role, content, opts)
+        after
+          # Task.await can return before Registry handles the task's DOWN signal.
+          # Release synchronously before another request reuses this exact identity.
+          Registry.unregister(AtlasBus.Endpoints, endpoint)
+        end
       end)
       |> Task.await()
 

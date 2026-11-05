@@ -26,12 +26,79 @@ defmodule AtlasRuntime.Agent do
   @callback accept(pid, map) :: {:ok, map} | {:error, term}
   @doc "Look up exact-target evidence; absence is explicit, never inferred from failure."
   @callback query(pid, map) :: {:ok, map} | {:not_admitted, map} | {:error, term}
-  @optional_callbacks capabilities: 1, accept: 2, query: 2
+  @doc "Side-effect-free pre-start descriptor; machine control is never prompt text."
+  @callback describe(map, keyword) :: {:ok, map} | {:error, term}
+  @doc "Typed admission deadline in wall-clock milliseconds; checked before new admission."
+  @callback accept(pid, map, integer) :: {:ok, map} | {:error, term}
+  @callback close_input(pid) :: :ok | {:error, term}
+  @doc "Open historical evidence without starting a model or activating an attempt."
+  @callback recover_input(map, keyword) :: {:ok, pid} | {:error, term}
+  @optional_callbacks capabilities: 1,
+                      accept: 2,
+                      query: 2,
+                      describe: 2,
+                      accept: 3,
+                      close_input: 1,
+                      recover_input: 2
+
+  def describe(port, turn, opts) do
+    case invoke(port, :describe, [turn, opts]) do
+      {:ok, descriptor} when is_map(descriptor) ->
+        # Use the same validation as live capabilities, without starting the port.
+        validate_descriptor(port, descriptor)
+
+      _ ->
+        {:error, :unsupported}
+    end
+  end
+
+  def runtime_input?(port),
+    do:
+      Enum.all?(
+        [{:describe, 2}, {:accept, 3}, {:close_input, 1}, {:recover_input, 2}],
+        fn {name, arity} ->
+          Code.ensure_loaded?(port) and function_exported?(port, name, arity)
+        end
+      )
+
+  def stop(port, pid), do: invoke(port, :stop, [pid])
+
+  def close_input(port, pid), do: invoke(port, :close_input, [pid])
+
+  def recover_input(port, turn, opts) do
+    case invoke(port, :recover_input, [turn, opts]) do
+      {:ok, pid} when is_pid(pid) -> {:ok, pid}
+      {:error, reason} -> error(reason)
+      _ -> {:error, :uncertain}
+    end
+  end
+
+  def accept(port, pid, request, deadline) when is_integer(deadline) do
+    with true <- runtime_input?(port),
+         {:ok, _} <- capabilities(port, pid),
+         :ok <- AtlasRuntime.Agent.Input.validate(request) do
+      evidence_result(
+        invoke(port, :accept, [pid, request, deadline]),
+        Map.drop(request, ["body", "mode"])
+      )
+    else
+      false -> {:error, :unsupported}
+      error -> error
+    end
+  end
 
   @doc "Only this version's complete evidence contract enables the input interface."
   def capabilities(port, pid) do
     case invoke(port, :capabilities, [pid]) do
-      {:ok, %{"capability_version" => "1"} = descriptor} ->
+      {:ok, descriptor} when is_map(descriptor) -> validate_descriptor(port, descriptor)
+      {:error, reason} -> error(reason)
+      _ -> {:error, :unsupported}
+    end
+  end
+
+  defp validate_descriptor(port, result) do
+    case result do
+      %{"capability_version" => "1"} = descriptor ->
         if bounded?(descriptor, 8_192) and
              Enum.all?(
                ~w(harness harness_version),

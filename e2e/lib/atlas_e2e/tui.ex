@@ -1,5 +1,7 @@
 defmodule AtlasE2E.Tui do
   @moduledoc """
+  The unchanged legacy presentation is selected explicitly; the Console has its own
+  focused native proof and never falls back when negotiation fails.
   One real TUI, started with `atlas tui --env test` in a tmux pane of its own (on a tmux server of
   this run only, so no session of anyone else is touched). Keys go in with
   `tmux send-keys`; the screen comes out with `tmux capture-pane`.
@@ -13,7 +15,7 @@ defmodule AtlasE2E.Tui do
   def start(instance, socket, name, label) do
     command =
       Enum.map_join(instance.env, " ", fn {k, v} -> "#{k}=#{v}" end) <>
-        " " <> Path.join(instance.root, "bin/atlas") <> " tui --env test"
+        " " <> Path.join(instance.root, "bin/atlas") <> " tui --env test --surface legacy"
 
     tmux!(socket, [
       "new-session",

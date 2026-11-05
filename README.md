@@ -36,6 +36,13 @@ atlas tui --env test      # the same for test; again for a second one
 atlas status --env test   # what runs, and which build (also: logs, stop, restart, env)
 ```
 
+Console uses a dark Prism palette by default. An environment settings file can set
+`"tui_theme": "light"` for a light surface (`"dark"` restores the default).
+Both palettes set their own foreground/background and retain text labels and
+selection markers. This presentation setting does not affect server data or the
+explicit legacy surface. Prism tokens are mapped locally by the TUI; no Prism
+generator or runtime dependency is required.
+
 ## Driving Atlas from an agent
 
 Agents use the same Control as the TUI, from the command line: `atlas help`, `put`, `set`, `delete`, `get`, `list`. Nothing writes rela directly. The same rules, refusals and generated codes apply, and an open TUI shows each change at once. `atlas help` (or `atlas put --help`) lists the kinds, what a create asks, how ids are made, what a kind belongs under and its fields, all from rela's description. Every command takes `--json` and then prints one JSON value: the item, the list, or `{"refused": [...]}`. The exit status is 0 when done, 1 when refused (the reasons also go to stderr) and 2 on an error. Like `atlas`, it works on prod unless given `--env test`.
