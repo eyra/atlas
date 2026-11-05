@@ -33,7 +33,8 @@ defmodule AtlasBFFContract.Blocks do
     "position" => :integer,
     "at" => :string,
     "count" => :string,
-    "refused" => :list
+    "refused" => :list,
+    "actions_revision" => :string
   }
   @open %{
     name: :page,
@@ -135,14 +136,15 @@ defmodule AtlasBFFContract.Blocks do
       request: %{
         select: %{"op" => "hello"},
         required: %{"env" => :string, "client" => :string, "spec" => :string},
-        optional: %{"as" => :string}
+        optional: %{"as" => :string, "surface" => :string}
       },
       replies: [
         %{
           name: :welcome,
           select: %{"op" => "welcome"},
           effect: :progress,
-          required: %{"env" => :string, "spec" => :string}
+          required: %{"env" => :string, "spec" => :string},
+          optional: %{"surface" => :string}
         },
         Map.put(@open, :requires, [:welcome])
       ]
@@ -390,6 +392,36 @@ defmodule AtlasBFFContract.Blocks do
     field :steps, {:list, :step}, required: true
   end
 
+  # Opt-in Console presentation. These are auxiliary action content, not page layout.
+  defmodel :console_operation do
+    field :name, :string, required: true
+    field :to, :string
+    field :url, :string
+    field :intent, :string
+  end
+
+  defmodel :console_scope do
+    field :page, :string, required: true
+    field :revision, :string, required: true
+    field :context, :string, required: true
+    field :on, :string
+    field :row, :string
+  end
+
+  defblock :console_action do
+    field :label, :string, required: true
+    field :keys, {:list, :string}, required: true
+    field :operation, :console_operation, required: true
+    field :scope, :console_scope, required: true
+    field :available, :boolean, required: true
+    field :reason, :string
+  end
+
+  defmarkup :legend do
+    field :title, :string, required: true
+    field :context, :string, required: true
+  end
+
   # Markup: kinds that cover a stretch of a view model's blocks. All markup nests, of
   # every kind; see AtlasBFF.Markup in the generator. Markup says what a stretch means,
   # never how it looks: each client decides the layout (boxes, columns, tabs) itself.
@@ -498,6 +530,7 @@ defmodule AtlasBFFContract.Blocks do
   # answers bye and closes; else welcome, then its start page. `as`: the key of the fact
   # an agent client is (an agent's, such as coordinator), when it says so; no sign-in yet.
   defmodel :hello do
+    field :surface, :string
     field :env, :string, required: true
     field :client, :string, required: true
     field :spec, :string, required: true
@@ -505,6 +538,7 @@ defmodule AtlasBFFContract.Blocks do
   end
 
   defmodel :welcome do
+    field :surface, :string
     field :env, :string, required: true
     field :spec, :string, required: true
   end
