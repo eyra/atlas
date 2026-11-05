@@ -76,7 +76,7 @@ defmodule RuntimePlayground.Server do
 
     File.write!(
       dir <> "/ready",
-      "PRIVATE STUB; contract fed255b; worker remains stopped until explicit start\n"
+      "PRIVATE STUB; contract c341938; worker remains stopped until explicit start\n"
     )
 
     Process.send_after(self(), :tick, 1000)

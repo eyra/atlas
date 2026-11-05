@@ -1,7 +1,7 @@
 # Runtime Playground · UC46 / IS125
 
 Private prototype depending on IS126 PR103, contract pin
-`fed255b7a9331ed65812cdb38b53965812319e74`. The local terminal client attaches to an
+`c34193806fdcceebbe47a00ba6d40ec158970077`. The local terminal client attaches to an
 independent headless Runtime, with real Bus, State, Flow, leases and stored turn
 history. The existing built-in agent stub is the only simulated component. There
 is no model, guidance support, harness, external action or live environment data.
