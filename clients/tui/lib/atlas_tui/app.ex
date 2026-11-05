@@ -287,7 +287,17 @@ defmodule AtlasTui.App do
   defp draw(state) do
     {width, height} = size()
     state = %{state | model: AtlasTui.Legend.resize(state.model, width, height)}
-    state.model |> View.render(width, height, state.reconcile) |> View.to_ansi() |> IO.write()
+
+    theme =
+      if state.model.console,
+        do: AtlasTui.Palette.theme(state.settings["tui_theme"]),
+        else: :legacy
+
+    state.model
+    |> View.render(width, height, state.reconcile)
+    |> View.to_ansi(theme)
+    |> IO.write()
+
     state
   end
 

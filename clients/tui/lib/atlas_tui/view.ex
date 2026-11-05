@@ -96,9 +96,27 @@ defmodule AtlasTui.View do
       end)
 
   @doc "The screen as ANSI, ready to write from the top-left corner."
-  def to_ansi(lines) do
+  def to_ansi(lines, theme \\ :legacy)
+
+  def to_ansi(lines, :legacy) do
     rows = Enum.map(lines, fn line -> [Enum.map(line, &segment/1), "\e[0m\e[K"] end)
     ["\e[H", Enum.intersperse(rows, "\r\n"), "\e[J"]
+  end
+
+  def to_ansi(lines, theme) do
+    base = AtlasTui.Palette.ansi(:plain, theme)
+
+    rows =
+      Enum.map(lines, fn line ->
+        [
+          base,
+          Enum.map(line, fn {style, text} -> [AtlasTui.Palette.ansi(style, theme), text] end),
+          base,
+          "\e[K"
+        ]
+      end)
+
+    ["\e[H", Enum.intersperse(rows, "\r\n"), base, "\e[J"]
   end
 
   # Prod stands out (white on red), so Melle never takes one environment for the other.
@@ -109,6 +127,7 @@ defmodule AtlasTui.View do
   defp segment({:prod, text}), do: ["\e[0;1;97;41m", text]
   defp segment({:bold, text}), do: ["\e[0;1m", text]
   defp segment({:dim, text}), do: ["\e[0;2m", text]
+  defp segment({:border, text}), do: ["\e[0;2m", text]
   defp segment({:selected, text}), do: ["\e[0;7m", text]
   defp segment({:cursor, text}), do: ["\e[0;7m", text]
   defp segment({:ok, text}), do: ["\e[0;32m", text]
@@ -396,6 +415,55 @@ defmodule AtlasTui.View do
 
   # Rows in columns: the id (as wide as the list's longest), the label (the rest, cut
   # with "…" only when it must be) and the detail (at most a third of the width).
+  defp block(%ListBlock{} = list, at, %{console: console} = model, width, _room)
+       when console != nil do
+    rows = list.rows || []
+    inner = max(width - 4, 1)
+
+    heading =
+      if list.title,
+        do: [
+          [{:bold, " " <> list.title}, {:dim, " · #{length(rows)}"}],
+          [{:border, " " <> String.duplicate("─", max(width - 2, 0))}]
+        ],
+        else: []
+
+    content =
+      rows
+      |> Enum.with_index()
+      |> Enum.map(fn {row, i} ->
+        selected = at + i == model.selected
+        style = if selected, do: :selected, else: :bold
+        marker = if selected, do: " › ", else: "   "
+        id = if row.id in [nil, ""], do: "", else: cut(row.id, max(div(inner, 3), 1)) <> "  "
+        label_room = max(inner - String.length(id), 1)
+        labels = Text.wrap(row.label || "", label_room)
+
+        title =
+          labels
+          |> Enum.with_index()
+          |> Enum.map(fn {line, n} ->
+            prefix =
+              if n == 0, do: marker <> id, else: "   " <> String.duplicate(" ", String.length(id))
+
+            [{style, prefix <> line}]
+          end)
+
+        detail =
+          for line <- Text.wrap(row.detail || "", inner), line != "", do: [{:dim, "   " <> line}]
+
+        title ++ detail
+      end)
+
+    empty =
+      for line <- Text.wrap(list.empty || "Nothing here.", inner), do: [{:dim, "   " <> line}]
+
+    separator = [[{:border, " " <> String.duplicate("─", max(width - 2, 0))}]]
+
+    heading ++
+      if(rows == [], do: empty, else: content |> Enum.intersperse(separator) |> Enum.concat())
+  end
+
   defp block(%ListBlock{} = list, at, model, width, _room) do
     rows = list.rows || []
     id_width = rows |> Enum.map(&String.length(&1.id || "")) |> Enum.max(fn -> 0 end)
