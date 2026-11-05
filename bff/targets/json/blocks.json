@@ -765,6 +765,56 @@
     {
       "fields": [
         {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "configuration",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "directory",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "instance",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_boot"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "instance",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "pid",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "name": "runtime_machine_boot_receipt"
+    },
+    {
+      "fields": [
+        {
           "name": "local_status",
           "required": true,
           "type": "boolean"
@@ -1719,6 +1769,108 @@
     }
   ],
   "protocol": [
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "start"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_start",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_start_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_start_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_start",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "stop"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_stop",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_stop_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_stop_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_stop",
+          "version": "0.1.0"
+        }
+      }
+    },
     {
       "channel": "runtime_machine",
       "cli": [

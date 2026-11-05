@@ -93,9 +93,12 @@ class StatusProjectionTest(unittest.TestCase):
             for words in [['runtime', 'status', '--unknown'], ['runtime', 'status', '--machine', 'other']]:
                 result = call(words)
                 self.assertNotEqual(result.returncode, 0)
-            result = call(['runtime', 'stop'])
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('unsupported', result.stderr)
+            for words in [['runtime', 'stop'], ['runtime-stop']]:
+                result = call(words)
+                self.assertNotEqual(result.returncode, 0)
+                refusal = json.loads(result.stdout)
+                self.assertEqual(refusal['op'], 'machine_stop_error')
+                self.assertEqual(refusal['error']['code'], 'ownership_refused')
 
 
     def test_pid_records_are_bounded_before_any_inspector_call(self):
@@ -164,9 +167,19 @@ class StatusProjectionTest(unittest.TestCase):
             for target in [dict(environment='test', machine='foreign'), ['not-an-object']]:
                 model['target'] = target
                 (fake/'tools/runtime.py').write_text('print('+repr(json.dumps(model))+')')
-                result = subprocess.run(['elixir', *paths, str(ROOT/'tools/runtime_status.exs'), str(fake), 'test', str(fake/'missing.json'), '--machine', 'fixture', '--json'], env=dict(os.environ, ELIXIR_ERL_OPTIONS='+S 1:1'), text=True, capture_output=True)
-                self.assertEqual(result.returncode, 2, result.stdout+result.stderr)
-                self.assertEqual(json.loads(result.stdout)['error']['code'], 'invalid_diagnostic')
+                for command in ['status', 'start', 'stop']:
+                    result = subprocess.run(['elixir', *paths, str(ROOT/'tools/runtime_status.exs'), str(fake), 'test', str(fake/'missing.json'), '--operation', command, 'unused', '--machine', 'fixture', '--json'], env=dict(os.environ, ELIXIR_ERL_OPTIONS='+S 1:1'), text=True, capture_output=True)
+                    self.assertEqual(result.returncode, 2, result.stdout+result.stderr)
+                    frame = json.loads(result.stdout)
+                    self.assertEqual(frame['op'], 'machine_'+command+'_error')
+                    self.assertEqual(frame['target'], dict(environment='test',machine='fixture'))
+                    self.assertEqual(frame['error']['code'], 'invalid_diagnostic')
+            for command in ['start','stop']:
+                result = subprocess.run(['elixir', *paths, str(ROOT/'tools/runtime_status.exs'), str(fake), 'test', 'unused', '--operation', command, 'unused', '--unknown', '--json'], env=dict(os.environ, ELIXIR_ERL_OPTIONS='+S 1:1'),text=True,capture_output=True)
+                self.assertEqual(result.returncode,2,result.stdout+result.stderr)
+                frame=json.loads(result.stdout)
+                self.assertEqual(frame['op'],'machine_'+command+'_error')
+                self.assertEqual(frame['error']['code'],'invalid_options')
 
 
 if __name__ == '__main__': unittest.main()
