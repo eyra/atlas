@@ -134,7 +134,7 @@ defmodule AtlasTui.Model do
         # "Stopping after this step…" is answered by the plan itself once it ends.
         over = plan.state in ["done", "stopped", "failed"] and model.plan.state == "running"
         notice = if over and match?(%{tone: "pending"}, model.notice), do: nil, else: model.notice
-        %{model | plan: plan, steps: steps, notice: notice}
+        advance_mode(%{model | plan: plan, steps: steps, notice: notice})
 
       _ ->
         %{model | notice: %{tone: "error", text: "The agent sent a plan this TUI cannot show."}}
@@ -157,7 +157,8 @@ defmodule AtlasTui.Model do
           other
       end
 
-    %{model | plan: plan, notice: %{tone: "error", text: "The agent stopped: #{why}"}}
+    updated = %{model | plan: plan, notice: %{tone: "error", text: "The agent stopped: #{why}"}}
+    if plan != model.plan, do: advance_mode(updated), else: updated
   end
 
   # A page about one fact opens at its top, even when a list under it has a selected row.
@@ -339,7 +340,7 @@ defmodule AtlasTui.Model do
   def key(model, key) do
     cond do
       form = form(model) -> form_key(model, form, key)
-      key == {:char, ":"} -> {%{model | ask: ""}, []}
+      key == {:char, ":"} -> {advance_mode(%{model | ask: ""}), []}
       confirm = confirm(model) -> confirm_key(model, confirm, key)
       true -> browse_key(model, key)
     end
@@ -449,7 +450,7 @@ defmodule AtlasTui.Model do
   def operation(%{ask: text} = model, "ask_send") when is_binary(text),
     do: ask_key(model, text, :enter)
 
-  def operation(model, "ask_cancel"), do: {%{model | ask: nil}, []}
+  def operation(model, "ask_cancel"), do: {advance_mode(%{model | ask: nil}), []}
 
   def operation(%{plan: %Plan{state: state}} = model, "plan_cancel")
       when state in ["planning", "proposed"],
@@ -501,7 +502,7 @@ defmodule AtlasTui.Model do
   end
 
   def external(model, url), do: open_url(model, url)
-  def agent_action(model, _label, nil), do: {%{model | ask: ""}, []}
+  def agent_action(model, _label, nil), do: {advance_mode(%{model | ask: ""}), []}
   def agent_action(model, label, intent), do: ask_agent(model, label, intent)
 
   # The request line: type, enter asks the agent about the page you are on, esc closes.
@@ -514,12 +515,12 @@ defmodule AtlasTui.Model do
         {%{model | ask: String.slice(text, 0..-2//1)}, []}
 
       :esc ->
-        {%{model | ask: nil}, []}
+        {advance_mode(%{model | ask: nil}), []}
 
       :enter ->
         case String.trim(text) do
           "" ->
-            {%{model | ask: nil}, []}
+            {advance_mode(%{model | ask: nil}), []}
 
           request ->
             ask_agent(%{model | ask: nil}, request, nil)
@@ -535,7 +536,7 @@ defmodule AtlasTui.Model do
     plan = %Plan{title: "Planning…", request: request, state: "planning", steps: []}
     ask = %{"op" => "ask", "request" => request, "on" => model.path || "/"}
     ask = if intent, do: Map.put(ask, "intent", intent), else: ask
-    {%{model | plan: plan, steps: @no_steps, notice: nil}, [{:agent, ask}]}
+    {advance_mode(%{model | plan: plan, steps: @no_steps, notice: nil}), [{:agent, ask}]}
   end
 
   defp plan_key(model, %Plan{state: "planning"}, key) do
@@ -572,7 +573,7 @@ defmodule AtlasTui.Model do
         run(model)
 
       {:char, ":"} ->
-        {%{model | ask: plan.request}, []}
+        {advance_mode(%{model | ask: plan.request}), []}
 
       :esc ->
         close_plan(model, [{:agent, %{"op" => "cancel"}}])
@@ -597,13 +598,19 @@ defmodule AtlasTui.Model do
   defp plan_key(model, %Plan{}, key) do
     case key do
       k when k in [:esc, :enter, :left, {:char, "b"}] -> close_plan(model, [])
-      {:char, ":"} -> {%{model | ask: ""}, []}
+      {:char, ":"} -> {advance_mode(%{model | ask: ""}), []}
       {:char, "q"} -> {model, [:quit]}
       _ -> {model, []}
     end
   end
 
-  defp close_plan(model, effects), do: {%{model | plan: nil, steps: @no_steps}, effects}
+  # Captured actions belong to one local editor/plan lifetime, even when a cycle
+  # returns to the same context, focus and page without another server projection.
+  defp advance_mode(%{console: nil} = model), do: model
+  defp advance_mode(model), do: update_in(model.console.generation, &(&1 + 1))
+
+  defp close_plan(model, effects),
+    do: {advance_mode(%{model | plan: nil, steps: @no_steps}), effects}
 
   # Enter runs the kept steps, in order, with their edited values.
   defp run(model) do
@@ -634,7 +641,7 @@ defmodule AtlasTui.Model do
     values = Map.new(step.inputs, &{&1.name, &1.value || ""})
     values = Map.merge(values, model.steps.values[step.n] || %{})
     model = %{model | values: values, focus: 0, cursor: nil}
-    {put_in(model.steps.editing, step.n), []}
+    {advance_mode(put_in(model.steps.editing, step.n)), []}
   end
 
   defp step_form_key(model, form, key) do
@@ -644,10 +651,10 @@ defmodule AtlasTui.Model do
       [{:send, %{"op" => "submit", "values" => values}}] ->
         n = model.steps.editing
         steps = %{model.steps | editing: nil, values: Map.put(model.steps.values, n, values)}
-        {%{edited | steps: steps, values: %{}, waiting: false}, []}
+        {advance_mode(%{edited | steps: steps, values: %{}, waiting: false}), []}
 
       [{:send, %{"op" => "open"}}] ->
-        {%{edited | steps: %{model.steps | editing: nil}, values: %{}}, []}
+        {advance_mode(%{edited | steps: %{model.steps | editing: nil}, values: %{}}), []}
 
       _ ->
         {edited, []}
