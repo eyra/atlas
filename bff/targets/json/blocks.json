@@ -155,6 +155,41 @@
         }
       ],
       "name": "plan"
+    },
+    {
+      "fields": [
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "keys",
+          "required": true,
+          "type": "list of string"
+        },
+        {
+          "name": "operation",
+          "required": true,
+          "type": "console_operation"
+        },
+        {
+          "name": "scope",
+          "required": true,
+          "type": "console_scope"
+        },
+        {
+          "name": "available",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "console_action"
     }
   ],
   "endpoints": [
@@ -643,6 +678,21 @@
           "type": "string"
         },
         {
+          "name": "context",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "legend"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
           "name": "role",
           "required": true,
           "type": "string"
@@ -895,6 +945,61 @@
     {
       "fields": [
         {
+          "name": "name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "url",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "intent",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "console_operation"
+    },
+    {
+      "fields": [
+        {
+          "name": "page",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "context",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "on",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "row",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "console_scope"
+    },
+    {
+      "fields": [
+        {
           "name": "id",
           "required": true,
           "type": "string"
@@ -975,6 +1080,11 @@
     {
       "fields": [
         {
+          "name": "surface",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "env",
           "required": true,
           "type": "string"
@@ -999,6 +1109,11 @@
     },
     {
       "fields": [
+        {
+          "name": "surface",
+          "required": false,
+          "type": "string"
+        },
         {
           "name": "env",
           "required": true,
@@ -1312,6 +1427,7 @@
           "effect": "complete",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1348,6 +1464,7 @@
           "effect": "complete",
           "name": "stored",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1369,6 +1486,7 @@
           "effect": "complete",
           "name": "refused",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1390,6 +1508,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1430,6 +1549,9 @@
         {
           "effect": "progress",
           "name": "welcome",
+          "optional": {
+            "surface": "string"
+          },
           "required": {
             "env": "string",
             "spec": "string"
@@ -1442,6 +1564,7 @@
           "effect": "complete",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1465,7 +1588,8 @@
       ],
       "request": {
         "optional": {
-          "as": "string"
+          "as": "string",
+          "surface": "string"
         },
         "required": {
           "client": "string",
@@ -1525,6 +1649,7 @@
           "effect": "complete",
           "name": "stored",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1546,6 +1671,7 @@
           "effect": "complete",
           "name": "refused",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1596,6 +1722,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1629,6 +1756,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1657,6 +1785,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
