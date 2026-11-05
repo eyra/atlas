@@ -115,6 +115,8 @@ defmodule AtlasTui.ConsoleTransportTest do
 
     context = if path == "/k/widget/new", do: "form", else: "browse"
 
+    page = Map.put(page, "actions_revision", "fixture")
+
     update_in(page["blocks"], fn blocks ->
       Enum.map(blocks, fn
         %{"type" => "console_action"} = action ->

@@ -259,14 +259,22 @@ defmodule AtlasTui.ConsoleTest do
   defp declared(page, context, actions) do
     actions =
       Enum.map(actions, fn action ->
-        put_in(action, ["props", "scope"], %{
-          "page" => page["path"],
-          "revision" => "fixture",
-          "context" => context
-        })
+        put_in(
+          action,
+          ["props", "scope"],
+          Map.merge(
+            %{
+              "page" => page["path"],
+              "revision" => "fixture",
+              "context" => context
+            },
+            action["props"]["scope"] || %{}
+          )
+        )
       end)
 
     page
+    |> Map.put("actions_revision", "fixture")
     |> Map.update!("blocks", &(&1 ++ actions))
     |> Map.put("markup", [
       %{
@@ -523,5 +531,31 @@ defmodule AtlasTui.ConsoleTest do
     {opened, []} = Console.receive(pending, page("/k/widget/W1"))
     assert opened.path == "/k/widget/W1"
     assert opened.console.active == "widgets"
+  end
+
+  test "row scope includes its content block when two lists have the same row id" do
+    projected = page()
+    first = hd(projected["blocks"])
+
+    second =
+      first
+      |> Map.put("id", "second-list")
+      |> put_in(["props", "rows"], [
+        %{"id" => "W1", "label" => "Same id in another list", "to" => "/k/part/P1"}
+      ])
+
+    projected = Map.put(projected, "blocks", [first, second])
+
+    scoped =
+      action("open-part", "o", "open", %{
+        "operation" => %{"name" => "open", "to" => "/k/part/P1"},
+        "scope" => %{"on" => "second-list", "row" => "W1"}
+      })
+
+    projected = declared(projected, "browse", [scoped])
+    {model, []} = Console.receive(ready(), projected)
+    assert model.console.projection != nil
+    assert Model.key(model, {:char, "o"}) == {model, []}
+    {_, [{:send, %{"to" => "/k/part/P1"}}]} = Model.key(%{model | selected: 2}, {:char, "o"})
   end
 end

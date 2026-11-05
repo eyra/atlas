@@ -47,7 +47,7 @@ defmodule AtlasTui.Interactions do
         AtlasBFF.Markup.check(ids, markup) == :ok and
         Enum.all?(groups, fn group ->
           is_map(group["props"]) and group["props"]["context"] in Contract.contexts()
-        end)
+        end) and valid_groups?(actions, groups, ids)
 
     projection = if valid, do: %{actions: actions, groups: groups, ids: ids}, else: nil
 
@@ -200,20 +200,43 @@ defmodule AtlasTui.Interactions do
       is_list(keys) and length(keys) in 1..8 and Enum.all?(keys, &Contract.key?/1) and
       Contract.operation?(props["operation"]) and is_map(scope) and
       scope["page"] == page["path"] and text?(scope["revision"], 128) and
+      scope["revision"] == page["actions_revision"] and
       scope["context"] in Contract.contexts() and valid_scope?(scope, page)
   end
 
   defp valid_action?(_, _), do: false
 
-  defp valid_scope?(%{"on" => on, "row" => row}, page) when not is_nil(row) do
-    Enum.any?(page["blocks"], fn block ->
-      block["id"] == on and block["type"] == "list" and
-        Enum.any?(block["props"]["rows"] || [], &(&1["id"] == row))
-    end)
+  defp valid_scope?(scope, page) do
+    on = scope["on"]
+    row = scope["row"]
+
+    cond do
+      row != nil ->
+        text?(on, 128) and text?(row, 128) and
+          Enum.any?(page["blocks"], fn block ->
+            block["id"] == on and block["type"] == "list" and
+              Enum.any?(block["props"]["rows"] || [], &(&1["id"] == row))
+          end)
+
+      on != nil ->
+        text?(on, 128) and Enum.any?(page["blocks"], &(&1["id"] == on))
+
+      true ->
+        true
+    end
   end
 
-  defp valid_scope?(scope, page),
-    do: is_nil(scope["on"]) or Enum.any?(page["blocks"], &(&1["id"] == scope["on"]))
+  defp valid_groups?(actions, groups, ids) do
+    by_id = Map.new(actions, &{&1["id"], &1["props"]["scope"]["context"]})
+
+    Enum.all?(groups, fn group ->
+      covered = range(ids, group["start"], group["end"])
+      covered != [] and Enum.all?(covered, &(Map.get(by_id, &1) == group["props"]["context"]))
+    end) and
+      Enum.all?(actions, fn action ->
+        Enum.any?(groups, &(action["id"] in range(ids, &1["start"], &1["end"])))
+      end)
+  end
 
   defp text?(text, limit),
     do:
