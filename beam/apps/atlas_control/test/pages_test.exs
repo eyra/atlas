@@ -8,6 +8,17 @@ defmodule AtlasControl.PagesTest do
   defp fact(key, values, version \\ "v1"),
     do: %{"key" => key, "values" => values, "version" => version}
 
+  test "failed reads preserve typed codes without deriving them from prose" do
+    for code <- ["exact_identity_required", "store_error", nil] do
+      failure = %{"error" => ":exact_identity_required"}
+      failure = if code, do: Map.put(failure, "code", code), else: failure
+      page = Pages.render({:list, "widget"}, @d, [failure])
+      assert [%{"type" => "confirm", "props" => props}] = page.blocks
+      assert props["code"] == code
+      assert props["text"] =~ ":exact_identity_required"
+    end
+  end
+
   test "only kinds without a parent are on top; one top kind opens its list at once" do
     assert Pages.top_kinds(@d) == ["widget"]
     assert Pages.reads(:home, @d) == [{"widget", %{}}]

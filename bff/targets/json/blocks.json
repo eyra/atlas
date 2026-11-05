@@ -112,6 +112,11 @@
           "name": "cancel_to",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "code",
+          "required": false,
+          "type": "string"
         }
       ],
       "name": "confirm"
