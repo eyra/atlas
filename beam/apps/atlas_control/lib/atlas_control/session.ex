@@ -42,6 +42,7 @@ defmodule AtlasControl.Session do
        socket: socket,
        endpoint: endpoint,
        hello: false,
+       surface: nil,
        description: %{},
        listening: MapSet.new(),
        route: :home,
@@ -72,6 +73,8 @@ defmodule AtlasControl.Session do
         {:noreply, notice(state, "error", "Control could not read: #{String.slice(line, 0, 80)}")}
     end
   end
+
+  def handle_info(:presentation_failed, state), do: {:stop, :normal, state}
 
   def handle_info({:tcp_closed, _}, state), do: {:stop, :normal, state}
   def handle_info({:tcp_error, _, _}, state), do: {:stop, :normal, state}
@@ -184,9 +187,38 @@ defmodule AtlasControl.Session do
             "#{environment} speaks #{version}. It is too old: update it (atlas starts the newest build)."
         )
 
+      message["surface"] not in [nil, "console"] ->
+        bye(state, "Unsupported Control presentation surface")
+
+      message["surface"] == "console" ->
+        state =
+          describe(%{
+            state
+            | hello: true,
+              surface: "console",
+              by: actor(message["client"], message["as"])
+          })
+
+        welcome = %{
+          "op" => "welcome",
+          "env" => environment,
+          "spec" => version,
+          "surface" => "console"
+        }
+
+        {:noreply, show(state, :home, "open", nil, nil, welcome)}
+
       true ->
         send_client(state, %{"op" => "welcome", "env" => environment, "spec" => version})
-        state = describe(%{state | hello: true, by: actor(message["client"], message["as"])})
+
+        state =
+          describe(%{
+            state
+            | hello: true,
+              surface: nil,
+              by: actor(message["client"], message["as"])
+          })
+
         {:noreply, show(state, :home, "open", nil)}
     end
   end
@@ -773,7 +805,7 @@ defmodule AtlasControl.Session do
   # How long a read waits for State's answer before it asks again (a setting for tests).
   defp read_timeout, do: Application.get_env(:atlas_control, :read_timeout_ms, 2_000)
 
-  defp show(state, route, reason, position, refused \\ nil) do
+  defp show(state, route, reason, position, refused \\ nil, welcome \\ nil) do
     route = start(route, state)
 
     answers =
@@ -810,8 +842,7 @@ defmodule AtlasControl.Session do
 
     as_of = position || Enum.find_value(answers, & &1["position"])
 
-    send_client(
-      state,
+    message =
       %{
         "op" => "page",
         "path" => current_path(route),
@@ -825,7 +856,25 @@ defmodule AtlasControl.Session do
       }
       |> then(&if(refused, do: Map.put(&1, "refused", refused), else: &1))
       |> then(&if(state.count, do: Map.put(&1, "count", state.count), else: &1))
-    )
+
+    projected =
+      if state.surface == "console" do
+        with {:ok, shell} <- AtlasControl.Shell.boot(state.description, state.by_kind),
+             {:ok, page} <- AtlasControl.Console.project(message, length(shell["tabs"])),
+             do: {:ok, page}
+      else
+        {:ok, message}
+      end
+
+    case projected do
+      {:ok, message} ->
+        if welcome, do: send_client(state, welcome)
+        send_client(state, message)
+
+      {:error, why} ->
+        send_client(state, %{"op" => "bye", "text" => "Console projection unavailable: #{why}"})
+        send(self(), :presentation_failed)
+    end
 
     %{state | route: route, form: form}
   end
