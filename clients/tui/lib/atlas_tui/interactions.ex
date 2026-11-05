@@ -34,7 +34,14 @@ defmodule AtlasTui.Interactions do
         Enum.all?(groups, fn group -> group["props"]["context"] in @contexts end)
 
     projection = if valid, do: %{actions: actions, groups: groups, ids: ids}, else: nil
-    console = %{model.console | projection: projection, generation: model.console.generation + 1}
+
+    console = %{
+      model.console
+      | projection: projection,
+        generation: model.console.generation + 1,
+        action_error: if(valid, do: nil, else: "Unsupported or invalid Console actions")
+    }
+
     content = Map.put(page, "blocks", Enum.reject(blocks, &(&1["type"] == "console_action")))
     # Auxiliary markup is consumed with its actions, never drawn as ordinary content.
     content = Map.put(content, "markup", Enum.reject(markup, &(&1["kind"] == "legend")))
@@ -74,6 +81,7 @@ defmodule AtlasTui.Interactions do
           id: action["id"],
           generation: model.console.generation,
           context: context(model),
+          focus: focus(model),
           path: model.path,
           selected: selected_identity(model)
         }
@@ -89,7 +97,8 @@ defmodule AtlasTui.Interactions do
     current =
       model.connected && model.console.phase == :ready && is_nil(model.console.expected) &&
         event.generation == model.console.generation && event.context == context(model) &&
-        event.path == model.path && event.selected == selected_identity(model)
+        event.path == model.path && event.selected == selected_identity(model) &&
+        event.focus == focus(model)
 
     action = if current, do: Enum.find(active(model), &(&1["id"] == event.id))
 
@@ -116,6 +125,8 @@ defmodule AtlasTui.Interactions do
     row = Enum.at(Model.rows(model), model.selected)
     row && {row.id, row.to}
   end
+
+  defp focus(model), do: {model.focus, model.part, model.steps.selected, model.steps.editing}
 
   defp range(ids, start, finish) do
     with from when is_integer(from) <- Enum.find_index(ids, &(&1 == start)),

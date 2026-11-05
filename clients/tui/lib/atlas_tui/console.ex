@@ -17,6 +17,7 @@ defmodule AtlasTui.Console do
             active: nil,
             selections: %{},
             projection: nil,
+            action_error: nil,
             generation: 0
 
   def new, do: %__MODULE__{}
@@ -268,7 +269,7 @@ defmodule AtlasTui.Console do
   end
 
   defp validate_shell(%{"error" => error}, _env) when is_binary(error),
-    do: {:error, String.slice(error, 0, 512)}
+    do: {:error, error |> String.slice(0, 512) |> String.replace(~r/[\x00-\x1f\x7f]/, " ")}
 
   defp validate_shell(message, env) do
     tabs = message["tabs"]

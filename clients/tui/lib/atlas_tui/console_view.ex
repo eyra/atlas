@@ -6,11 +6,18 @@ defmodule AtlasTui.ConsoleView do
     shell = console.shell
     title = if shell, do: shell["title"], else: "Atlas Console"
     count = if model.count, do: " · " <> model.count, else: ""
-    stale = if console.stale, do: " · stale shell", else: ""
+    stale = if console.stale && shell, do: " · stale shell", else: ""
+    suffix = " · #{model.env}"
+    title = String.slice(title, 0, max(width - String.length(suffix) - 1, 0))
+    # Keep environment and stale state readable even in a narrow viewport.
+    {title, stale} =
+      if stale != "" && width < String.length(title <> suffix <> stale) + 1,
+        do: {"stale shell", ""},
+        else: {title, stale}
 
     [
       [
-        {if(model.env == "prod", do: :prod, else: :bold), " #{title} · #{model.env}#{count}"},
+        {if(model.env == "prod", do: :prod, else: :bold), " #{title}#{suffix}#{count}"},
         {:pending, stale}
       ],
       [{:dim, "┌" <> String.duplicate("─", max(width - 2, 0)) <> "┐"}],

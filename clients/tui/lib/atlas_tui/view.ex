@@ -772,6 +772,9 @@ defmodule AtlasTui.View do
   defp console_notice(%Model{console: %{error: error}}) when is_binary(error),
     do: [{:error, " Console: " <> error <> " · retrying boot"}]
 
+  defp console_notice(%Model{console: %{action_error: error}}) when is_binary(error),
+    do: [{:error, " Console: " <> error}]
+
   defp console_notice(model), do: notice(model)
 
   # Footer
