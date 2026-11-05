@@ -1,5 +1,8 @@
 # Control's BFF
 
+Native shell metadata is an ordinary typed endpoint: see
+[native shell boot](../docs/adr/0004-native-shell-boot.md) (IS-Atlas-119).
+
 Control is a spec-driven backend for frontend (architecture, section 14). The spec says which blocks Control sends and every client renders. Clients know blocks, never entities: what a block shows comes from rela's description through Control.
 
 mica-bff (`~/projects/nova/mica-bff`) was the inspiration for the format. Atlas shares no code, catalogue or package with it (d-0009).
@@ -185,3 +188,5 @@ corrects semantic metadata without changing bytes sent by Control. Existing
 client-before-server deployment is needed for this slice. Deployments still go
 through coordinator review. A later version bump must distribute compatible
 clients before advancing Control, since older versions are refused at hello.
+
+<sub>Written by an AI agent (Codex · GPT-6 · herdr-projects atlas · t-0026).</sub>

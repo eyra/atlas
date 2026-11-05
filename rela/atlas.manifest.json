@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "compositions/atlas-eyra/atlas.json": "63db02db8bcaf1077286007b802d40c581eb323644b33d4039a714da0fbb7a30",
+    "compositions/atlas-eyra/atlas.json": "6ee00034d2294141ee680102283cd03609476042b26593ea859f1ac201ad11fb",
     "compositions/atlas-eyra/bindings.yaml": "8ce4839a8adbc739723cd4e954742c9bd1a30286d01efcb873fd690bb963783f",
     "compositions/atlas-eyra/sources.json": "f2943e33b78d4f347ef6e87921df31867ea1748522f078b5d7713bf955a54407",
     "data-entry.yaml": "afe3e95d13e4cd9f52b43b3dc518d2922ba01283e8bfb5c31964ee43d1829cdc",
@@ -14,5 +14,5 @@
     "modules/software-factory/schema.yaml": "f5e47096cedc7ab4649b98f0123da1855bce2c0aae3fd941d330e323726c251b",
     "schema.yaml": "867320ac3ec6f822290adb4e19139987b204dc4695afd4dabeaba85b3dbbbc3b"
   },
-  "output_sha256": "9a344c02cffa5e55538661b2b47da9988d577e0744cb1f85f78bc17d3828e6cc"
+  "output_sha256": "12f46c543d135f72c2e0b739aa27dda55781ec1cddb870c029df79a9380ce8b7"
 }

@@ -51,7 +51,7 @@ def combine(left, right, path=''):
 
 def validate(extra, schema, actors=None):
     """Only current Atlas annotation vocabulary, with schema-resolved references."""
-    keys(extra, '_about todo runtime guidance start types entities relations progress flows', 'extension')
+    keys(extra, '_about todo runtime guidance start shell types entities relations progress flows', 'extension')
     entities, relations, types = (schema.get(k, {}) for k in ('entities', 'relations', 'types'))
 
     def entity(kind):
@@ -133,6 +133,34 @@ def validate(extra, schema, actors=None):
 
     if 'todo' in extra:
         keys(extra['todo'], 'title why instructions answers', 'todo')
+    if 'shell' in extra:
+        shell = extra['shell']
+        keys(shell, 'title tabs', 'shell')
+        if not isinstance(shell.get('title'), str) or not shell['title'].strip() or len(shell['title'].encode()) > 128:
+            raise ConfigError('shell.title: expected nonempty text')
+        if not isinstance(shell.get('tabs'), list) or not shell['tabs'] or len(shell['tabs']) > 64:
+            raise ConfigError('shell.tabs: expected nonempty list')
+        ids, targets = set(), set()
+        for tab in shell['tabs']:
+            keys(tab, 'id label to assigned', 'shell.tabs')
+            if any(not isinstance(tab.get(k), str) or not tab[k].strip() for k in ('id', 'label', 'to')):
+                raise ConfigError('shell.tabs: id, label and to require nonempty text')
+            if any(len(tab[k].encode()) > limit for k, limit in [('id', 64), ('label', 128), ('to', 2048)]):
+                raise ConfigError('shell.tabs: text exceeds size limit')
+            if not isinstance(tab.get('assigned', False), bool):
+                raise ConfigError('shell.tabs.assigned: expected boolean')
+            target = tab['to']
+            if target == '/':
+                if tab.get('assigned') is not True or not extra.get('start', {}).get('assigned'):
+                    raise ConfigError('shell.tabs: root requires an assigned start')
+            elif target.startswith('/k/') and target.count('/') == 2:
+                entity(target[3:])
+            else:
+                raise ConfigError('shell.tabs: destination must be an index page')
+            if tab['id'] in ids or target in targets:
+                raise ConfigError('shell.tabs: duplicate id or destination')
+            ids.add(tab['id'])
+            targets.add(target)
     if 'start' in extra:
         keys(extra['start'], 'assigned open', 'start')
         if 'assigned' in extra['start']:
@@ -213,6 +241,9 @@ def validate(extra, schema, actors=None):
         if 'component' in annotation:
             component = annotation['component']
             keys(component, 'key values', name + '.component')
+            template = component.get('key')
+            if not isinstance(template, str) or not template.strip() or len(template.encode()) > 2048:
+                raise ConfigError(f'{name}: component key template must be nonempty text within 2048 bytes')
             if len(rel['to']) != 1:
                 raise ConfigError(f'{name}: component needs one target kind')
             for prop in component.get('values', {}):

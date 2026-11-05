@@ -72,7 +72,38 @@ defmodule AtlasBFFContract.Blocks do
   }
   @plan %{name: :plan, select: %{"op" => "plan"}, effect: :progress, required: %{"block" => :map}}
 
+  # Boot is additive: existing hello/welcome/page clients keep their 0.14.0 exchange.
   protocol([
+    %{
+      name: :boot,
+      channel: :control,
+      direction: :request,
+      request: %{select: %{"op" => "boot"}, optional: %{"to" => :string}},
+      replies: [
+        %{
+          name: :shell,
+          select: %{"op" => "boot"},
+          absent: ["error"],
+          effect: :complete,
+          required: %{
+            "title" => :string,
+            "env" => :string,
+            "spec" => :string,
+            "revision" => :string,
+            "tabs" => :list,
+            "initial_to" => :string
+          },
+          optional: %{"active_tab" => :string}
+        },
+        %{
+          name: :error,
+          select: %{"op" => "boot"},
+          present: ["error"],
+          effect: :error,
+          required: %{"error" => :string}
+        }
+      ]
+    },
     %{
       name: :open,
       channel: :control,
@@ -430,6 +461,37 @@ defmodule AtlasBFFContract.Blocks do
 
   # The session's other messages, in JSON lines over the socket (bff/README.md, Protocol).
   # Each endpoint's call is the message's "op".
+
+  # Native shell metadata, independent of page blocks and terminal key bindings.
+  defmodel :shell_tab do
+    field :id, :string, required: true
+    field :label, :string, required: true
+    field :to, :string, required: true
+  end
+
+  defmodel :boot_request do
+    field :to, :string
+  end
+
+  defmodel :shell do
+    field :title, :string, required: true
+    field :env, :string, required: true
+    field :spec, :string, required: true
+    field :revision, :string, required: true
+    field :tabs, {:list, :shell_tab}, required: true
+    field :initial_to, :string, required: true
+    field :active_tab, :string
+  end
+
+  defmodel :boot_error do
+    field :error, :string, required: true
+  end
+
+  defendpoint :boot,
+    wire: :boot,
+    call: :boot,
+    takes: :boot_request,
+    replies: [shell: :shell, error: :boot_error]
 
   # A client's first message: its environment, what it is, and the contract version it
   # implements. Control of another environment, or one newer than the client's version,

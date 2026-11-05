@@ -312,5 +312,26 @@
         }
       }
     }
+  },
+  "shell": {
+    "title": "Atlas Console",
+    "tabs": [
+      {
+        "id": "assigned",
+        "label": "Assigned to you",
+        "to": "/",
+        "assigned": true
+      },
+      {
+        "id": "scenes",
+        "label": "Scenes",
+        "to": "/k/scene"
+      },
+      {
+        "id": "open-work",
+        "label": "Open work",
+        "to": "/k/assignment"
+      }
+    ]
   }
 }

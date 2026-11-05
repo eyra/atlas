@@ -194,6 +194,52 @@ defmodule AtlasControl.Session do
   defp handle_op(_op, _message, %{hello: false} = state),
     do: {:noreply, notice(state, "error", "Say hello first.")}
 
+  defp handle_op("boot", message, state) do
+    # A boot refresh is a read, even while editing: never redraw or reset a draft.
+    # Unlike page refresh, stale cached description is not a successful shell reply.
+    case ask(@description, %{}) do
+      %{"description" => description} ->
+        result =
+          with :ok <- AtlasControl.Shell.validate_description(description) do
+            # Work against a candidate only. Invalid metadata/target resolution must
+            # leave the prior description, listeners, route and form intact.
+            candidate = %{state | description: description}
+            by_kind = known_kind(candidate, actor_kind(candidate))
+            candidate = %{candidate | by_kind: by_kind}
+
+            case AtlasControl.Shell.boot(
+                   description,
+                   by_kind,
+                   message["to"],
+                   &route(&1, candidate)
+                 ) do
+              {:ok, shell} -> {:ok, shell, candidate}
+              {:error, _} = error -> error
+            end
+          end
+
+        case result do
+          {:ok, shell, candidate} ->
+            kinds = Map.keys(description["entities"])
+            Enum.each(kinds, &AtlasBus.listen/1)
+            send_client(state, Map.put(shell, "op", "boot"))
+            {:noreply, %{candidate | listening: MapSet.new(kinds)}}
+
+          {:error, why} ->
+            send_client(state, %{"op" => "boot", "error" => why})
+            {:noreply, state}
+        end
+
+      _ ->
+        send_client(state, %{
+          "op" => "boot",
+          "error" => "State did not answer with the description"
+        })
+
+        {:noreply, state}
+    end
+  end
+
   defp handle_op("open", %{"to" => to}, state) do
     # Without the description (State did not answer at hello) no page can be worked out.
     state = if state.description == %{}, do: describe(state), else: state
@@ -653,10 +699,7 @@ defmodule AtlasControl.Session do
   defp describe(state) do
     case ask(@description, %{}) do
       %{"description" => description} ->
-        kinds = Map.keys(description["entities"] || %{})
-        Enum.each(kinds, &AtlasBus.listen/1)
-        state = %{state | description: description, listening: MapSet.new(kinds)}
-        %{state | by_kind: known_kind(state, actor_kind(state))}
+        install_description(state, description)
 
       _ ->
         notice(
@@ -665,6 +708,13 @@ defmodule AtlasControl.Session do
           "State did not answer with the description; showing what Control had."
         )
     end
+  end
+
+  defp install_description(state, description) do
+    kinds = Map.keys(description["entities"] || %{})
+    Enum.each(kinds, &AtlasBus.listen/1)
+    state = %{state | description: description, listening: MapSet.new(kinds)}
+    %{state | by_kind: known_kind(state, actor_kind(state))}
   end
 
   # What the client was known to be stays while State does not answer whether it still is

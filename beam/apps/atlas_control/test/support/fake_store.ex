@@ -143,6 +143,8 @@ defmodule AtlasControl.FakeStore do
     do: GenServer.call(__MODULE__, {:origin, kind, key, relation, origin})
 
   @doc "Every fact content State was sent, oldest first."
+  def describe(description), do: GenServer.call(__MODULE__, {:describe, description})
+
   def sent, do: GenServer.call(__MODULE__, :sent)
 
   def link(part, widget), do: put(part, %{"title" => part}, "part", %{"of_widget" => [widget]})
@@ -166,6 +168,7 @@ defmodule AtlasControl.FakeStore do
 
     {:ok,
      %{
+       description: description(),
        facts: %{},
        position: 0,
        silent: false,
@@ -200,6 +203,9 @@ defmodule AtlasControl.FakeStore do
   def handle_call({:origin, kind, key, relation, origin}, _from, s),
     do: {:reply, :ok, put_in(s.origins[{kind, key, relation}], origin)}
 
+  def handle_call({:describe, description}, _from, s),
+    do: {:reply, :ok, %{s | description: description}}
+
   def handle_call(:sent, _from, s), do: {:reply, Enum.reverse(s.sent), s}
 
   def handle_call({:refuse, key, reason}, _from, s),
@@ -217,7 +223,7 @@ defmodule AtlasControl.FakeStore do
     answer =
       case {e.kind, content} do
         {"_description", _} ->
-          %{"description" => description()}
+          %{"description" => s.description}
 
         {kind, %{"key" => key}} ->
           case s.facts[{kind, key}] do
