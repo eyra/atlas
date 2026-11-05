@@ -47,6 +47,7 @@ jobs:
       - run: mix format --check-formatted
       # Fails when a file in bff/targets differs from what the contract generates, or is left over.
       - run: mix atlas.gen --check
+      - run: mix test
 
   beam:
     name: Bus, State, Control

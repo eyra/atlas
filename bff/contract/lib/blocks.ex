@@ -11,6 +11,8 @@ defmodule AtlasBFFContract.Blocks do
   `bff/targets/json/blocks.json` for clients in other languages.
   """
   use AtlasBFF.Schema
+  models_from(AtlasBFFContract.Runtime)
+  protocol(AtlasBFFContract.Runtime.__schema__().protocol)
 
   # 0.7.0: markup names meaning; part (main, related) replaces border and columns.
   # 0.8.0: a pair may carry its origin: the fact that set it (since, by, cause).

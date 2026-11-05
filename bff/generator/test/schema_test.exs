@@ -18,6 +18,12 @@ defmodule AtlasBFF.SchemaTest do
   end
 
   describe "a mistake fails at compile time" do
+    test "shared model imports retain validation and reject duplicates" do
+      assert_raise CompileError, ~r/:link is defined twice/, fn ->
+        spec("models_from AtlasBFF.Example\ndefmodel :link do field :x, :string end")
+      end
+    end
+
     test "a block holding a block" do
       assert_raise CompileError, ~r/holds block :a; blocks have no children/, fn ->
         spec("defblock :a do field :x, :string end\ndefblock :b do field :inner, :a end")
