@@ -363,6 +363,8 @@ defmodule AtlasBFFContract.Blocks do
     field :confirm_label, :string
     field :confirm_to, :call
     field :cancel_to, :string, required: true
+    # Optional failure code from State; never inferred from the human explanation.
+    field :code, :string
   end
 
   # One step of an agent's plan: the form it fills (`label`, its title; `inputs`, its
