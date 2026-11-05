@@ -23,7 +23,8 @@ defmodule AtlasTui.Model do
 
   @scroll_step 10
 
-  defstruct env: nil,
+  defstruct console: nil,
+            env: nil,
             connected: false,
             path: nil,
             title: "",
@@ -133,7 +134,7 @@ defmodule AtlasTui.Model do
         # "Stopping after this step…" is answered by the plan itself once it ends.
         over = plan.state in ["done", "stopped", "failed"] and model.plan.state == "running"
         notice = if over and match?(%{tone: "pending"}, model.notice), do: nil, else: model.notice
-        %{model | plan: plan, steps: steps, notice: notice}
+        advance_mode(%{model | plan: plan, steps: steps, notice: notice})
 
       _ ->
         %{model | notice: %{tone: "error", text: "The agent sent a plan this TUI cannot show."}}
@@ -156,13 +157,15 @@ defmodule AtlasTui.Model do
           other
       end
 
-    %{model | plan: plan, notice: %{tone: "error", text: "The agent stopped: #{why}"}}
+    updated = %{model | plan: plan, notice: %{tone: "error", text: "The agent stopped: #{why}"}}
+    if plan != model.plan, do: advance_mode(updated), else: updated
   end
 
   # A page about one fact opens at its top, even when a list under it has a selected row.
   defp first_scroll(blocks), do: if(Enum.any?(blocks, &match?(%Item{}, &1)), do: 0, else: nil)
 
-  def disconnected(model), do: %{model | connected: false}
+  def disconnected(%{console: nil} = model), do: %{model | connected: false}
+  def disconnected(model), do: AtlasTui.Console.disconnected(model)
 
   # A list keeps the selected row when it is redrawn, even if rows moved.
   defp keep_selection(_model, false), do: 0
@@ -317,6 +320,10 @@ defmodule AtlasTui.Model do
 
   def key(model, :ctrl_c), do: {model, [:quit]}
   def key(%{closed: true} = model, _key), do: {model, [:quit]}
+
+  def key(%{console: console} = model, key) when console != nil,
+    do: AtlasTui.Interactions.key(model, key)
+
   def key(%{ask: text} = model, key) when is_binary(text), do: ask_key(model, text, key)
 
   def key(%{plan: %Plan{}} = model, key) do
@@ -329,11 +336,170 @@ defmodule AtlasTui.Model do
   def key(model, key) do
     cond do
       form = form(model) -> form_key(model, form, key)
-      key == {:char, ":"} -> {%{model | ask: ""}, []}
+      key == {:char, ":"} -> {advance_mode(%{model | ask: ""}), []}
       confirm = confirm(model) -> confirm_key(model, confirm, key)
       true -> browse_key(model, key)
     end
   end
+
+  @doc "Literal editor input; Console commands are dispatched only from BFF actions."
+  def literal(model, {:char, _} = key) do
+    cond do
+      model.ask != nil -> ask_key(model, model.ask, key)
+      form = step_form(model) -> step_form_key(model, form, key)
+      form = form(model) -> form_key(model, form, key)
+      true -> {model, []}
+    end
+  end
+
+  def literal(model, _key), do: {model, []}
+
+  @doc "Finite Console operations; callers resolve a current declared action first."
+  def operation(model, "list_next"), do: operation(model, "move_next")
+  def operation(model, "list_previous"), do: operation(model, "move_previous")
+  def operation(model, "scroll_up"), do: operation(model, "page_previous")
+  def operation(model, "scroll_down"), do: operation(model, "page_next")
+  def operation(model, "submit"), do: operation(model, "submit_form")
+  def operation(model, "cancel"), do: operation(model, "cancel_form")
+
+  def operation(model, "open_selected") do
+    case Enum.at(rows(model), model.selected) do
+      nil -> {model, []}
+      row -> AtlasTui.Console.navigate(model, row.to)
+    end
+  end
+
+  def operation(model, "move_next"),
+    do:
+      {%{model | selected: min(model.selected + 1, max(length(rows(model)) - 1, 0)), scroll: nil},
+       []}
+
+  def operation(model, "move_previous"),
+    do: {%{model | selected: max(model.selected - 1, 0), scroll: nil}, []}
+
+  def operation(model, "select_first"), do: {%{model | selected: 0, scroll: nil}, []}
+
+  def operation(model, "select_last"),
+    do: {%{model | selected: max(length(rows(model)) - 1, 0), scroll: nil}, []}
+
+  def operation(model, "back"), do: AtlasTui.Console.navigate(model, model.back)
+  def operation(model, "refresh"), do: {model, [{:send, %{"op" => "refresh"}}]}
+  def operation(model, "quit"), do: {model, [:quit]}
+
+  def operation(model, name) when name in ["page_next", "page_previous"] do
+    by = if name == "page_next", do: @scroll_step, else: -@scroll_step
+
+    case part(model) do
+      nil -> {%{model | scroll: max((model.scroll || 0) + by, 0)}, []}
+      part -> {scroll_part(model, part, by), []}
+    end
+  end
+
+  def operation(model, name) when name in ["part_next", "part_previous"] do
+    count = length(parts(model))
+
+    if count > 0 do
+      step = if name == "part_next", do: 1, else: -1
+      {%{model | part: Integer.mod((part(model) || 0) + step, count)}, []}
+    else
+      {model, []}
+    end
+  end
+
+  def operation(model, name) when name in ["focus_next", "focus_previous"] do
+    case step_form(model) || form(model) do
+      nil ->
+        {model, []}
+
+      form ->
+        step = if name == "focus_next", do: 1, else: -1
+        focus = Integer.mod(model.focus + step, length(focusable(form)))
+        {focus_to(model, focus), []}
+    end
+  end
+
+  def operation(model, "submit_form") do
+    cond do
+      form = form(model) -> submit(model, form.submit_to, model.values)
+      confirm = confirm(model) -> submit(model, confirm.confirm_to, %{})
+      true -> {model, []}
+    end
+  end
+
+  def operation(model, "cancel_form") do
+    cond do
+      form = form(model) -> AtlasTui.Console.navigate(model, form.cancel_to)
+      confirm = confirm(model) -> AtlasTui.Console.navigate(model, confirm.cancel_to)
+      true -> {model, []}
+    end
+  end
+
+  def operation(model, "form_enter"), do: editor_operation(model, :enter)
+  def operation(model, "input_up"), do: editor_operation(model, :up)
+  def operation(model, "input_down"), do: editor_operation(model, :down)
+  def operation(model, "input_left"), do: editor_operation(model, :left)
+  def operation(model, "input_right"), do: editor_operation(model, :right)
+  def operation(model, "input_home"), do: editor_operation(model, :home)
+  def operation(model, "input_end"), do: editor_operation(model, :end)
+  def operation(model, "input_backspace"), do: editor_operation(model, :backspace)
+
+  def operation(%{ask: text} = model, "ask_send") when is_binary(text),
+    do: ask_key(model, text, :enter)
+
+  def operation(model, "ask_cancel"), do: {advance_mode(%{model | ask: nil}), []}
+
+  def operation(%{plan: %Plan{state: state}} = model, "plan_cancel")
+      when state in ["planning", "proposed"],
+      do: close_plan(model, [{:agent, %{"op" => "cancel"}}])
+
+  def operation(%{plan: %Plan{state: "proposed"}} = model, "plan_run"), do: run(model)
+
+  def operation(%{plan: %Plan{state: "proposed"}} = model, "plan_toggle"),
+    do: plan_key(model, model.plan, {:char, " "})
+
+  def operation(%{plan: %Plan{state: "proposed"}} = model, "plan_edit"),
+    do: plan_key(model, model.plan, {:char, "e"})
+
+  def operation(%{plan: %Plan{}} = model, "plan_previous"), do: plan_key(model, model.plan, :up)
+  def operation(%{plan: %Plan{}} = model, "plan_next"), do: plan_key(model, model.plan, :down)
+
+  def operation(%{plan: %Plan{state: "running"}} = model, "plan_stop"),
+    do: plan_key(model, model.plan, :esc)
+
+  def operation(%{plan: %Plan{state: state}} = model, "plan_close")
+      when state not in ["planning", "running", "proposed"],
+      do: close_plan(model, [])
+
+  def operation(model, "step_save") do
+    case step_form(model) do
+      nil -> {model, []}
+      form -> step_form_key(model, form, :ctrl_s)
+    end
+  end
+
+  def operation(model, "step_cancel") do
+    case step_form(model) do
+      nil -> {model, []}
+      form -> step_form_key(model, form, :esc)
+    end
+  end
+
+  # IS121 supplies legend presentation. Unknown/unimplemented operations do not run.
+  def operation(model, _unknown),
+    do: {%{model | notice: %{tone: "error", text: "Action unavailable in this Console"}}, []}
+
+  defp editor_operation(model, key) do
+    cond do
+      model.ask != nil -> ask_key(model, model.ask, key)
+      form = step_form(model) -> step_form_key(model, form, key)
+      form = form(model) -> form_key(model, form, key)
+      true -> {model, []}
+    end
+  end
+
+  def external(model, url), do: open_url(model, url)
+  def agent_action(model, _label, nil), do: {advance_mode(%{model | ask: ""}), []}
+  def agent_action(model, label, intent), do: ask_agent(model, label, intent)
 
   # The request line: type, enter asks the agent about the page you are on, esc closes.
   defp ask_key(model, text, key) do
@@ -345,12 +511,12 @@ defmodule AtlasTui.Model do
         {%{model | ask: String.slice(text, 0..-2//1)}, []}
 
       :esc ->
-        {%{model | ask: nil}, []}
+        {advance_mode(%{model | ask: nil}), []}
 
       :enter ->
         case String.trim(text) do
           "" ->
-            {%{model | ask: nil}, []}
+            {advance_mode(%{model | ask: nil}), []}
 
           request ->
             ask_agent(%{model | ask: nil}, request, nil)
@@ -366,7 +532,7 @@ defmodule AtlasTui.Model do
     plan = %Plan{title: "Planning…", request: request, state: "planning", steps: []}
     ask = %{"op" => "ask", "request" => request, "on" => model.path || "/"}
     ask = if intent, do: Map.put(ask, "intent", intent), else: ask
-    {%{model | plan: plan, steps: @no_steps, notice: nil}, [{:agent, ask}]}
+    {advance_mode(%{model | plan: plan, steps: @no_steps, notice: nil}), [{:agent, ask}]}
   end
 
   defp plan_key(model, %Plan{state: "planning"}, key) do
@@ -403,7 +569,7 @@ defmodule AtlasTui.Model do
         run(model)
 
       {:char, ":"} ->
-        {%{model | ask: plan.request}, []}
+        {advance_mode(%{model | ask: plan.request}), []}
 
       :esc ->
         close_plan(model, [{:agent, %{"op" => "cancel"}}])
@@ -428,13 +594,19 @@ defmodule AtlasTui.Model do
   defp plan_key(model, %Plan{}, key) do
     case key do
       k when k in [:esc, :enter, :left, {:char, "b"}] -> close_plan(model, [])
-      {:char, ":"} -> {%{model | ask: ""}, []}
+      {:char, ":"} -> {advance_mode(%{model | ask: ""}), []}
       {:char, "q"} -> {model, [:quit]}
       _ -> {model, []}
     end
   end
 
-  defp close_plan(model, effects), do: {%{model | plan: nil, steps: @no_steps}, effects}
+  # Captured actions belong to one local editor/plan lifetime, even when a cycle
+  # returns to the same context, focus and page without another server projection.
+  defp advance_mode(%{console: nil} = model), do: model
+  defp advance_mode(model), do: update_in(model.console.generation, &(&1 + 1))
+
+  defp close_plan(model, effects),
+    do: {advance_mode(%{model | plan: nil, steps: @no_steps}), effects}
 
   # Enter runs the kept steps, in order, with their edited values.
   defp run(model) do
@@ -465,7 +637,7 @@ defmodule AtlasTui.Model do
     values = Map.new(step.inputs, &{&1.name, &1.value || ""})
     values = Map.merge(values, model.steps.values[step.n] || %{})
     model = %{model | values: values, focus: 0, cursor: nil}
-    {put_in(model.steps.editing, step.n), []}
+    {advance_mode(put_in(model.steps.editing, step.n)), []}
   end
 
   defp step_form_key(model, form, key) do
@@ -475,10 +647,10 @@ defmodule AtlasTui.Model do
       [{:send, %{"op" => "submit", "values" => values}}] ->
         n = model.steps.editing
         steps = %{model.steps | editing: nil, values: Map.put(model.steps.values, n, values)}
-        {%{edited | steps: steps, values: %{}, waiting: false}, []}
+        {advance_mode(%{edited | steps: steps, values: %{}, waiting: false}), []}
 
       [{:send, %{"op" => "open"}}] ->
-        {%{edited | steps: %{model.steps | editing: nil}, values: %{}}, []}
+        {advance_mode(%{edited | steps: %{model.steps | editing: nil}, values: %{}}), []}
 
       _ ->
         {edited, []}
