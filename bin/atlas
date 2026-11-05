@@ -19,6 +19,7 @@
 #   atlas e2e [uc-atlas-01 ...]  the end-to-end test, on a private test instance of its own
 #   atlas runtime       start this machine's Runtime node (local runtime.json required)
 #   atlas runtime-stop, atlas runtime-status
+#   atlas runtime status [--machine <name>] [--json]   readonly local node diagnostics
 #   atlas playground init|stop <private-dir>   private stub prototype (IS125)
 #   atlas attach breaker --prototype <private-dir>   independent terminal viewer
 #   atlas rela-status, atlas rela-stop
@@ -107,7 +108,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|turn|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help) args+=("$1"); shift ;;
+        e2e|turn|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help|runtime|runtime-status) args+=("$1"); shift ;;
         tui)
           case "$1" in
             --surface)
@@ -169,6 +170,16 @@ fly_in_use() {
   if command -v plutil >/dev/null; then [ "$(plutil -extract fly.in_use raw -o - "$settings" 2>/dev/null)" != false ]
   else [ "$(jq -r '.fly.in_use' "$settings")" != false ]; fi
 }
+
+case "$cmd" in
+  runtime)
+    if [ "${args[0]:-}" = status ]; then
+      exec python3 "$root/tools/runtime.py" runtime-status "$root" "$settings" "$env" "${args[@]:1}"
+    fi
+    [ ${#args[@]} -eq 0 ] || { echo "atlas runtime: only readonly status is added; lifecycle subcommands are unsupported" >&2; exit 2; } ;;
+  runtime-status)
+    exec python3 "$root/tools/runtime.py" runtime-status "$root" "$settings" "$env" ${args[@]+"${args[@]}"} ;;
+esac
 
 case "$cmd" in
   runtime|runtime-stop|runtime-status)

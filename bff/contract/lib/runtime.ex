@@ -11,6 +11,75 @@ defmodule AtlasBFFContract.Runtime do
   @wire_version "0.1.0"
   version @wire_version
 
+  # Node lifecycle is machine-scoped; it never invents a worker identity.
+  defmodel :runtime_machine do
+    field :environment, :string, required: true
+    field :machine, :string, required: true
+  end
+
+  defmodel :runtime_machine_status_options do
+    field :machine, :string
+    field :json, :boolean
+  end
+
+  defmodel :runtime_machine_capabilities do
+    field :local_status, :boolean, required: true
+    field :local_start, :boolean, required: true
+    field :local_stop, :boolean, required: true
+    field :remote_status, :boolean, required: true
+  end
+
+  defmodel :runtime_machine_status do
+    field :target, :runtime_machine, required: true
+    field :state, :string, required: true
+    field :basis, :string, required: true
+    field :message, :string, required: true
+    field :capabilities, :runtime_machine_capabilities, required: true
+    field :pid, :integer
+    field :process_present, :boolean
+    field :log, :string
+  end
+
+  protocol([
+    %{
+      name: :runtime_machine_status,
+      channel: :runtime_machine,
+      direction: :request,
+      cli: ["status"],
+      request: %{
+        select: %{"op" => "machine_status", "channel" => "control", "version" => @wire_version},
+        required: %{"id" => :string, "target" => :runtime_machine}
+      },
+      replies: [
+        %{
+          name: :result,
+          select: %{
+            "op" => "machine_status_result",
+            "channel" => "control",
+            "version" => @wire_version
+          },
+          required: %{
+            "id" => :string,
+            "target" => :runtime_machine,
+            "status" => :runtime_machine_status
+          },
+          effect: :complete
+        },
+        %{
+          name: :error,
+          select: %{
+            "op" => "machine_status_error",
+            "channel" => "control",
+            "version" => @wire_version
+          },
+          required: %{"id" => :string, "error" => :runtime_error},
+          optional: %{"target" => :runtime_machine},
+          effect: :error
+        }
+      ]
+    }
+  ])
+
   defmodel :runtime_worker do
     field :environment, :string, required: true
     field :machine, :string, required: true
@@ -151,4 +220,9 @@ end
 defmodule AtlasBFFContract.Runtime.Types do
   @moduledoc "Generated shared data structures for any Atlas client or service adapter."
   use AtlasBFF.Targets.Client, contract: AtlasBFFContract.Runtime
+end
+
+defmodule AtlasBFFContract.Runtime.MachineProtocol do
+  @moduledoc "Generated machine-scoped diagnostics, distinct from worker control."
+  use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Runtime, channel: :runtime_machine
 end

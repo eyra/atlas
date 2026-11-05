@@ -7,6 +7,14 @@ defmodule AtlasBFF.ProtocolTest do
       %{
         version: "2.0",
         models: [
+          %{
+            name: :command_options,
+            fields: [
+              %{name: :name, type: :string, required: true},
+              %{name: :verbose, type: :boolean, required: false},
+              %{name: :limit, type: :integer, required: false}
+            ]
+          },
           %{name: :sample, fields: [%{name: :count, type: :integer, required: true}]},
           %{
             name: :probe_input,
@@ -32,6 +40,23 @@ defmodule AtlasBFF.ProtocolTest do
 
   defmodule Protocol do
     use AtlasBFF.Targets.Protocol, contract: Contract
+  end
+
+  test "CLI option parsing is generated from primitive model fields" do
+    assert {:ok, %{"name" => "literal", "verbose" => true, "limit" => 2}} =
+             Protocol.options(:command_options, ["--name", "literal", "--verbose", "--limit", "2"])
+
+    for argv <- [
+          [],
+          ["--name", "one", "--name", "two"],
+          ["--name", "one", "extra"],
+          ["--name", "one", "--unknown"],
+          ["--name", "one", "--limit", "bad"]
+        ] do
+      assert {:invalid, _} = Protocol.options(:command_options, argv)
+    end
+
+    assert {:invalid, _} = Protocol.options(:probe_input, [])
   end
 
   test "new operations, nested models and fields come only from schema data" do
