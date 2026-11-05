@@ -439,4 +439,32 @@ defmodule AtlasRuntime.GuidanceInboxTest do
     assert {:error, :invalid_activity} = Harness.activity("consumed", "not proof")
     assert {:error, :invalid_activity} = Harness.activity("tool", String.duplicate("x", 1_025))
   end
+
+  test "expired typed deadline is explicit stale, with no durable admission", %{tmp_dir: dir} do
+    {:ok, pid} = start(dir, initialize: true)
+
+    assert {:error, :stale} =
+             Harness.accept(FakeInbox, pid, @request, System.system_time(:millisecond) - 1)
+
+    assert {:not_admitted, @identity} = Harness.query(FakeInbox, pid, @identity)
+  end
+
+  test "historical recovery cannot activate or close a different current attempt", %{tmp_dir: dir} do
+    {:ok, pid} = start(dir, initialize: true)
+    {:ok, original} = Harness.accept(FakeInbox, pid, @request)
+    :ok = FakeInbox.close_attempt(pid)
+    :ok = FakeInbox.stop(pid)
+    successor = %{@turn | key: "turn-b", attempt: "attempt-b"}
+    {:ok, next} = start(dir, [], successor)
+    :ok = FakeInbox.stop(next)
+    {:ok, history} = FakeInbox.recover_input(@turn, inbox_dir: dir)
+    assert {:ok, ^original} = Harness.query(FakeInbox, history, @identity)
+    assert {:error, :stale} = FakeInbox.consume(history, @identity)
+    new_request = %{@request | "interaction" => "interaction-new"}
+    assert {:error, :stale} = Harness.accept(FakeInbox, history, new_request)
+    :ok = FakeInbox.stop(history)
+    {:ok, current} = start(dir, [], successor)
+    request = %{@request | "turn" => "turn-b", "attempt" => "attempt-b", "interaction" => "new"}
+    assert {:ok, _} = Harness.accept(FakeInbox, current, request)
+  end
 end

@@ -11,11 +11,18 @@ defmodule AtlasRuntime.Talk do
   @tries 3
 
   @doc "Read: State's answer, or `%{\"error\" => …}`."
-  def read(kind, content), do: read(kind, content, @tries)
+  def read(kind, content, opts \\ []),
+    do:
+      read_request(
+        kind,
+        content,
+        Keyword.get(opts, :tries, @tries),
+        Keyword.get(opts, :wait, @wait)
+      )
 
-  defp read(_kind, _content, 0), do: %{"error" => "State did not answer"}
+  defp read_request(_kind, _content, 0, _wait), do: %{"error" => "State did not answer"}
 
-  defp read(kind, content, tries) do
+  defp read_request(kind, content, tries, wait) do
     envelope = Envelope.new("read", kind)
     id = envelope.id
     :ok = AtlasBus.send(envelope, content)
@@ -23,27 +30,43 @@ defmodule AtlasRuntime.Talk do
     receive do
       {:atlas_bus, %Envelope{id: ^id, class: "answer"}, answer} -> answer
     after
-      @wait -> read(kind, content, tries - 1)
+      wait -> read_request(kind, content, tries - 1, wait)
     end
   end
 
   @doc "Put a fact: `{:stored, position}`, `{:refused, reasons}` or `{:error, :no_answer}`."
-  def put(kind, content), do: put(Envelope.new("fact", kind), content, @tries)
+  def put(kind, content) do
+    case fact(kind, content) do
+      {:stored, _answer, position} -> {:stored, position}
+      {:refused, refusal} -> {:refused, refusal["reasons"] || List.wrap(refusal["code"])}
+      error -> error
+    end
+  end
 
-  defp put(_envelope, _content, 0), do: {:error, :no_answer}
+  @doc "Full acknowledgement, including immutable fact identity and typed refusal."
+  def fact(kind, content, opts \\ []),
+    do:
+      fact_request(
+        Envelope.new("fact", kind),
+        content,
+        Keyword.get(opts, :tries, @tries),
+        Keyword.get(opts, :wait, @wait)
+      )
 
-  defp put(envelope, content, tries) do
+  defp fact_request(_envelope, _content, 0, _wait), do: {:error, :no_answer}
+
+  defp fact_request(envelope, content, tries, wait) do
     id = envelope.id
     :ok = AtlasBus.send(envelope, content)
 
     receive do
-      {:atlas_bus, %Envelope{id: ^id, class: "stored"} = stored, _} ->
-        {:stored, stored.position}
+      {:atlas_bus, %Envelope{id: ^id, class: "stored"} = stored, answer} ->
+        {:stored, answer, stored.position}
 
       {:atlas_bus, %Envelope{id: ^id, class: "refused"}, refusal} ->
-        {:refused, refusal["reasons"]}
+        {:refused, refusal}
     after
-      @wait -> put(envelope, content, tries - 1)
+      wait -> fact_request(envelope, content, tries - 1, wait)
     end
   end
 end
