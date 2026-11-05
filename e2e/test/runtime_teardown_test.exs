@@ -5,7 +5,14 @@ defmodule AtlasE2E.RuntimeTeardownTest do
   @tag timeout: 120_000
   test "ended Runtime fixture teardown does not grant Control fenced-turn authority" do
     i = Instance.start()
-    on_exit(fn -> Instance.stop(i) end)
+
+    on_exit(fn ->
+      Instance.stop(i)
+      # Instance is normally owned by the standalone e2e VM. This unit fixture must
+      # also release its unlinked named stand-in before another fixture starts one.
+      if pid = Process.whereis(AtlasE2E.GitHub), do: Agent.stop(pid)
+    end)
+
     IO.puts("private teardown fixture retained: #{i.dir}")
     Scenario.atlas_json(i, ["put", "agent", "--name", "Runner"])
     Scenario.atlas_json(i, ["put", "agent", "--name", "Bystander"])

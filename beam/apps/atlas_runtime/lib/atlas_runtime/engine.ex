@@ -283,17 +283,7 @@ defmodule AtlasRuntime.Engine do
           kind: owned.kind,
           agent: owned.agent,
           port: port,
-          port_opts:
-            Keyword.merge(
-              [
-                stub_dir: Keyword.get(opts, :stub_dir),
-                agent: agents[owned.agent],
-                turns_dir: Keyword.get(opts, :turns_dir),
-                env_file: Keyword.get(opts, :env_file),
-                atlas_bin: Keyword.get(opts, :atlas_bin)
-              ],
-              Keyword.get(opts, :port_opts, [])
-            ),
+          port_opts: port_opts(agents[owned.agent], opts),
           guidance_every: Keyword.get(opts, :guidance_every, Keyword.fetch!(opts, :lease)),
           description: Keyword.get(opts, :description, %{}),
           ownership: owned.ownership,
@@ -320,6 +310,21 @@ defmodule AtlasRuntime.Engine do
   # Explicit dependency injection for private proof tests, never read from machine settings.
   defp port(settings, opts),
     do: Keyword.get(opts, :ports, %{})[settings["port"]] || Agent.port(settings)
+
+  # Startup and historical recovery must preserve the same adapter binding. The
+  # immutable execution is checked separately; current settings cannot redefine it.
+  defp port_opts(settings, opts) do
+    Keyword.merge(
+      [
+        stub_dir: Keyword.get(opts, :stub_dir),
+        agent: settings,
+        turns_dir: Keyword.get(opts, :turns_dir),
+        env_file: Keyword.get(opts, :env_file),
+        atlas_bin: Keyword.get(opts, :atlas_bin)
+      ],
+      Keyword.get(opts, :port_opts, [])
+    )
+  end
 
   # One historical turn/page per round, no model restart and no successor resolution.
   # The bounded cursor is an optimization; State and native history remain authoritative.
@@ -364,7 +369,7 @@ defmodule AtlasRuntime.Engine do
         turn_kind: n.kind,
         description: d,
         port: port,
-        port_opts: Keyword.get(state.opts, :port_opts, []),
+        port_opts: port_opts(settings, state.opts),
         talk_opts: Keyword.get(state.opts, :talk_opts, [])
       }
 

@@ -105,7 +105,17 @@ defmodule AtlasRuntime.Guidance do
     state = %{execution: execution, cursor: cursor, supported: execution["queued_input"] == true}
 
     if state.supported do
-      case Agent.recover_input(turn.port, context(turn), turn.port_opts) do
+      original_context = Map.put(context(turn), :execution, execution)
+      # Do not open a different/current binding as though it were the original one.
+      result =
+        with {:ok, descriptor} <- Agent.describe(turn.port, original_context, turn.port_opts),
+             true <- compatible_descriptor?(turn, execution, descriptor) do
+          Agent.recover_input(turn.port, original_context, turn.port_opts)
+        else
+          _ -> {:error, :uncertain}
+        end
+
+      case result do
         {:ok, pid} ->
           try do
             {_, next} = round(turn, state, pid, :closed)
@@ -203,18 +213,27 @@ defmodule AtlasRuntime.Guidance do
 
   defp compatible?(turn, execution, pid) do
     case Agent.capabilities(turn.port, pid) do
-      {:ok, d} ->
-        Enum.all?(
-          ~w(harness harness_version capability_version queued_input durable_accept_query consumption_evidence),
-          &(execution[&1] == d[&1])
-        ) and
-          (d["reported_model"] == nil or execution["reported_model"] == d["reported_model"]) and
-          execution["configured_model"] ==
-            (d["configured_model"] || (turn.port_opts[:agent] || %{})["model"] || "unknown")
-
-      _ ->
-        false
+      {:ok, d} -> compatible_descriptor?(turn, execution, d)
+      _ -> false
     end
+  end
+
+  defp compatible_descriptor?(turn, execution, d) do
+    identity = %{
+      "environment" => AtlasBus.environment(),
+      "machine" => turn.machine,
+      "worker" => turn.agent,
+      "turn" => turn.key,
+      "attempt" => turn.attempt
+    }
+
+    Map.take(execution, Map.keys(identity)) == identity and
+      Enum.all?(
+        ~w(harness harness_version capability_version queued_input durable_accept_query consumption_evidence reported_model),
+        &(execution[&1] == d[&1])
+      ) and
+      execution["configured_model"] ==
+        (d["configured_model"] || (turn.port_opts[:agent] || %{})["model"] || "unknown")
   end
 
   def eligible(turn) do

@@ -31,6 +31,7 @@ defmodule AtlasRuntime.GuidancePort do
   @impl true
   def recover_input(turn, opts) do
     send(opts[:observer], {:recovering, turn})
+    send(opts[:observer], {:recovery_options, opts})
 
     case FakeInbox.recover_input(turn, inbox_opts(turn, opts)) do
       {:ok, pid} = ok ->

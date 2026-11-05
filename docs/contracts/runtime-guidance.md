@@ -92,7 +92,13 @@ Local finish closes native input before stop/end, then reconciles at most one pa
 never drains a queue to keep a worker alive. Remaining history is reconciled by Engine,
 one ended turn/page per round. Orphan turns are ended first; historical recovery is a
 separate explicitly model-free call, never fallback `start`. It cannot resurrect an old
-attempt. The fake monitors its owner, retains closed tombstones and named-file guards,
+attempt. Startup and historical recovery use the same complete adapter option builder
+(agent configuration, paths, environment/client options and explicit private adapter
+options). Recovery receives the immutable execution descriptor and first checks its
+original exact identity/model/capabilities against the current binding. Changed model or
+descriptor provenance fails closed before opening native history; `unknown` is not a
+wildcard. Restoring a matching binding can recover retained proof without rewriting the
+execution or clearing earlier uncertainty. The fake monitors its owner, retains closed tombstones and named-file guards,
 and opens recovery with admission/consumption disabled. Opening an old attempt's history
 cannot close or activate a different current attempt.
 

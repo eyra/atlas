@@ -448,6 +448,79 @@ defmodule AtlasRuntime.RuntimeGuidanceTest do
     assert {:ok, _} = FakeInbox.query(inbox, identity(t, i))
   end
 
+  test "configured model and adapter options survive exact historical consumption recovery", c do
+    opts =
+      c.opts
+      |> Keyword.update!(:agents, &put_in(&1, ["ada", "model"], "private-configured-model"))
+      |> Keyword.merge(
+        stub_dir: "private-stub",
+        turns_dir: "private-turns",
+        env_file: "private-env",
+        atlas_bin: "private-atlas"
+      )
+
+    {engine, pid, inbox, t} = boot(%{c | opts: opts})
+    ex = execution(t)
+    assert ex["configured_model"] == "private-configured-model"
+    i = submit(t)
+    reconcile(pid)
+    assert current(i)["projection"]["proven"] == "delivered"
+    :sys.suspend(pid)
+    assert {:ok, consumed} = FakeInbox.consume(inbox, identity(t, i))
+    Process.exit(pid, :kill)
+    monitor = Process.monitor(inbox)
+    assert_receive {:DOWN, ^monitor, :process, ^inbox, _}, 2_000
+    assert current(i)["projection"]["proven"] == "delivered"
+    {:ok, []} = Rela.change(c.rela, "cards", "card-a", %{"later" => "held"}, nil, %{})
+    Engine.round(engine)
+    Engine.round(engine)
+    assert current(i)["projection"]["proven"] == "acknowledged"
+    assert_receive {:recovering, %{execution: ^ex}}
+    assert_receive {:recovery_options, recovered_opts}
+    assert recovered_opts[:inbox_root] == opts[:port_opts][:inbox_root]
+    assert recovered_opts[:observer] == self()
+    %{"facts" => receipts} = Talk.read("synthetic_receipt", %{"interaction" => i["key"]})
+    ack = Enum.find(receipts, &(&1["stage"] == "acknowledged"))
+    assert ack["admission_id"] == consumed["admission_id"]
+    assert ack["consumption_id"] == consumed["consumption_id"]
+    assert recovered_opts[:agent] == opts[:agents]["ada"]
+
+    for key <- [:stub_dir, :turns_dir, :env_file, :atlas_bin],
+        do: assert(recovered_opts[key] == opts[key])
+
+    assert execution(t) == ex
+  end
+
+  test "changed model configuration cannot query history as the original execution", c do
+    opts = Keyword.update!(c.opts, :agents, &put_in(&1, ["ada", "model"], "original-model"))
+    {engine, pid, inbox, t} = boot(%{c | opts: opts})
+    ex = execution(t)
+    i = submit(t)
+    reconcile(pid)
+    :sys.suspend(pid)
+    assert {:ok, _} = FakeInbox.consume(inbox, identity(t, i))
+    Process.exit(pid, :kill)
+    monitor = Process.monitor(inbox)
+    assert_receive {:DOWN, ^monitor, :process, ^inbox, _}, 2_000
+    {:ok, []} = Rela.change(c.rela, "cards", "card-a", %{"later" => "held"}, nil, %{})
+    changed = Keyword.update!(opts, :agents, &put_in(&1, ["ada", "model"], "changed-model"))
+    :sys.replace_state(engine, fn state -> %{state | opts: changed} end)
+    Engine.round(engine)
+    Engine.round(engine)
+    assert current(i)["projection"]["proven"] == "delivered"
+    assert current(i)["projection"]["uncertain"]
+    key = t.key
+    refute_receive {:recovering, %{key: ^key}}, 20
+    assert execution(t) == ex
+    # Restoring the original binding can recover its retained proof, without erasing
+    # uncertainty or rewriting immutable model provenance.
+    :sys.replace_state(engine, fn state -> %{state | opts: opts} end)
+    Engine.round(engine)
+    assert current(i)["projection"]["proven"] == "acknowledged"
+    assert current(i)["projection"]["uncertain"]
+    assert execution(t) == ex
+  end
+
   defp eventually(fun, remaining \\ 50)
   defp eventually(fun, 0), do: assert(fun.())
 
