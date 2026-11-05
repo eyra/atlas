@@ -64,14 +64,15 @@ defmodule AtlasRuntime.Agent.FakeInbox do
          {:ok, stat} <- File.stat(dir),
          lock = {__MODULE__, node(), stat.major_device, stat.minor_device, stat.inode},
          :yes <- :global.register_name(lock, self()) do
-      case open(dir, scope, target, Keyword.get(opts, :initialize, false)) do
-        {:ok, table, meta} ->
+      case open(dir, scope, target, Keyword.get(opts, :initialize, false), physical_id(stat)) do
+        {:ok, table, meta, binding} ->
           {:ok,
            %{
              table: table,
              meta: meta,
              owner: owner,
              lock: lock,
+             binding: binding,
              barrier: Keyword.get(opts, :barrier),
              failed: false
            }}
@@ -92,7 +93,7 @@ defmodule AtlasRuntime.Agent.FakeInbox do
     if File.dir?(dir), do: :ok, else: {:error, :uncertain}
   end
 
-  defp open(dir, scope, target, initialize) do
+  defp open(dir, scope, target, initialize, directory_id) do
     file = Path.join(dir, "inbox.dets")
     marker = Path.join(dir, "identity.json")
     new? = initialize and File.ls!(dir) == []
@@ -107,13 +108,29 @@ defmodule AtlasRuntime.Agent.FakeInbox do
     with true <- new? or (File.exists?(file) and File.exists?(marker)),
          {:ok, contents} <- File.read(marker),
          {:ok, ^scope} <- JSON.decode(contents),
+         {:ok, marker_id} <- named_file_id(marker),
+         {:ok, history_id} <- if(new?, do: {:ok, nil}, else: named_file_id(file)),
          {:ok, table} <-
            :dets.open_file(make_ref(), file: String.to_charlist(file), repair: false) do
-      result = load(table, scope, target, new?)
+      result =
+        with {:ok, meta} <- load(table, scope, target, new?),
+             {:ok, opened_id} <- named_file_id(file) do
+          binding = %{
+            directory: dir,
+            directory_id: directory_id,
+            history: file,
+            history_id: history_id || opened_id,
+            marker: marker,
+            marker_id: marker_id,
+            contents: contents
+          }
+
+          if binding_intact?(binding), do: {:ok, meta, binding}, else: {:error, :uncertain}
+        end
 
       case result do
-        {:ok, meta} ->
-          {:ok, table, meta}
+        {:ok, meta, binding} ->
+          {:ok, table, meta, binding}
 
         error ->
           :dets.close(table)
@@ -125,6 +142,35 @@ defmodule AtlasRuntime.Agent.FakeInbox do
   rescue
     _ -> {:error, :uncertain}
   end
+
+  defp physical_id(stat), do: {stat.major_device, stat.minor_device, stat.inode}
+
+  defp named_file_id(path) do
+    case File.lstat(path) do
+      {:ok, %{type: :regular} = stat} -> {:ok, physical_id(stat)}
+      _ -> {:error, :uncertain}
+    end
+  end
+
+  defp binding_intact?(binding) do
+    with {:ok, %{type: :directory} = directory} <- File.stat(binding.directory),
+         true <- physical_id(directory) == binding.directory_id,
+         {:ok, history_id} <- named_file_id(binding.history),
+         true <- history_id == binding.history_id,
+         {:ok, marker_id} <- named_file_id(binding.marker),
+         true <- marker_id == binding.marker_id,
+         {:ok, contents} <-
+           File.open(binding.marker, [:read, :binary], fn io ->
+             IO.binread(io, byte_size(binding.contents) + 1)
+           end),
+         true <- contents == binding.contents do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp ensure_binding!(state), do: true = binding_intact?(state.binding)
 
   defp load(table, scope, target, true) do
     meta = %{version: 1, scope: scope, active: target, closed: false}
@@ -188,7 +234,9 @@ defmodule AtlasRuntime.Agent.FakeInbox do
   def handle_call(_, _, %{failed: true} = state), do: {:reply, {:error, :uncertain}, state}
 
   def handle_call(call, _, state) do
+    ensure_binding!(state)
     {answer, updated} = operation(call, state)
+    ensure_binding!(updated)
     {:reply, answer, updated}
   rescue
     _ -> {:reply, {:error, :uncertain}, %{state | failed: true}}
@@ -262,6 +310,7 @@ defmodule AtlasRuntime.Agent.FakeInbox do
   defp admit(state, request) do
     if active?(request, state) do
       barrier(state, :before_accept, request)
+      ensure_binding!(state)
 
       evidence = %{
         "identity" => identity(request),
@@ -277,6 +326,7 @@ defmodule AtlasRuntime.Agent.FakeInbox do
       if byte_size(JSON.encode!(largest)) <= 32_768 do
         sync(state.table, {{:input, request["interaction"]}, record})
         barrier(state, :after_accept, request)
+        ensure_binding!(state)
         {:ok, evidence}
       else
         {:error, :record_too_large}
@@ -300,12 +350,14 @@ defmodule AtlasRuntime.Agent.FakeInbox do
   defp existing(:consume, record, state) do
     if active?(record.request, state) do
       barrier(state, :before_consume, record.request)
+      ensure_binding!(state)
 
       evidence =
         Map.merge(record.evidence, %{"stage" => "consumed", "consumption_id" => evidence_id()})
 
       sync(state.table, {{:input, record.request["interaction"]}, %{record | evidence: evidence}})
       barrier(state, :after_consume, record.request)
+      ensure_binding!(state)
       send(state.owner, {:agent, self(), {:guidance, evidence}})
       {:ok, evidence}
     else

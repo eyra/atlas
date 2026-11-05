@@ -71,6 +71,18 @@ consumption-proof space at initial admission. All records are checked when reope
 collection scanning is internal, with no unbounded public history response. Storage
 failure latches uncertainty until restart; it never becomes authoritative absence.
 
+The live owner pins the physical directory and named regular history/marker files
+by device/inode, plus the marker's identity bytes. It validates that binding before
+and after calls, and around admission/consumption barriers before writing or emitting
+success. Moving or replacing either named file, or changing marker identity, latches
+uncertainty even when DETS still serves its old open handle. Restoring the original
+binding does not clear the latch; restart must validate the retained history again.
+No archive is deleted, repaired, relabelled or implicitly initialized. A transition
+already synced before binding loss can be recovered after restoration/restart, but
+cannot emit a successful reply or consumption notification once loss is detected.
+These checks cover partial named-history loss; they are not an external-writer lock
+or a guarantee against arbitrary deletion after the final check/response.
+
 Deterministic private barriers exist before/after admission and consumption to test
 process-crash windows. Synced DETS plus an identity marker proves these process/reply
 boundaries, not arbitrary power loss, rollback/deletion of all storage, distributed

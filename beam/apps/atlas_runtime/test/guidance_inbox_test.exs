@@ -283,6 +283,127 @@ defmodule AtlasRuntime.GuidanceInboxTest do
     assert {:ok, _} = Harness.accept(FakeInbox, pid, @request)
   end
 
+  for {file, change, first} <- [
+        {"inbox.dets", :move, :query},
+        {"inbox.dets", :replace, :accept},
+        {"identity.json", :move, :consume},
+        {"identity.json", :replace, :close}
+      ] do
+    test "live #{file} #{change} refuses #{first} and latches uncertainty", %{tmp_dir: dir} do
+      assert_binding_loss(dir, unquote(file), unquote(change), unquote(first))
+    end
+  end
+
+  defp assert_binding_loss(dir, file, change, first) do
+    {:ok, pid} = start(dir, initialize: true)
+    {:ok, original} = FakeInbox.accept(pid, @request)
+    table = :sys.get_state(pid).table
+    retained = :dets.lookup(table, {:input, @identity["interaction"]})
+    archive = move_binding(dir, file, change)
+    assert binding_call(first, pid) == {:error, :uncertain}, "synthetic evidence: #{dir}"
+    assert_uncertain(pid)
+    assert :dets.lookup(table, {:input, @identity["interaction"]}) == retained
+    assert :dets.lookup(table, {:input, "unseen"}) == []
+    refute_receive {:agent, ^pid, _}
+    restore_binding(dir, file, archive)
+    assert_uncertain(pid)
+    FakeInbox.stop(pid)
+    {:ok, reopened} = start(dir)
+    assert FakeInbox.query(reopened, @identity) == {:ok, original}
+    assert File.exists?(archive)
+  end
+
+  defp binding_call(:query, pid),
+    do: FakeInbox.query(pid, %{@identity | "interaction" => "unseen"})
+
+  defp binding_call(:accept, pid),
+    do: FakeInbox.accept(pid, %{@request | "interaction" => "unseen"})
+
+  defp binding_call(:consume, pid), do: FakeInbox.consume(pid, @identity)
+  defp binding_call(:close, pid), do: FakeInbox.close_attempt(pid)
+
+  defp assert_uncertain(pid) do
+    for op <- [:query, :accept, :consume, :close] do
+      assert binding_call(op, pid) == {:error, :uncertain}
+    end
+
+    assert FakeInbox.context_input(pid, @identity) == {:error, :uncertain}
+    assert Harness.query(FakeInbox, pid, @identity) == {:error, :uncertain}
+  end
+
+  defp move_binding(dir, file, change) do
+    path = Path.join(dir, file)
+    archive = Path.join(dir, "archived-" <> file)
+    File.rename!(path, archive)
+    if change == :replace, do: File.cp!(archive, path)
+    archive
+  end
+
+  defp restore_binding(dir, file, archive) do
+    path = Path.join(dir, file)
+    if File.exists?(path), do: File.rename!(path, Path.join(dir, "replacement-" <> file))
+    # Keep the archive; restore the same physical file to prove the failure latch.
+    File.ln!(archive, path)
+  end
+
+  test "live marker content change at the same inode latches uncertainty", %{tmp_dir: dir} do
+    {:ok, pid} = start(dir, initialize: true)
+    marker = Path.join(dir, "identity.json")
+    archive = Path.join(dir, "archived-identity.json")
+    File.cp!(marker, archive)
+    original = File.read!(marker)
+    File.write!(marker, JSON.encode!(%{"environment" => "changed", "machine" => "box"}))
+    assert FakeInbox.query(pid, @identity) == {:error, :uncertain}, "synthetic evidence: #{dir}"
+    File.write!(marker, original)
+    assert_uncertain(pid)
+    assert File.read!(archive) == original
+  end
+
+  for phase <- [:before_accept, :after_accept, :before_consume, :after_consume] do
+    test "binding replacement at #{phase} cannot emit success", %{tmp_dir: dir} do
+      assert_binding_barrier(dir, unquote(phase))
+    end
+  end
+
+  defp assert_binding_barrier(dir, phase) do
+    {:ok, pid} = start(dir, initialize: true, barrier: {self(), phase})
+    if phase in [:before_consume, :after_consume], do: FakeInbox.accept(pid, @request)
+
+    task =
+      Task.async(fn ->
+        if phase in [:before_accept, :after_accept],
+          do: FakeInbox.accept(pid, @request),
+          else: FakeInbox.consume(pid, @identity)
+      end)
+
+    assert_receive {:inbox_barrier, ^pid, ^phase, "interaction-a"}
+    archive = move_binding(dir, "inbox.dets", :replace)
+    send(pid, {:release, phase})
+    assert Task.await(task) == {:error, :uncertain}, "synthetic evidence: #{dir}"
+    refute_receive {:agent, ^pid, _}
+    table = :sys.get_state(pid).table
+    records = :dets.lookup(table, {:input, @identity["interaction"]})
+
+    case phase do
+      :before_accept -> assert records == []
+      :after_accept -> assert [{_, %{evidence: %{"stage" => "admitted"}}}] = records
+      :before_consume -> assert [{_, %{evidence: %{"stage" => "admitted"}}}] = records
+      :after_consume -> assert [{_, %{evidence: %{"stage" => "consumed"}}}] = records
+    end
+
+    restore_binding(dir, "inbox.dets", archive)
+    assert_uncertain(pid)
+    FakeInbox.stop(pid)
+    {:ok, reopened} = start(dir)
+
+    case records do
+      [] -> assert FakeInbox.query(reopened, @identity) == {:not_admitted, @identity}
+      [{_, record}] -> assert FakeInbox.query(reopened, @identity) == {:ok, record.evidence}
+    end
+
+    assert File.exists?(archive)
+  end
+
   test "record and response bounds, malformed identities and activity remain explicit", %{
     tmp_dir: dir
   } do
