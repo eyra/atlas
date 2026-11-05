@@ -196,6 +196,63 @@ defmodule AtlasState.GuidanceTest do
     assert {:ok, [_]} = Rela.list(c.rela, "interactions")
   end
 
+  test "deployment guard probes stay distinct from valid private scoped reads", c do
+    # These are semantic roles mapped to synthetic kinds/properties, not production data.
+    for role <- ~w(execution interaction receipt) do
+      assert {"answer",
+              %{"code" => "exact_identity_required", "error" => ":exact_identity_required"},
+              _} =
+               request(role, %{}, class: "read")
+    end
+
+    assert {"stored", %{"fact" => note}, _} = request("interaction", interaction(c.execution))
+    evidence = receipt(note, "delivered", %{"admission_id" => "private-inbox"})
+    assert {"refused", %{"code" => "receipt_authority"}, _} = request("receipt", evidence)
+    assert {"stored", %{"fact" => proof}, _} = as("runtime@box", "receipt", evidence)
+    before = for plural <- ~w(executions interactions receipts), do: Rela.list(c.rela, plural)
+
+    assert {"answer", %{"fact" => execution}, _} =
+             request("execution", %{"key" => c.execution["key"]}, class: "read")
+
+    assert execution["key"] == c.execution["key"]
+
+    assert {"answer", %{"facts" => [found], "more" => false}, _} =
+             request("interaction", %{"execution" => execution["key"], "limit" => 1},
+               class: "read"
+             )
+
+    assert found["key"] == note["key"]
+
+    assert {"answer", %{"facts" => [^proof], "more" => false}, _} =
+             request("receipt", %{"interaction" => note["key"], "limit" => 1}, class: "read")
+
+    assert {"answer", %{"code" => "invalid_page"}, _} =
+             request("interaction", %{"execution" => execution["key"], "limit" => 0},
+               class: "read"
+             )
+
+    assert {"answer", %{"code" => "not_found"}, _} =
+             request("receipt", %{"interaction" => "absent-private-parent"}, class: "read")
+
+    assert before ==
+             for(plural <- ~w(executions interactions receipts), do: Rela.list(c.rela, plural))
+  end
+
+  test "a private backend failure is not the exact-identity guard", c do
+    GuidanceStore.fail_next_get(
+      c.store,
+      "executions",
+      c.execution["key"],
+      {:unavailable, "private outage"}
+    )
+
+    assert {"answer", %{"code" => "store_error", "error" => error}, _} =
+             request("execution", %{"key" => c.execution["key"]}, class: "read")
+
+    assert error =~ "private outage"
+    refute error == ":exact_identity_required"
+  end
+
   test "concurrent conflicting bodies have one winner", c do
     content = interaction(c.execution)
     result = race(content, put_in(content, ["values", "body"], "changed"))

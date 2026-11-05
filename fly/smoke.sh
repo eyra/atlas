@@ -7,7 +7,9 @@
 #  1. With a label: the core on Fly runs that image (the build just deployed).
 #  2. bin/atlas opens a tunnel over WireGuard to Control on the private network, and
 #     Control answers with the kinds of rela's description: State read it from rela.
-#  3. Every kind lists: each read goes Control -> Bus -> State -> rela on Fly and back.
+#  3. Ordinary kinds list; description-declared restricted roles must return their
+#     exact typed scope guard. Scoped record reads are covered by private State tests,
+#     not by enumerating or creating live guidance records during deployment.
 #
 # It runs on a private copy of env/<env>.json with a tunnel of its own on a free port, so
 # it works before the environment's clients use Fly ("in_use": false) and never meets a
@@ -35,13 +37,5 @@ if [ -n "$label" ]; then
   echo "smoke: $app runs $label"
 fi
 
-kinds="$(atlas help --json | jq -r '.[].kind')"
-[ -n "$kinds" ] || fail "Control on $app answered no kinds"
-echo "smoke: Control on $app answers over the private network; kinds: $(echo $kinds)"
-
-for kind in $kinds; do
-  count="$(atlas list "$kind" --json | jq -e 'if type == "array" then length else error("not a list") end')" ||
-    fail "listing $kind failed"
-  echo "smoke: $kind: $count"
-done
-echo "smoke: $env on Fly answers"
+ATLAS_ENV_FILE="$dir/$env.json" ATLAS_NO_UPDATE=1 python3 "$root/fly/smoke-reads.py" \
+  "$root/bin/atlas" "$root/rela/atlas.json" "$env" "$app"

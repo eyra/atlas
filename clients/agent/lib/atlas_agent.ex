@@ -228,14 +228,7 @@ defmodule AtlasAgent do
   """
   def list(client, kind, parent \\ nil)
 
-  def list(client, kind, nil) do
-    with {:ok, page} <- Client.open(client, "/k/#{enc(kind)}") do
-      case Client.blocks(page, "list") do
-        [list | _] -> {:ok, rows(list)}
-        [] -> {:error, why(page, kind)}
-      end
-    end
-  end
+  def list(client, kind, nil), do: list(client, kind, nil, [])
 
   def list(client, kind, parent) do
     with {:ok, item} <- get(client, parent) do
@@ -248,6 +241,27 @@ defmodule AtlasAgent do
          String.starts_with?(row["path"], prefix),
          do: row
        )}
+    end
+  end
+
+  @doc "List an unscoped kind; typed_errors retains an optional Control failure code for JSON clients."
+  def list(client, kind, nil, opts) do
+    with {:ok, page} <- Client.open(client, "/k/#{enc(kind)}") do
+      case Client.blocks(page, "list") do
+        [list | _] ->
+          {:ok, rows(list)}
+
+        [] ->
+          code =
+            case Client.blocks(page, "confirm") do
+              [confirm] -> confirm["code"]
+              _ -> nil
+            end
+
+          if Keyword.get(opts, :typed_errors, false) and is_binary(code) and code != "",
+            do: {:error, why(page, kind), code},
+            else: {:error, why(page, kind)}
+      end
     end
   end
 

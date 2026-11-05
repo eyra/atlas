@@ -2075,7 +2075,14 @@ defmodule AtlasControl.Pages do
         _ -> "State did not answer"
       end
 
-    missing(title, "#{error}. Showing nothing rather than something old.", back)
+    page(title, back, [
+      Blocks.confirm(
+        title: title,
+        text: "#{error}. Showing nothing rather than something old.",
+        cancel_to: back,
+        code: failed["code"]
+      )
+    ])
   end
 
   @doc "The relations whose facts point at `kind`, with the keys pointing at this fact."
