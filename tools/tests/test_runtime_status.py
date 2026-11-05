@@ -98,13 +98,52 @@ class StatusProjectionTest(unittest.TestCase):
             self.assertIn('unsupported', result.stderr)
 
 
+    def test_pid_records_are_bounded_before_any_inspector_call(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary); config = home/'runtime.json'
+            config.write_text(json.dumps({'env': 'test', 'runtime': {'machine': 'fixture'}, 'bus_link': {'machine': 'fixture'}}))
+            target = dict(environment='test', machine='fixture')
+            with patch.dict(os.environ, ATLAS_RUNTIME_HOME=str(home), ATLAS_RUNTIME_FILE=str(config)):
+                for record in ['0', '1', '-2', str(2**31), str(os.getpid()+2**32), '9'*10000, '+123', '1_23', '١٢٣', '2.0', 'True', '', '12 34']:
+                    with self.subTest(record=record[:30]):
+                        (home/'runtime.pid').write_text(record)
+                        from unittest.mock import Mock
+                        inspector = Mock(return_value={'uid': os.getuid()})
+                        result = self.subject.observe_status(ROOT, 'test', {'target': target}, inspect_process=inspector)
+                        self.assertEqual(result['basis'], 'invalid_pid_record')
+                        self.assertEqual(result['state'], 'stale')
+                        self.assertNotEqual(result.get('process_present'), True)
+                        inspector.assert_not_called()
+                for pid in [2, 2**31-1]:
+                    (home/'runtime.pid').write_text(str(pid)+'\n')
+                    from unittest.mock import Mock
+                    inspector = Mock(return_value={'uid': os.getuid()})
+                    result = self.subject.observe_status(ROOT, 'test', {'target': target}, inspect_process=inspector)
+                    self.assertEqual(result['state'], 'unverified')
+                    inspector.assert_called_once_with(pid)
+
+    def test_full_cli_rejects_self_pid_wrap_and_arbitrary_size_records(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)/'runtime'; home.mkdir()
+            config = home/'runtime.json'; config.write_text(json.dumps({'env': 'test', 'runtime': {'machine': 'fixture'}, 'bus_link': {'machine': 'fixture'}}))
+            client = Path(temporary)/'client.json'; client.write_text(json.dumps({'env': 'test'}))
+            env = dict(os.environ, ATLAS_ENV_FILE=str(client), ATLAS_RUNTIME_HOME=str(home), ATLAS_RUNTIME_FILE=str(config))
+            for record in [str(os.getpid()+2**32), '9'*10000, 'not-a-pid']:
+                (home/'runtime.pid').write_text(record)
+                result = subprocess.run([str(ROOT/'bin/atlas'), 'runtime', 'status', '--env', 'test', '--machine', 'fixture', '--json'], env=env, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+                report = json.loads(result.stdout)['status']
+                self.assertEqual(report['state'], 'stale')
+                self.assertEqual(report['basis'], 'invalid_pid_record')
+                self.assertNotEqual(report.get('process_present'), True)
+
     def test_status_never_builds_or_writes_import_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)/'runtime'; home.mkdir()
             config = home/'runtime.json'; config.write_text(json.dumps({'env': 'test', 'runtime': {'machine': 'fixture'}, 'bus_link': {'machine': 'fixture'}}))
             (home/'runtime.pid').write_text('1234')
             fake = Path(temporary)/'checkout'; (fake/'tools/runtime-playground').mkdir(parents=True)
-            (fake/'tools/runtime-playground/launch.py').write_text('def process_identity(pid): return {"uid": '+str(os.getuid())+'}\n')
+            (fake/'tools/runtime-playground/launch.py').write_text('def parse_pid(record): return int(record)\ndef process_identity(pid): return {"uid": '+str(os.getuid())+'}\n')
             before = sorted(str(p) for p in Path(temporary).rglob('*'))
             previous = sys.dont_write_bytecode
             try:
