@@ -96,6 +96,9 @@ scenario "UC-Atlas-08: break down several children before the turn hands over", 
     )
 
     wait_for.(i, scene, "Assigned to", "coordinator")
+    # IS-Atlas-123: a replacement must never race the durable deferred handover.
+    {_, replacement_status, _} = atlas(i, ["get", "TU-AS-#{scene}-2", "--json"])
+    replacement_status != 0 || raise "the old owner got a replacement before handover"
     {_, status, _} = atlas(agent, ["turn", "--json"])
     status != 0 || raise "the old agent still has a current turn"
   end

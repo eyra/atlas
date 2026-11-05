@@ -68,6 +68,52 @@ defmodule AtlasRuntimeTest do
     end
   end
 
+  defp settle_turns do
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(AtlasRuntime.Supervisor),
+        do: :sys.get_state(pid)
+  end
+
+  test "a delayed ownership snapshot cannot bypass a newly saved handover", %{dir: dir} do
+    box()
+    runtime = engine(dir, every: 3_600_000)
+    eventually(fn -> run("R-C-B-1-1") != nil end)
+    [{turn, _}] = Registry.lookup(AtlasRuntime.Turns, "R-C-B-1-1")
+    held = FakeState.hold_read("card", %{"linked" => %{"owned_by" => "ada"}, "plain" => true})
+    round = Task.async(fn -> Engine.round(runtime) end)
+    assert_receive {:held_read, ^held}, 3_000
+
+    # Runtime's ownership answer is already captured. Flow commits its handover,
+    # then the live turn ends before Runtime receives that old answer.
+    card = FakeState.get("card", "C-B-1") |> put_in(["values", "later"], "pending")
+    FakeState.put("card", card)
+    ref = Process.monitor(turn)
+    AtlasRuntime.Turn.finish(turn, "the agent ended its turn: packed it")
+    assert_receive {:DOWN, ^ref, :process, ^turn, :normal}, 3_000
+    eventually(fn -> Registry.lookup(AtlasRuntime.Turns, "R-C-B-1-1") == [] end)
+    FakeState.release_read()
+    Task.await(round)
+    settle_turns()
+    assert run("R-C-B-1-1")["values"]["reason"] == "the agent ended its turn: packed it"
+    assert run("R-C-B-1-2") == nil
+    Engine.round(runtime)
+    assert run("R-C-B-1-2") == nil
+  end
+
+  test "a normal end without a handover permits the same owner to continue", %{dir: dir} do
+    box()
+    runtime = engine(dir, every: 3_600_000)
+    eventually(fn -> run("R-C-B-1-1") != nil end)
+    [{turn, _}] = Registry.lookup(AtlasRuntime.Turns, "R-C-B-1-1")
+    ref = Process.monitor(turn)
+    FakeState.put("run", put_in(run("R-C-B-1-1"), ["values", "result"], "packed one part"))
+    Engine.round(runtime)
+    assert_receive {:DOWN, ^ref, :process, ^turn, :normal}, 3_000
+    eventually(fn -> Registry.lookup(AtlasRuntime.Turns, "R-C-B-1-1") == [] end)
+    Engine.round(runtime)
+    eventually(fn -> run("R-C-B-1-2") != nil end)
+    assert run("R-C-B-1-2")["links"]["run_by"] == ["ada"]
+  end
+
   test "an orphaned turn keeps its stored outcome and does not restart from stale ownership", %{
     dir: dir
   } do
@@ -174,9 +220,12 @@ defmodule AtlasRuntimeTest do
     engine(dir, leave_grace: 5_000)
     eventually(fn -> run("R-C-B-1-1")["values"]["status"] == "going" end)
 
-    # As when ada hands it on itself: the item moves, then ada ends its turn.
+    # As when ada hands it on itself: acknowledge reconciliation and its leave cast
+    # before ending the stub; the grace must not depend on a wall-clock pause.
     box("bob")
-    Process.sleep(500)
+    Engine.round(Engine)
+    [{turn, _}] = Registry.lookup(AtlasRuntime.Turns, "R-C-B-1-1")
+    assert :sys.get_state(turn).leaving == "C-B-1 is no longer ada's to work on"
     assert run("R-C-B-1-1")["values"]["status"] == "going"
     mode(dir, "ada", "end")
 
