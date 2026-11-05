@@ -51,7 +51,7 @@ def combine(left, right, path=''):
 
 def validate(extra, schema, actors=None):
     """Only current Atlas annotation vocabulary, with schema-resolved references."""
-    keys(extra, '_about todo runtime start shell types entities relations progress flows', 'extension')
+    keys(extra, '_about todo runtime guidance start shell types entities relations progress flows', 'extension')
     entities, relations, types = (schema.get(k, {}) for k in ('entities', 'relations', 'types'))
 
     def entity(kind):
@@ -103,6 +103,33 @@ def validate(extra, schema, actors=None):
                 field(k, rule['field'])
                 if 'value' in rule:
                     values(k, {rule['field']: [rule['value']]})
+
+    if 'guidance' in extra:
+        required = {
+            'execution': 'environment worker turn attempt machine harness harness_version configured_model reported_model capability_version queued_input durable_accept_query consumption_evidence recorded_at recorded_position',
+            'interaction': 'environment actor client_key body body_digest worker turn attempt mode execution cause recorded_at recorded_position',
+            'receipt': 'environment interaction worker turn attempt execution stage evidence_id admission_id consumption_id reason writer cause recorded_at recorded_position',
+        }
+        keys(extra['guidance'], 'execution interaction receipt', 'guidance')
+        if set(extra['guidance']) != set(required):
+            raise ConfigError('guidance: all three durable roles required')
+        kinds = []
+        for role, slots in required.items():
+            mapping = extra['guidance'][role]
+            keys(mapping, 'kind fields', 'guidance.' + role)
+            kind = mapping['kind']
+            entity(kind)
+            kinds.append(kind)
+            if set(mapping['fields']) != set(slots.split()):
+                raise ConfigError('guidance.' + role + ': incomplete field mapping')
+            if len(set(mapping['fields'].values())) != len(mapping['fields']):
+                raise ConfigError('guidance.' + role + ': duplicate field mapping')
+            for name in mapping['fields'].values():
+                field(kind, name)
+        if len(set(kinds)) != 3:
+            raise ConfigError('guidance: roles must use separate kinds')
+        turn = extra.get('runtime', {}).get('turn', {})
+        field(turn.get('kind'), turn.get('attempt'))
 
     if 'todo' in extra:
         keys(extra['todo'], 'title why instructions answers', 'todo')
@@ -309,7 +336,7 @@ def validate(extra, schema, actors=None):
         # Runtime obtains agent kinds from the target of turn.by, not a fixed name.
     if 'turn' in runtime:
         turn = runtime['turn']
-        keys(turn, 'kind key on by state running ended machine lease activity why ended_at outcome', 'runtime.turn')
+        keys(turn, 'kind key on by state running ended machine lease activity why ended_at outcome attempt', 'runtime.turn')
         kind = turn['kind']
         entity(kind)
         for key in ('state', 'machine', 'lease', 'activity', 'why', 'ended_at', 'outcome'):

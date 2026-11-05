@@ -63,7 +63,167 @@ defmodule AtlasState.Server do
   end
 
   @impl true
-  def handle_info({:atlas_bus, %Envelope{class: "fact"} = envelope, content}, state) do
+  def handle_info({:atlas_bus, %Envelope{class: class} = envelope, content}, state)
+      when class in ["fact", "read"] do
+    {_, state} = ensure_description(state, envelope.kind)
+
+    binding = Ledger.request_identity(envelope, content)
+
+    if class == "fact" and not Ledger.matches_request?(state.ledger, envelope.id, binding),
+      do: refusal(envelope, :request_conflict, state),
+      else: dispatch(envelope, content, state)
+  end
+
+  def handle_info({:atlas_bus, _envelope, _content}, state), do: {:noreply, state}
+
+  defp dispatch(envelope, content, state) do
+    case AtlasState.Guidance.role(state.description || %{}, envelope.kind) do
+      nil ->
+        if envelope.class == "fact" do
+          case AtlasState.Guidance.authorize_turn(
+                 state.rela,
+                 state.description || %{},
+                 envelope,
+                 content
+               ) do
+            :ok ->
+              ordinary(envelope, content, state)
+
+            {:delete, target} ->
+              delete_request(envelope, content, target, state)
+
+            :absent_delete ->
+              delete_request(envelope, content, :absent, state)
+
+            {:error, reason} ->
+              refusal(envelope, reason, state)
+          end
+        else
+          ordinary(envelope, content, state)
+        end
+
+      role ->
+        guidance(envelope, content, role, state)
+    end
+  end
+
+  defp refusal(envelope, reason, state) do
+    reply(envelope, "refused", %{"code" => guidance_code(reason)}, nil)
+    {:noreply, state}
+  end
+
+  defp delete_request(envelope, content, target, state) do
+    binding = Ledger.request_identity(envelope, content)
+
+    if Ledger.delete_request_available?(state.ledger, envelope.id, binding) do
+      if target == :absent,
+        do: absent_delete(envelope, content, state),
+        else: turn_delete(envelope, content, target, state)
+    else
+      refusal(envelope, :request_conflict, state)
+    end
+  end
+
+  defp turn_delete(envelope, content, target, state) do
+    binding = Ledger.request_identity(envelope, content)
+
+    case Ledger.deletion(state.ledger, binding) do
+      {:ok, %{answer: {_, _, _}}} ->
+        refusal(envelope, :deleted_target_reappeared, state)
+
+      {:ok, %{target: saved}} when saved != target ->
+        refusal(envelope, :delete_target_changed, state)
+
+      {:error, reason} ->
+        refusal(envelope, reason, state)
+
+      _ ->
+        before_delete = fn fact ->
+          if fact == nil or
+               AtlasState.Guidance.deletion_target(state.description, fact) == target,
+             do: Ledger.prepare_delete(state.ledger, envelope.id, binding, target),
+             else: {:error, :delete_target_changed}
+        end
+
+        {:noreply, updated} =
+          ordinary(envelope, content, Map.put(state, :before_delete, before_delete))
+
+        {:noreply, Map.delete(updated, :before_delete)}
+    end
+  end
+
+  defp absent_delete(envelope, content, state) do
+    binding = Ledger.request_identity(envelope, content)
+
+    case Ledger.deletion(state.ledger, binding) do
+      {:ok, proof} ->
+        :ok = Ledger.prepare_delete(state.ledger, envelope.id, binding, proof.target)
+
+        case Ledger.answer(state.ledger, envelope.id) do
+          {class, answer, position} ->
+            if class == "stored",
+              do: remember_links(state, envelope.kind, content, answer, position)
+
+            reply(envelope, class, answer, position)
+
+          nil ->
+            # Confirmed absence plus durable validated intent: finish without a
+            # backend delete, even after a commit-before-acknowledgement crash.
+            answer(state, envelope, content, :stored)
+        end
+
+        {:noreply, state}
+
+      :none ->
+        refusal(envelope, :not_found, state)
+
+      {:error, reason} ->
+        refusal(envelope, reason, state)
+    end
+  end
+
+  defp ensure_description(state, kind) do
+    case kind_spec(state, kind) do
+      {:ok, _, state} -> {:ok, state}
+      {_, _, state} -> {:error, state}
+    end
+  end
+
+  defp guidance(envelope, content, role, state) do
+    result =
+      if envelope.class == "fact",
+        do:
+          AtlasState.Guidance.write(state.rela, state.description, role, envelope, content, fn ->
+            Ledger.reserve(state.ledger)
+          end),
+        else: AtlasState.Guidance.read(state.rela, state.description, role, content)
+
+    case result do
+      {:ok, answer} when envelope.class == "fact" ->
+        position = answer["recorded_position"]
+        reply(envelope, "stored", %{"key" => answer["key"], "fact" => answer}, position)
+
+      {:ok, answer} ->
+        reply(envelope, "answer", answer, nil)
+
+      {:error, reason} ->
+        class = if envelope.class == "read", do: "answer", else: "refused"
+
+        reply(
+          envelope,
+          class,
+          %{"error" => inspect(reason), "code" => guidance_code(reason)},
+          nil
+        )
+    end
+
+    {:noreply, state}
+  end
+
+  defp guidance_code(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp guidance_code(_), do: "store_error"
+
+  defp ordinary(%Envelope{class: "fact"} = envelope, content, state) do
     case Ledger.answer(state.ledger, envelope.id) do
       {class, answer, position} ->
         reply(envelope, class, answer, position)
@@ -76,13 +236,11 @@ defmodule AtlasState.Server do
     end
   end
 
-  def handle_info({:atlas_bus, %Envelope{class: "read"} = envelope, content}, state) do
+  defp ordinary(%Envelope{class: "read"} = envelope, content, state) do
     {answer, state} = read(state, envelope.kind, content || %{})
     reply(envelope, "answer", Map.put(answer, "position", Ledger.position(state.ledger)), nil)
     {:noreply, state}
   end
-
-  def handle_info({:atlas_bus, _envelope, _content}, state), do: {:noreply, state}
 
   defp answer(state, envelope, content, result) do
     about = %{"op" => content_op(content), "key" => content_key(content)}
@@ -387,8 +545,11 @@ defmodule AtlasState.Server do
 
   defp store(state, _kind, _content), do: {{:refused, ["a fact needs an op and a key"]}, state}
 
-  defp write(state, spec, op, key, values, version, targets, was, []),
-    do: store(state.rela, spec, op, key, values, version, targets, was)
+  defp write(state, spec, op, key, values, version, targets, was, []) do
+    if op == "delete",
+      do: delete(state, spec, key, version),
+      else: store(state.rela, spec, op, key, values, version, targets, was)
+  end
 
   # A fact with components: they are made first (the fact links to them), and when the fact
   # is then not stored, the ones made here go again.
@@ -424,8 +585,8 @@ defmodule AtlasState.Server do
   end
 
   # Deleted with the fact, by the keys they are made with, so a resent delete finds them too.
-  defp write(state, spec, "delete", key, values, version, targets, was, parts) do
-    case store(state.rela, spec, "delete", key, values, version, targets, was) do
+  defp write(state, spec, "delete", key, _values, version, _targets, _was, parts) do
+    case delete(state, spec, key, version) do
       :stored ->
         Enum.reduce_while(parts, :stored, fn {_relation, kind, part, _}, :stored ->
           case Rela.delete(state.rela, plural(state, kind), part, nil) do
@@ -524,30 +685,37 @@ defmodule AtlasState.Server do
     end
   end
 
-  defp store(rela, spec, "delete", key, _values, version, _targets, _was) do
-    # The current rela ignores If-Match on delete, so State compares the version itself.
-    current =
-      case Rela.get(rela, spec["plural"], key) do
-        {:ok, %{version: current}} when version != nil and current != version -> :changed
-        _ -> :same
-      end
+  defp store(_rela, _spec, op, _key, _values, _version, _targets, _was),
+    do: {:refused, ["unknown op #{inspect(op)}"]}
+
+  defp delete(state, spec, key, version) do
+    before_delete = Map.get(state, :before_delete, fn _ -> :ok end)
 
     result =
-      if current == :changed,
-        do: {:error, :version_mismatch},
-        else: Rela.delete(rela, spec["plural"], key, version)
+      case Rela.get(state.rela, spec["plural"], key) do
+        {:ok, %{version: current}} when version != nil and current != version ->
+          {:error, :version_mismatch}
+
+        {:ok, fact} ->
+          with :ok <- before_delete.(fact),
+               do: Rela.delete(state.rela, spec["plural"], key, version)
+
+        {:error, :not_found} ->
+          # Generic absence remains idempotent; protected turn absence has already
+          # required trusted deletion provenance in the dispatch guard.
+          before_delete.(nil)
+
+        error ->
+          error
+      end
 
     case result do
       :ok -> :stored
-      # Gone is what was asked for: a resent delete after a lost answer.
       {:error, :not_found} -> :stored
       {:error, :version_mismatch} -> {:refused, ["#{key} changed meanwhile; open it again"]}
       error -> failure(error)
     end
   end
-
-  defp store(_rela, _spec, op, _key, _values, _version, _targets, _was),
-    do: {:refused, ["unknown op #{inspect(op)}"]}
 
   defp both(:ok, :ok), do: :ok
   defp both(first, second), do: {:error, problems(first) ++ problems(second)}

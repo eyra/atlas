@@ -30,6 +30,12 @@ defmodule AtlasState.Rela do
   @doc "Check a create without storing anything; returns rela's warnings."
   @callback check_create(config, String.t(), String.t(), map(), targets) ::
               {:ok, [String.t()]} | {:error, failure}
+  @doc """
+  Atomically claim a collection/key identity. Exactly one concurrent create may
+  succeed; others return `:exists` without changing the original properties/links.
+  A lost response is recovered by reading that identity. Guidance relies on this
+  backend guarantee, not an in-memory identity registry.
+  """
   @callback create(config, String.t(), String.t(), map(), targets) ::
               {:ok, [String.t()]} | {:error, failure}
   @doc "Change properties and, for each relation in `targets`, replace the keys it points at."
