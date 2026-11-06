@@ -59,7 +59,7 @@ defmodule RuntimePlayground.Server do
       "status" => "ready_to_pick_up"
     })
 
-    {:ok, flow} = Supervisor.start_child(AtlasFlow.Root, {AtlasFlow.Engine, every: 1000})
+    {:ok, flow} = Supervisor.start_child(AtlasFlow.Root, {AtlasFlow.Engine, every: 10_000})
     AtlasFlow.Engine.round(flow)
     put("assignment", "AS-SC-Atlas-1", %{}, %{"assigned_to" => ["breaker"]}, "change")
     path = dir <> "/runtime.sock"
@@ -93,7 +93,7 @@ defmodule RuntimePlayground.Server do
       "PRIVATE STUB; contract c341938; worker remains stopped until explicit start\n"
     )
 
-    Process.send_after(self(), :tick, 1000)
+    Process.send_after(self(), :tick, 5_000)
     {:ok, state}
   end
 
@@ -380,7 +380,7 @@ defmodule RuntimePlayground.Server do
         end)
       )
 
-    Process.send_after(self(), :tick, 1000)
+    Process.send_after(self(), :tick, 5_000)
     {:noreply, %{state | sequence: sequence, attachments: attachments}}
   end
 

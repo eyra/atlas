@@ -17,34 +17,54 @@ defmodule AtlasState.Links do
     File.mkdir_p!(dir)
     file = dir |> Path.join("links.dets") |> String.to_charlist()
     {:ok, table} = :dets.open_file(make_ref(), file: file, type: :set)
-    table
+    # DETS hashes the complete {kind, key, relation} key. Matching a partial
+    # tuple scans the entire history table for every returned fact. Keep just
+    # the relation names indexed in memory, rebuilt from the unchanged disk file.
+    index = :ets.new(__MODULE__, [:bag, :protected])
+
+    :dets.foldl(
+      fn {{kind, key, relation}, _entries}, :ok ->
+        true = :ets.insert(index, {{kind, key}, relation})
+        :ok
+      end,
+      :ok,
+      table
+    )
+
+    %{disk: table, index: index}
   end
 
-  def close(table), do: :dets.close(table)
+  def close(%{disk: disk, index: index}) do
+    :ok = :dets.close(disk)
+    :ets.delete(index)
+    :ok
+  end
 
   @doc "Record that the fact `key` of `kind` now points at `keys` through `relation`."
-  def record(table, kind, key, relation, keys, about) do
+  def record(%{disk: disk, index: index} = table, kind, key, relation, keys, about) do
     entry = Map.put(about, "keys", Enum.sort(keys))
 
     :ok =
-      :dets.insert(table, {{kind, key, relation}, history(table, kind, key, relation) ++ [entry]})
+      :dets.insert(disk, {{kind, key, relation}, history(table, kind, key, relation) ++ [entry]})
 
-    :ok = :dets.sync(table)
+    :ok = :dets.sync(disk)
+    true = :ets.insert(index, {{kind, key}, relation})
+    :ok
   end
 
   @doc "Every entry for one link, oldest first."
-  def history(table, kind, key, relation) do
-    case :dets.lookup(table, {kind, key, relation}) do
+  def history(%{disk: disk}, kind, key, relation) do
+    case :dets.lookup(disk, {kind, key, relation}) do
       [{_, entries}] -> entries
       [] -> []
     end
   end
 
   @doc "All entries of a fact: `%{relation => entries}`."
-  def all(table, kind, key) do
-    table
-    |> :dets.match({{kind, key, :"$1"}, :"$2"})
-    |> Map.new(fn [relation, entries] -> {relation, entries} end)
+  def all(%{index: index} = table, kind, key) do
+    Map.new(:ets.lookup(index, {kind, key}), fn {_, relation} ->
+      {relation, history(table, kind, key, relation)}
+    end)
   end
 
   @doc """
@@ -60,8 +80,12 @@ defmodule AtlasState.Links do
   end
 
   @doc "Forget a deleted fact's links."
-  def forget(table, kind, key) do
-    :ok = :dets.match_delete(table, {{kind, key, :_}, :_})
-    :ok = :dets.sync(table)
+  def forget(%{disk: disk, index: index}, kind, key) do
+    for {_, relation} <- :ets.lookup(index, {kind, key}),
+        do: :ok = :dets.delete(disk, {kind, key, relation})
+
+    :ok = :dets.sync(disk)
+    :ets.delete(index, {kind, key})
+    :ok
   end
 end
