@@ -37,6 +37,7 @@ defmodule AtlasControl.RuntimeDiscovery do
   defp grants do
     with name when is_binary(name) and name != "" <-
            Application.get_env(:atlas_control, :runtime_read_token_env),
+         true <- Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, name),
          value when is_binary(value) <- System.get_env(name),
          {:ok, %{} = grants} <- JSON.decode(value),
          true <-

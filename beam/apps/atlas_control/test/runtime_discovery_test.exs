@@ -265,4 +265,32 @@ defmodule AtlasControl.RuntimeDiscoveryTest do
     send_message(s, request(%{"grant" => "private-read-grant"}))
     assert %{"error" => %{"code" => "unauthorized"}} = receive_message(s)
   end
+
+  test "invalid configured grant names deny on a surviving session without logging bearer bytes",
+       %{port: port} do
+    s = connected(port)
+    secret = "PRIVATE_READ_SECRET_LOG_ASSERTION"
+
+    for name <- ["BAD=NAME", "BAD" <> <<0>> <> "NAME", "BAD\n", "", "1INVALID"] do
+      Application.put_env(:atlas_control, :runtime_read_token_env, name)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          send_message(s, request(%{"grant" => secret}))
+          send(self(), {:response, :gen_tcp.recv(s, 0, 1_000)})
+        end)
+
+      assert_receive {:response, {:ok, bytes}}
+      assert %{"error" => %{"code" => "unauthorized"}} = JSON.decode!(bytes)
+      refute log =~ secret
+      query = fn -> flunk("invalid name must precede registry access") end
+
+      assert %{"error" => %{"code" => "unauthorized"}} =
+               AtlasControl.RuntimeDiscovery.read(request(%{"grant" => secret}), true, query)
+    end
+
+    Application.put_env(:atlas_control, :runtime_read_token_env, "ATLAS_PRIVATE_DISCOVERY_TEST")
+    send_message(s, request(%{"grant" => "private-read-grant"}))
+    assert %{"availability" => _} = receive_message(s)
+  end
 end

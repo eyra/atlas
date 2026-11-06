@@ -169,4 +169,31 @@ class OwnershipLifecycleTest(unittest.TestCase):
                 with self.assertRaises(ValueError): c.start()
                 spawn.assert_not_called();self.assertFalse(c.file.exists())
 
+
+    def test_fly_keychain_and_runtime_children_all_exclude_read_grant(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temporary:
+            module,c,record,snapshots,live,calls=self.fixture(temporary)
+            c.file.unlink()
+            for role in ('runtime','tunnel'): (c.base/f'{role}.pid').unlink()
+            c.client_file.write_text(json.dumps({'env':'test','fly':{'in_use':True,'app':'private-app'}}))
+            seen=[]
+            def credential(command,**kwargs):
+                seen.append(('keychain',dict(kwargs.get('env',os.environ))))
+                return b'private-writer-synthetic'
+            def spawn(command,**kwargs):
+                role='proxy' if command[0]=='/private/fly' else 'runtime'
+                seen.append((role,dict(kwargs.get('env',os.environ))))
+                if role=='proxy':
+                    snapshots[222]['argv']=command
+                    return SimpleNamespace(pid=222,poll=lambda:None)
+                nonce=command[-1];snapshots[111]['argv']=['beam',*c._boot_args(nonce)]
+                c._write(c.base/('runtime-ready-'+nonce+'.json'),json.dumps(dict(target=c.target,instance=nonce,pid=111)))
+                return SimpleNamespace(pid=111,poll=lambda:None)
+            with patch.dict(os.environ,ATLAS_BUS_LINK_TOKEN='',ATLAS_RUNTIME_READ_TOKEN='private-read-synthetic'),patch.object(module,'shutil_which_fly',return_value='/private/fly'),patch.object(module.subprocess,'check_output',side_effect=credential),patch.object(module.subprocess,'Popen',side_effect=spawn),patch.object(module.os,'kill',side_effect=AssertionError('no real signals')):
+                c.start()
+            self.assertEqual([role for role,_ in seen],['keychain','proxy','runtime'])
+            for role,env in seen:
+                self.assertFalse('ATLAS_RUNTIME_READ_TOKEN' in env,role)
+
 if __name__ == '__main__': unittest.main()

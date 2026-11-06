@@ -116,7 +116,9 @@ read grant before accessing the Bus registry. It reuses the existing Bus token
 comparison primitive, with a separate configured read realm. No actor string,
 migration claim, person/role lookup or Bus writer token implicitly grants this
 operation. Missing, malformed, wildcard, wrong-scope or revoked grants fail closed;
-revocation is checked each request. This is a machine-scoped bearer capability,
+revocation is checked each request. Configured variable names must be ASCII
+identifiers (letters/underscore first, then letters/digits/underscore); malformed
+names deny before lookup, preserving the session without logging the bearer. This is a machine-scoped bearer capability,
 not authenticated human sign-in or a new role engine. No live defaults change.
 
 The reply contains only the requested exact machine's `registered` flag and
@@ -129,7 +131,10 @@ Result/error correlation and nested target are checked; ordinary hint traffic
 remains independent under one fixed request deadline. The CLI may compile its
 ordinary client as usual, but never builds/starts Runtime. Local status does not
 probe credentials or infer remote access from the existence of this command.
-The read token is stripped from the environment of explicitly started Runtime nodes.
+The read token is stripped before configuration/build/lifecycle helper children,
+including keychain, Fly proxy and Runtime startup, and restored only to the final
+explicit discovery transport. Direct lifecycle helpers independently sanitize all
+their child environments.
 
 Delivery remains the Bus's best effort contract: reads/facts retry and reconcile from
 State. Machine leases and Flow failover across machines remain follow-up work; this

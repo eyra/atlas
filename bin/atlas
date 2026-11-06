@@ -76,6 +76,12 @@
 # What to do (IS-Atlas-54), and what it writes is by it.
 set -euo pipefail
 
+# Keep the read capability out of config/build/lifecycle/proxy children. Only the
+# final explicit discovery transport receives it, without putting it in argv.
+atlas_discovery_read_grant="${ATLAS_RUNTIME_READ_TOKEN-}"
+export -n atlas_discovery_read_grant
+unset ATLAS_RUNTIME_READ_TOKEN
+
 # The repository this script lives in, also when it is called through a link.
 src="${BASH_SOURCE[0]}"
 while [ -L "$src" ]; do
@@ -176,6 +182,9 @@ fly_in_use() {
 run_agent_client() {
   cd "$root/clients/agent"
   mix compile >&2
+  if [ "$cmd" = runtime-discover ] && [ -n "$atlas_discovery_read_grant" ]; then
+    export ATLAS_RUNTIME_READ_TOKEN="$atlas_discovery_read_grant"
+  fi
   ATLAS_CALLER_CWD="$caller" exec mix atlas.agent "$cmd" --env "$env" ${args[@]+"${args[@]}"}
 }
 

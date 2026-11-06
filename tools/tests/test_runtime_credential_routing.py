@@ -1,0 +1,35 @@
+"""Private shell routing with inert child interpreters; no services/proxies/models."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+class CredentialRoutingTest(unittest.TestCase):
+    def test_only_discovery_transport_receives_the_read_credential(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            private=Path(temporary); binary=private/'bin';binary.mkdir()
+            settings=private/'client.json';settings.write_text(json.dumps({'env':'test','control':{'host':'127.0.0.1','port':1}}))
+            capture=private/'calls.jsonl'
+            stub='''#!/usr/bin/python3
+import os,sys,json
+with open(os.environ['PRIVATE_ENV_CAPTURE'],'a') as f:
+ f.write(json.dumps({'program':os.path.basename(sys.argv[0]),'command':sys.argv[1:],'read_present':'ATLAS_RUNTIME_READ_TOKEN' in os.environ,'private_var_present':'atlas_discovery_read_grant' in os.environ})+'\\n')
+'''
+            for command in ['mix','python3']:
+                file=binary/command;file.write_text(stub);file.chmod(0o755)
+            env=dict(os.environ,PATH=str(binary)+':/usr/bin:/bin',ATLAS_ENV_FILE=str(settings),ATLAS_NO_UPDATE='1',ATLAS_RUNTIME_READ_TOKEN='private-read-synthetic',PRIVATE_ENV_CAPTURE=str(capture))
+            for words in [['runtime','discover','--machine','fixture'],['runtime','status'],['runtime','start'],['runtime','stop']]:
+                result=subprocess.run([str(ROOT/'bin/atlas'),*words,'--env','test'],env=env,text=True,capture_output=True)
+                self.assertEqual(result.returncode,0,result.stderr)
+            calls=[json.loads(line) for line in capture.read_text().splitlines()]
+            self.assertEqual(sum(call['read_present'] for call in calls),1)
+            for call in calls:
+                expected=call['program']=='mix' and call['command'][:2]==['atlas.agent','runtime-discover']
+                self.assertEqual(call['read_present'],expected,call['command'])
+                self.assertFalse(call['private_var_present'],call['command'])
+
+if __name__=='__main__':unittest.main()

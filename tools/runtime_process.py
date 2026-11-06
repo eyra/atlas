@@ -166,6 +166,8 @@ class LocalRuntime:
         self._save(record)
 
     def start(self):
+        startup_env = dict(os.environ)
+        startup_env.pop('ATLAS_RUNTIME_READ_TOKEN', None)
         settings = self.configuration_data()
         client = json.loads(self.client_file.read_text())
         if not isinstance(client, dict) or client.get('env') != self.target['environment']:
@@ -186,9 +188,9 @@ class LocalRuntime:
                 raise OwnershipError('legacy PID-only Runtime records refuse start')
             instance = uuid.uuid4().hex
             record = dict(version='1', target=self.target, directory=str(self.base), configuration=str(self.configuration), root=str(self.root), client=str(self.client_file), instance=instance, phase='starting', processes={})
-            token = os.environ.get('ATLAS_BUS_LINK_TOKEN')
+            token = startup_env.get('ATLAS_BUS_LINK_TOKEN')
             if not token:
-                token = subprocess.check_output(['security', 'find-generic-password', '-s', 'atlas-bus-link-'+self.target['environment'], '-a', self.target['machine'], '-w'], stderr=subprocess.DEVNULL, timeout=5).decode().strip()
+                token = subprocess.check_output(['security', 'find-generic-password', '-s', 'atlas-bus-link-'+self.target['environment'], '-a', self.target['machine'], '-w'], stderr=subprocess.DEVNULL, timeout=5, env=startup_env).decode().strip()
             if not token:
                 raise OwnershipError('Bus link authority unavailable; no Runtime started')
             self._save(record)
@@ -200,9 +202,9 @@ class LocalRuntime:
                 command = [executable, 'proxy', str(link['port'])+':'+str(link.get('remote_port', 7694 if self.target['environment']=='test' else 7594)), '-a', fly['app'], '-q']
                 record['tunnel_command'] = command
                 with (self.base/'tunnel.log').open('ab') as log:
-                    child = subprocess.Popen(command, stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
+                    child = subprocess.Popen(command, env=startup_env, stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
                 self._capture(record, 'tunnel', child)
-            child_env = dict(os.environ, ATLAS_ROOT=str(self.root), ATLAS_ENV=self.target['environment'], ATLAS_ROLE='runtime', ATLAS_ENV_FILE=str(self.configuration), ATLAS_RUNTIME_HOME=str(self.base), ATLAS_RUNTIME_INSTANCE=instance, ATLAS_CLIENT_ENV_FILE=str(self.client_file), ATLAS_BUS_LINK_TOKEN=token, MIX_ENV='dev', PYTHONDONTWRITEBYTECODE='1', ELIXIR_ERL_OPTIONS='+S 1:1')
+            child_env = dict(startup_env, ATLAS_ROOT=str(self.root), ATLAS_ENV=self.target['environment'], ATLAS_ROLE='runtime', ATLAS_ENV_FILE=str(self.configuration), ATLAS_RUNTIME_HOME=str(self.base), ATLAS_RUNTIME_INSTANCE=instance, ATLAS_CLIENT_ENV_FILE=str(self.client_file), ATLAS_BUS_LINK_TOKEN=token, MIX_ENV='dev', PYTHONDONTWRITEBYTECODE='1', ELIXIR_ERL_OPTIONS='+S 1:1')
             child_env.pop('ATLAS_RUNTIME_DISCOVERY_TOKEN', None)
             child_env.pop('ATLAS_RUNTIME_READ_TOKEN', None)
             with (self.base/'runtime.log').open('ab') as log:
