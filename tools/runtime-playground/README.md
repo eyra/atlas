@@ -32,6 +32,11 @@ outstanding, with visible backpressure and ten-second expiry. Expiry or reconnec
 leaves outstanding outcomes unknown; controls are never automatically replayed.
 Status events neither complete requests nor extend their deadlines.
 
+The line socket uses a 256 KiB buffer as well as a 256 KiB packet limit, so a
+status containing accumulated turn history is decoded as one JSON frame. This
+fixes fragmented status replies/events; it does not fix State timeouts or provide
+controller recovery. A retained directory must not be passed to `init` again.
+
 Idle keeps renewing its lease; silence ends the turn after eight seconds; maximum
 duration is 120 seconds. Runtime replaces eligible ended turns using its existing
 behavior. Crash-once returns to active mode. Repeated crashes eventually trigger

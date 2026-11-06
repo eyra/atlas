@@ -70,6 +70,7 @@ defmodule RuntimePlayground.Server do
         ifaddr: {:local, path},
         packet: :line,
         packet_size: 262_144,
+        buffer: 262_144,
         active: false
       ])
 
@@ -484,7 +485,9 @@ defmodule RuntimePlayground.Client do
     case :gen_tcp.connect(
            {:local, dir <> "/runtime.sock"},
            0,
-           [:binary, packet: :line, packet_size: 262_144, active: false],
+           # packet_size alone does not grow the line driver's buffer: a long
+           # JSON line otherwise arrives as multiple independently decoded chunks.
+           [:binary, packet: :line, packet_size: 262_144, buffer: 262_144, active: false],
            1000
          ) do
       {:ok, socket} ->
