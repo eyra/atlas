@@ -32,6 +32,16 @@ outstanding, with visible backpressure and ten-second expiry. Expiry or reconnec
 leaves outstanding outcomes unknown; controls are never automatically replayed.
 Status events neither complete requests nor extend their deadlines.
 
+The line socket uses a 256 KiB buffer as well as a 256 KiB packet limit, so a
+status containing accumulated turn history is decoded as one JSON frame. This
+fixes fragmented status replies/events; it does not fix State timeouts or provide
+controller recovery. A retained directory must not be passed to `init` again.
+
+Private snapshot refreshes run every five seconds; explicit controls answer immediately.
+Flow retains hints and a ten-second reconciliation fallback. Link origins use an
+in-memory relation index rebuilt from the unchanged State ledger at startup, so
+retained turn history does not cause one full-ledger scan per displayed turn.
+
 Idle keeps renewing its lease; silence ends the turn after eight seconds; maximum
 duration is 120 seconds. Runtime replaces eligible ended turns using its existing
 behavior. Crash-once returns to active mode. Repeated crashes eventually trigger
@@ -96,4 +106,4 @@ JSON result for inspection. Run the bounded private integration proof with
 alongside mocked stop regressions, actual Client/probe peer fixtures and deterministic
 session deadline/bound tests. The latter start no Runtime or worker.
 
-<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0027).</sub>
+<sub>Written by an AI agent (Codex · GPT-6 · herdr-projects atlas · t-0030).</sub>
