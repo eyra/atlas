@@ -15,6 +15,9 @@ defmodule AtlasRuntime.Application do
     children =
       [
         {Registry, keys: :unique, name: AtlasRuntime.Turns},
+        AtlasRuntime.Output,
+        {AtlasRuntime.OutputEndpoint,
+         machine: Keyword.fetch!(AtlasRuntime.Settings.get(), :machine)},
         {DynamicSupervisor, name: AtlasRuntime.Supervisor, strategy: :one_for_one}
       ] ++ engine
 

@@ -382,8 +382,8 @@ defmodule AtlasRuntime.Agent.Claude do
   def handle_info({port, {:data, {:eol, line}}}, %{port: port} = state) do
     line = state.partial <> line
     IO.write(state.log, line <> "\n")
-    {what, result} = event(line)
-    send(state.turn_pid, {:agent, self(), {:activity, what}})
+    {what, result, output} = event(line)
+    AtlasRuntime.Agent.emit(state.turn_pid, what, output)
     {:noreply, %{state | partial: "", result: result || state.result}}
   end
 
@@ -413,32 +413,40 @@ defmodule AtlasRuntime.Agent.Claude do
 
   def terminate(_reason, _state), do: :ok
 
-  # One stream-json line: what it says it did, and its result when it is the last.
+  # Native lines stay in their existing artifact. Persisted activity is generic and
+  # the live projection admits only public assistant text and safe tool metadata.
   defp event(line) do
     case JSON.decode(line) do
-      {:ok, %{"type" => "result"} = event} ->
-        result = first_line(event["result"] || event["subtype"] || "done") <> cost(event)
-        {"result: #{result}", result}
+      {:ok, %{"type" => "result", "subtype" => "success", "result" => text} = event}
+      when is_binary(text) ->
+        result = first_line(text) <> cost(event)
+        {"claude: completed", result, [%{"kind" => "text", "text" => text}]}
+
+      {:ok, %{"type" => "result"}} ->
+        {"claude: finished", "Claude finished", []}
 
       {:ok, %{"type" => "assistant", "message" => %{"content" => content}}}
       when is_list(content) ->
-        {Enum.map_join(content, "; ", &part/1), nil}
-
-      {:ok, %{"type" => type}} ->
-        {type, nil}
+        {"claude: assistant activity", nil, Enum.flat_map(content, &part/1)}
 
       _ ->
-        {short(line), nil}
+        {"claude: activity", nil, []}
     end
   end
 
-  defp part(%{"type" => "tool_use", "name" => name, "input" => %{"command" => command}}),
-    do: "#{name}: #{short(command)}"
+  defp part(%{"type" => "tool_use", "name" => name}),
+    do: [
+      %{
+        "kind" => "tool",
+        "tool_name" => AtlasRuntime.Agent.tool_name(name),
+        "status" => "started"
+      }
+    ]
 
-  defp part(%{"type" => "tool_use", "name" => name}), do: name
-  defp part(%{"type" => "text"}), do: "text"
-  defp part(%{"type" => type}), do: type
-  defp part(_), do: "output"
+  defp part(%{"type" => "text", "text" => text}) when is_binary(text),
+    do: [%{"kind" => "text", "text" => text}]
+
+  defp part(_), do: []
 
   # What Claude Code says the turn cost, kept with its result.
   defp cost(%{"total_cost_usd" => usd}) when is_number(usd),

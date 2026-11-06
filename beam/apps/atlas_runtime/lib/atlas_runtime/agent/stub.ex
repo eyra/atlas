@@ -52,7 +52,7 @@ defmodule AtlasRuntime.Agent.Stub do
         {:stop, :normal, state}
 
       "idle" ->
-        send(state.turn_pid, {:agent, self(), {:activity, "idle"}})
+        AtlasRuntime.Agent.emit(state.turn_pid, "idle")
         Process.send_after(self(), :look, @look)
         {:noreply, state}
 
@@ -62,7 +62,7 @@ defmodule AtlasRuntime.Agent.Stub do
 
       _active ->
         n = state.n + 1
-        send(state.turn_pid, {:agent, self(), {:activity, "stub step #{n}"}})
+        AtlasRuntime.Agent.emit(state.turn_pid, "stub step #{n}")
         Process.send_after(self(), :look, @look)
         {:noreply, %{state | n: n}}
     end

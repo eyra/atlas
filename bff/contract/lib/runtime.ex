@@ -204,6 +204,31 @@ defmodule AtlasBFFContract.Runtime do
     field :attempt, :string
   end
 
+  # Ephemeral output is exact-attempt scoped; it never uses a State position.
+  defmodel :runtime_output_stream do
+    field :execution, :runtime_execution, required: true
+    field :epoch, :string, required: true
+    field :first_sequence, :integer, required: true
+    field :watermark, :integer, required: true
+    # Producer closure, not authoritative completion of the worker.
+    field :ended, :boolean, required: true
+  end
+
+  defmodel :runtime_output_event do
+    field :sequence, :integer, required: true
+    field :kind, :string, required: true
+    field :text, :string
+    field :tool_name, :string
+    field :status, :string
+  end
+
+  defmodel :runtime_output_reset do
+    field :reason, :string, required: true
+    # Inclusive known loss interval; omitted when a previous epoch's tail is unknown.
+    field :from_sequence, :integer
+    field :to_sequence, :integer
+  end
+
   defmodel :runtime_controls do
     field :status, :boolean, required: true
     field :start, :boolean, required: true
@@ -432,6 +457,60 @@ defmodule AtlasBFFContract.Runtime do
         }
       ]
   )
+
+  @output_operations [
+    {:runtime_output_snapshot, %{}, %{"cursor" => :string},
+     %{"stream" => :runtime_output_stream, "cursor" => :string}},
+    {:runtime_output_read, %{"cursor" => :string}, %{},
+     %{
+       "stream" => :runtime_output_stream,
+       "events" => {:list, :runtime_output_event},
+       "cursor" => :string,
+       "more" => :boolean
+     }}
+  ]
+
+  protocol(
+    for {name, required, optional, result} <- @output_operations do
+      %{
+        name: name,
+        channel: :runtime_output,
+        direction: :request,
+        request: %{
+          select: %{
+            "op" => Atom.to_string(name),
+            "channel" => "runtime_output",
+            "version" => @wire_version
+          },
+          required: Map.merge(required, %{"id" => :string, "execution" => :runtime_execution}),
+          optional: optional
+        },
+        replies: [
+          %{
+            name: :result,
+            effect: :complete,
+            select: %{
+              "op" => Atom.to_string(name) <> "_result",
+              "channel" => "runtime_output",
+              "version" => @wire_version
+            },
+            required: Map.put(result, "id", :string),
+            optional: %{"reset" => :runtime_output_reset}
+          },
+          %{
+            name: :error,
+            effect: :error,
+            select: %{
+              "op" => Atom.to_string(name) <> "_error",
+              "channel" => "runtime_output",
+              "version" => @wire_version
+            },
+            required: %{"id" => :string, "error" => :runtime_error}
+          }
+        ]
+      }
+    end
+  )
 end
 
 defmodule AtlasBFFContract.Runtime.Protocol do
@@ -457,4 +536,9 @@ end
 defmodule AtlasBFFContract.Runtime.AttachmentProtocol do
   @moduledoc "Generated execution-bound snapshot profile; not a guidance or lifecycle API."
   use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Runtime, channel: :runtime_attachment
+end
+
+defmodule AtlasBFFContract.Runtime.OutputProtocol do
+  @moduledoc "Bounded ephemeral output reads; no worker lifecycle or durable history writes."
+  use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Runtime, channel: :runtime_output
 end

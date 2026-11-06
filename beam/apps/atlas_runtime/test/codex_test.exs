@@ -41,8 +41,8 @@ defmodule AtlasRuntime.CodexTest do
       printf '%s\n' '{"type":"turn.completed"}'
       """)
 
-    assert_receive {:agent, ^pid, {:activity, "codex: child=" <> child}}, 5_000
-    child = String.trim(child)
+    assert_receive {:agent, ^pid, {:activity, "codex: item started"}}, 5_000
+    child = native_child(dir)
     on_exit(fn -> System.cmd("kill", ["-KILL", child], stderr_to_stdout: true) end)
     assert_receive {:agent, ^pid, {:ended, _}}, 5_000
     assert_dead(child)
@@ -81,7 +81,8 @@ defmodule AtlasRuntime.CodexTest do
       wait
       """)
 
-    assert_receive {:agent, ^pid, {:activity, "codex: child=" <> child}}, 5_000
+    assert_receive {:agent, ^pid, {:activity, "codex: item started"}}, 5_000
+    child = native_child(dir)
     assert :ok = Codex.stop(pid)
     refute Process.alive?(pid)
     assert_dead(String.trim(child))
@@ -119,7 +120,8 @@ defmodule AtlasRuntime.CodexTest do
 
     assert_receive {:adapter, adapter}, 5_000
     ref = Process.monitor(adapter)
-    assert_receive {:activity, "codex: child=" <> child}, 5_000
+    assert_receive {:activity, "codex: item started"}, 5_000
+    child = native_child(dir)
     Process.exit(owner, :kill)
     assert_receive {:DOWN, ^ref, :process, ^adapter, :normal}, 8_000
     assert_dead(String.trim(child))
@@ -174,6 +176,54 @@ defmodule AtlasRuntime.CodexTest do
     ref = Process.monitor(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, {:codex_failed, 1, nil}}, 5_000
     refute_received {:agent, ^pid, {:ended, _}}
+  end
+
+  test "only public assistant text and safe tool metadata leave the native stream", %{
+    tmp_dir: dir
+  } do
+    {:ok, pid} =
+      launch(dir, ~S"""
+      printf '%s\n' '{"type":"item.completed","item":{"type":"reasoning","text":"PRIVATE_REASONING"}}'
+      printf '%s\n' '{"type":"item.started","item":{"type":"command_execution","command":"PRIVATE_COMMAND","text":"PRIVATE_INPUT","status":"in_progress"}}'
+      printf '%s\n' '{"type":"item.completed","item":{"type":"command_execution","aggregated_output":"PRIVATE_RESULT","status":"completed"}}'
+      printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Public answer"}}'
+      printf '%s\n' '{"type":"turn.completed"}'
+      """)
+
+    assert_receive {:agent, ^pid, {:ended, "Public answer"}}, 5_000
+    messages = drain(pid)
+
+    assert {:output, %{"kind" => "text", "text" => "Public answer"}} in messages
+
+    assert {:output,
+            %{"kind" => "tool", "tool_name" => "command_execution", "status" => "started"}} in messages
+
+    assert {:output,
+            %{"kind" => "tool", "tool_name" => "command_execution", "status" => "completed"}} in messages
+
+    refute inspect(messages) =~ "PRIVATE_"
+    assert File.read!(Path.join([dir, "turns", @turn.key, "stream.jsonl"])) =~ "PRIVATE_REASONING"
+  end
+
+  defp drain(pid) do
+    receive do
+      {:agent, ^pid, message} -> [message | drain(pid)]
+    after
+      0 -> []
+    end
+  end
+
+  # Process cleanup probes use the private native artifact, not public activity.
+  defp native_child(dir) do
+    dir
+    |> Path.join("turns/#{@turn.key}/stream.jsonl")
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> hd()
+    |> JSON.decode!()
+    |> get_in(["item", "text"])
+    |> String.replace_prefix("child=", "")
+    |> String.trim()
   end
 
   defp assert_dead(pid) do
