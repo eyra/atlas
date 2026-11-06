@@ -1486,6 +1486,77 @@ defmodule AtlasControl.PagesTest do
     assert empty["rows"] == [] and empty["empty"] == "Nothing is held."
   end
 
+  test "open work exposes partial and total collection failures instead of authoritative rows" do
+    description =
+      put_in(@assigning, ["start", "open"], %{
+        "title" => "Open work",
+        "empty" => "Nothing is open."
+      })
+
+    visible =
+      kept("W-1", "Still open", "2026-11-03T12:00:00Z", "assigned")
+      |> Map.put("links", %{"kept_by" => ["ada"]})
+
+    success = %{"facts" => [visible]}
+
+    failed = %{
+      "error" => "Collection read failed",
+      "error_kind" => "answered",
+      "code" => "store_error"
+    }
+
+    for answers <- [[success, failed], [failed, success], [failed, failed]] do
+      page = Pages.render({:list, "widget"}, description, answers)
+      assert [%{"type" => "confirm", "props" => props}] = page.blocks
+      assert props["text"] =~ failed["error"]
+      assert props["code"] == "store_error"
+      refute Map.has_key?(props, "confirm_to")
+      refute JSON.encode!(page) =~ "Nothing is open."
+    end
+  end
+
+  test "open work recovery restores current rows and only successful emptiness shows the empty message" do
+    description =
+      put_in(@assigning, ["start", "open"], %{
+        "title" => "Open work",
+        "empty" => "Nothing is open."
+      })
+
+    failed = %{"error" => "Private backend unavailable", "error_kind" => "unreachable"}
+
+    assert [%{"type" => "confirm"}] =
+             Pages.render({:list, "widget"}, description, [failed, failed]).blocks
+
+    current =
+      kept("W-2", "Fresh work", "2026-11-03T13:00:00Z", "new assignment")
+      |> Map.put("links", %{"kept_by" => ["ada"]})
+
+    completed = Map.put(current, "completion", %{"done" => true})
+
+    recovered =
+      Pages.render({:list, "widget"}, description, [
+        %{"facts" => [current]},
+        %{"facts" => []}
+      ])
+
+    assert [
+             %{
+               "type" => "list",
+               "props" => %{"rows" => [%{"id" => "W-2", "label" => "Fresh work"}]}
+             }
+           ] =
+             recovered.blocks
+
+    empty =
+      Pages.render({:list, "widget"}, description, [
+        %{"facts" => [completed]},
+        %{"facts" => []}
+      ])
+
+    assert [%{"type" => "list", "props" => %{"rows" => [], "empty" => "Nothing is open."}}] =
+             empty.blocks
+  end
+
   # What to do (IS-Atlas-54): a flow on widgets, on their card; its state is the card's step.
   @todo @carded
         |> put_in(["entities", "card", "properties", "step"], %{"type" => "string"})

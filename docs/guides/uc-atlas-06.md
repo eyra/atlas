@@ -139,6 +139,8 @@ It is description, plus Control's list of the kind the start's relation starts a
 
 Control gathers Open work's unfiltered collection reads in one internal State request. Within that request, State reuses successful raw collection results when progress or completion needs the same collection again; pagination, enrichment and the complete page output stay unchanged. The data is discarded when the request ends, failed reads are not cached, and every later page request reads fresh data. This does not introduce a public protocol operation or a cross-request cache.
 
+If any required collection fails, Open work shows the existing unavailable page with the read error instead of a partial list or the empty-state message. Successful collections do not make the result complete. A later successful request restores the current rows; only a fully successful read can report that nothing is open.
+
 ### Try
 
 | Step | Keys / command | What you should see |

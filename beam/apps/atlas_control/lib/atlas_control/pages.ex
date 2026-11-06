@@ -774,22 +774,28 @@ defmodule AtlasControl.Pages do
 
   # Open work: the list of a kind the start's relation starts at, for everyone.
   defp open_work(description, kind, answers) do
-    rule = open_rule(description)
-    relation = assigned_rule(description)["relation"]
+    case Enum.find(answers, &match?(%{"error" => _}, &1)) do
+      nil ->
+        rule = open_rule(description)
+        relation = assigned_rule(description)["relation"]
 
-    rows =
-      for item <- open_facts(description, answers),
-          do: work_row(description, relation, item, true)
+        rows =
+          for item <- open_facts(description, answers),
+              do: work_row(description, relation, item, true)
 
-    list =
-      Blocks.list(
-        title: rule["title"] || plural(description["entities"][kind] || %{}, kind),
-        rows: rows,
-        empty: rule["empty"],
-        actions: []
-      )
+        list =
+          Blocks.list(
+            title: rule["title"] || plural(description["entities"][kind] || %{}, kind),
+            rows: rows,
+            empty: rule["empty"],
+            actions: []
+          )
 
-    page(rule["title"] || "", "/", [list])
+        page(rule["title"] || "", "/", [list])
+
+      failed ->
+        unavailable(failed, "/")
+    end
   end
 
   # What the fact's owner is expected to do: the value of the field a flow on its kind
