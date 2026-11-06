@@ -85,7 +85,6 @@ defmodule AtlasTui.PresentationTest do
       assert text =~ "Widgets · 2"
       assert text =~ "› W-01"
       assert text =~ "Second"
-      assert text =~ "title"
       assert text =~ "connected"
       for row <- rows, do: assert(Enum.sum(Enum.map(row, &String.length(elem(&1, 1)))) <= width)
       assert Enum.any?(rows, &Enum.any?(&1, fn {style, _} -> style == :border end))
@@ -224,46 +223,95 @@ defmodule AtlasTui.PresentationTest do
         updated: nil
     }
 
-    rows = View.render(m, width, 160, 5)
-    title = for row <- rows, {style, text} <- row, style == :selected, into: "", do: text
-
-    metadata =
-      for row <- rows,
-          {style, text} <- row,
-          style == :dim and String.starts_with?(text, "   "),
-          into: "",
-          do: text
-
-    {String.replace(title, ~r/[\s›A-Z0-9…]/u, ""), String.replace(metadata, ~r/\s/u, "")}
+    View.render(m, width, 160, 5)
   end
 
-  test "narrow bare and framed lists preserve entire title and metadata in reading order" do
-    label = "abcdefghijklmnopqrstuvwxyz"
-    detail = "lowercase metadata stays complete"
+  test "each item occupies one adjacent row with inline metadata and no separators" do
+    rows = View.render(model(), 110, 40, 5)
+    lines = String.split(View.plain(rows), "\n")
+    first = Enum.find_index(lines, &String.contains?(&1, "W-01"))
+    second = Enum.find_index(lines, &String.contains?(&1, "W-02"))
+    assert second == first + 1
+    assert Enum.at(lines, first) =~ "Descriptive"
+    assert Enum.at(lines, second) =~ "Second title"
+    assert Enum.at(lines, second) =~ "Another detail"
 
-    for {width, framed} <- [
-          {19, false},
-          {20, false},
-          {38, true},
-          {20, true},
-          {12, false},
-          {8, false},
-          {5, false}
-        ] do
-      {visible_title, visible_detail} = narrow_content(width, framed, label, detail)
-      assert visible_title == label, "#{width} columns framed=#{framed}"
-      assert visible_detail =~ String.replace(detail, " ", "")
+    assert Enum.any?(Enum.at(rows, first), fn {style, text} ->
+             style == :dim and String.contains?(text, "Descriptive")
+           end)
+  end
+
+  test "ID title and compact summary columns align without displaying provenance prose" do
+    m = model()
+    [list] = m.blocks
+
+    rows = [
+      %AtlasTui.Blocks.Row{
+        id: "I1",
+        label: "Short",
+        detail: "Test it · since yesterday · Flow: completed",
+        to: "/k/widget/one"
+      },
+      %AtlasTui.Blocks.Row{
+        id: "LONG-ID",
+        label: "界語é longer title",
+        detail: "Build it · 3/4 · since today · Assigned by someone",
+        to: "/k/widget/two"
+      },
+      %AtlasTui.Blocks.Row{id: nil, label: "No ID", detail: nil, to: "/k/widget/three"}
+    ]
+
+    rendered = View.render(%{m | blocks: [%{list | rows: rows}]}, 90, 30, 5) |> View.plain()
+    lines = String.split(rendered, "\n")
+    first = Enum.find(lines, &String.contains?(&1, "Short"))
+    second = Enum.find(lines, &String.contains?(&1, "界語"))
+    third = Enum.find(lines, &String.contains?(&1, "No ID"))
+
+    column = fn line, text ->
+      line
+      |> String.split(text, parts: 2)
+      |> hd()
+      |> String.graphemes()
+      |> Enum.sum_by(&if(&1 in ["界", "語"], do: 2, else: 1))
+    end
+
+    assert column.(first, "Short") == column.(second, "界語")
+    assert column.(first, "Short") == column.(third, "No ID")
+    assert column.(first, "Test it") == column.(second, "Build it")
+    assert second =~ "Build it · 3/4"
+    refute rendered =~ "since"
+    refute rendered =~ "Flow:"
+    refute rendered =~ "Assigned by someone"
+  end
+
+  test "narrow and framed items stay single-line without splitting wide or combining graphemes" do
+    for framed <- [false, true],
+        width <- if(framed, do: 8..40, else: 1..40) do
+      rows = narrow_content(width, framed, String.duplicate("界語é❤️1️⃣", 20), "meta\nstatus")
+      selected = Enum.filter(rows, &Enum.any?(&1, fn {style, _} -> style == :selected end))
+      assert length(selected) == 1
+      assert View.plain(selected) =~ "›"
+
+      for row <- rows do
+        text = Enum.map_join(row, &elem(&1, 1))
+        refute text =~ "\n"
+        assert String.valid?(text)
+
+        cells =
+          text
+          |> String.graphemes()
+          |> Enum.sum_by(&if(&1 in ["界", "語", "❤️", "1️⃣"], do: 2, else: 1))
+
+        assert cells <= width
+      end
     end
   end
 
-  test "narrow wrapping preserves multibyte and combining graphemes" do
-    label = "éàñøüéíçáößőűæœ"
-    detail = "éàñøü éíçáöß őűæœ"
-
-    for {width, framed} <- [{19, false}, {20, true}, {8, false}] do
-      {visible_title, visible_detail} = narrow_content(width, framed, label, detail)
-      assert visible_title == label
-      assert visible_detail =~ String.replace(detail, " ", "")
-    end
+  test "embedded whitespace in item labels and metadata cannot create extra terminal rows" do
+    rows = narrow_content(100, false, "first\nsecond\ttitle", "status\r\nmetadata")
+    [selected] = Enum.filter(rows, &Enum.any?(&1, fn {style, _} -> style == :selected end))
+    text = Enum.map_join(selected, &elem(&1, 1))
+    assert text =~ "first second title"
+    assert text =~ "status metadata"
   end
 end

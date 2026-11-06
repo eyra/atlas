@@ -754,20 +754,6 @@ defmodule AtlasTuiTest do
     end
   end
 
-  test "Console preserves complete long row details beneath their labels" do
-    long = "Test it · since 3 Nov 14:20 · all 12 parts are completed, and Melle can test it now"
-
-    page =
-      @list
-      |> Map.put("count", "2 assigned to you")
-      |> put_in(["blocks", Access.at(0), "props", "rows", Access.at(0), "detail"], long)
-
-    text = model(page) |> View.render(90, 20, 5) |> View.plain()
-    assert text =~ "all 12 parts are completed"
-    # Whole, under the row's label, not cut at the edge.
-    assert text =~ ~r/First\s*\n\s+Test it · since/
-  end
-
   test "the Console renderer covers the complete presentation catalogue" do
     schema = AtlasBFFContract.Blocks.__schema__()
     known = View.known()

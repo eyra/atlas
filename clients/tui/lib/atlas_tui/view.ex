@@ -328,7 +328,7 @@ defmodule AtlasTui.View do
   defp count(n, noun), do: "#{n} #{noun}#{if n == 1, do: "", else: "s"}"
 
   defp pad_line(line, width) do
-    used = line |> Enum.map(&String.length(elem(&1, 1))) |> Enum.sum()
+    used = Enum.reduce(line, 0, fn {_, text}, used -> used + display_width(text) end)
     line ++ [{:plain, String.duplicate(" ", max(width - used, 0))}]
   end
 
@@ -357,7 +357,7 @@ defmodule AtlasTui.View do
     lines =
       for line <- nodes(children, model, inner, room) do
         line = fit(line, inner)
-        used = line |> Enum.map(&String.length(elem(&1, 1))) |> Enum.sum()
+        used = Enum.reduce(line, 0, fn {_, text}, used -> used + display_width(text) end)
         [{:dim, " │"} | line] ++ [{:plain, String.duplicate(" ", inner - used)}, {:dim, "│"}]
       end
 
@@ -378,10 +378,9 @@ defmodule AtlasTui.View do
     badge ++ nodes(children, model, width, max(room - length(badge), 1))
   end
 
-  # Console rows retain their complete labels and metadata at narrow widths.
+  # One physical line per item; titles take priority over inline metadata.
   defp block(%ListBlock{} = list, at, model, width, _room) do
     rows = list.rows || []
-    inner = max(width - 4, 1)
 
     heading =
       if list.title do
@@ -407,41 +406,37 @@ defmodule AtlasTui.View do
         []
       end
 
+    prepared =
+      Enum.map(rows, fn row ->
+        {single_line(row.id), single_line(row.label), row_summary(row.detail)}
+      end)
+
+    {ids, titles, summaries} =
+      Enum.reduce(prepared, {0, 0, 0}, fn {id, title, summary}, {ids, titles, summaries} ->
+        {max(ids, display_width(id)), max(titles, display_width(title)),
+         max(summaries, display_width(summary))}
+      end)
+
+    marker_room = if width >= 3, do: 3, else: 1
+    available = max(width - marker_room, 0)
+    id_room = min(ids, min(div(available, 3), max(available - 3, 0)))
+    id_gap = if id_room > 0, do: 2, else: 0
+    available = max(available - id_room - id_gap, 0)
+    summary_room = if available >= 16, do: min(summaries, min(24, div(available, 3))), else: 0
+    summary_gap = if summary_room > 0, do: 2, else: 0
+    title_room = min(titles, max(available - summary_room - summary_gap, 0))
+
     content =
-      rows
+      prepared
       |> Enum.with_index()
-      |> Enum.map(fn {row, i} ->
-        selected = at + i == model.selected
-        style = if selected, do: :selected, else: :bold
-        marker = if selected, do: " › ", else: "   "
-        id = if row.id in [nil, ""], do: "", else: cut(row.id, max(div(inner, 3), 1)) <> "  "
-        prefix = marker <> id
-        stacked = String.length(prefix) >= width
-        label_prefix = if stacked, do: "", else: prefix
-        label_room = max(width - String.length(label_prefix), 1)
-        labels = list_wrap(row.label || "", label_room)
-
-        title =
-          labels
-          |> Enum.with_index()
-          |> Enum.map(fn {line, n} ->
-            prefix =
-              if n == 0,
-                do: label_prefix,
-                else: String.duplicate(" ", String.length(label_prefix))
-
-            [{style, prefix <> line}]
-          end)
-
-        indent = String.duplicate(" ", min(3, max(width - 1, 0)))
-
-        detail =
-          for line <- list_wrap(row.detail || "", width - String.length(indent)),
-              line != "",
-              do: [{:dim, indent <> line}]
-
-        identity = if stacked, do: Enum.map(list_wrap(prefix, width), &[{style, &1}]), else: []
-        identity ++ title ++ detail
+      |> Enum.map(fn {{id, title, summary}, i} ->
+        style = if at + i == model.selected, do: :selected, else: :bold
+        marker = if style == :selected, do: "›", else: " "
+        marker = if marker_room == 3, do: " " <> marker <> " ", else: marker
+        identity = if id_room > 0, do: cell_pad(id, id_room) <> "  ", else: ""
+        label = marker <> identity <> cell_pad(title, title_room)
+        metadata = cell_cut(summary, summary_room)
+        [{style, label}] ++ if(metadata == "", do: [], else: [{:dim, "  " <> metadata}])
       end)
 
     indent = String.duplicate(" ", min(3, max(width - 1, 0)))
@@ -450,10 +445,7 @@ defmodule AtlasTui.View do
       for line <- list_wrap(list.empty || "Nothing here.", width - String.length(indent)),
           do: [{:dim, indent <> line}]
 
-    separator = [[{:border, " " <> String.duplicate("─", max(width - 2, 0))}]]
-
-    heading ++
-      if(rows == [], do: empty, else: content |> Enum.intersperse(separator) |> Enum.concat())
+    heading ++ if(rows == [], do: empty, else: content)
   end
 
   # Values keep their line breaks and blank lines; a heading line (`#`) is bold.
@@ -856,8 +848,8 @@ defmodule AtlasTui.View do
   defp fit(segments, width) do
     {fitted, _} =
       Enum.reduce(segments, {[], width}, fn {style, text}, {acc, left} ->
-        text = String.slice(text, 0, max(left, 0))
-        {[{style, text} | acc], left - String.length(text)}
+        text = cell_take(text, max(left, 0))
+        {[{style, text} | acc], left - display_width(text)}
       end)
 
     Enum.reverse(fitted)
@@ -865,9 +857,62 @@ defmodule AtlasTui.View do
 
   defp pad(text, n), do: String.pad_trailing(String.slice(text, 0, n), n)
 
-  # Text no longer than `n`, ending in "…" when it had to be cut.
-  defp cut(text, n) do
-    if String.length(text) > n, do: String.slice(text, 0, max(n - 1, 0)) <> "…", else: text
+  defp single_line(nil), do: ""
+  defp single_line(text), do: text |> String.replace(~r/\s+/u, " ") |> String.trim()
+
+  # Control appends provenance as " · since …", followed by the cause. Keep the
+  # supplied summary (including owner/progress) without inferring workflow state.
+  # The complete detail stays in the model and the item's detail presentation.
+  defp row_summary(nil), do: ""
+
+  defp row_summary(detail) do
+    case :binary.match(detail, " · since ") do
+      {at, _} -> detail |> binary_part(0, at) |> single_line()
+      :nomatch -> single_line(detail)
+    end
+  end
+
+  defp cell_pad(text, width) do
+    text = cell_cut(text, width)
+    text <> String.duplicate(" ", max(width - display_width(text), 0))
+  end
+
+  # Use the same native cell widths as OTP's terminal driver, keeping grapheme
+  # clusters intact. Joined emoji may reserve extra cells rather than overflow.
+  defp display_width(text), do: display_width(text, 0)
+  defp display_width("", width), do: width
+
+  defp display_width(text, width) do
+    {grapheme, rest} = String.next_grapheme(text)
+    display_width(rest, width + grapheme_width(grapheme))
+  end
+
+  defp grapheme_width(grapheme) do
+    {width, emoji} =
+      for <<cp::utf8 <- grapheme>>, reduce: {0, false} do
+        {width, emoji} -> {width + :prim_tty.npwcwidth(cp), emoji or cp in [0xFE0F, 0x20E3]}
+      end
+
+    if emoji, do: max(width, 2), else: width
+  end
+
+  defp cell_cut(_text, width) when width <= 0, do: ""
+
+  defp cell_cut(text, width) do
+    taken = cell_take(text, width)
+    if byte_size(taken) == byte_size(text), do: text, else: cell_take(taken, width - 1) <> "…"
+  end
+
+  defp cell_take(text, width), do: binary_part(text, 0, cell_bytes(text, width, 0))
+  defp cell_bytes("", _width, bytes), do: bytes
+
+  defp cell_bytes(text, width, bytes) do
+    {grapheme, rest} = String.next_grapheme(text)
+    cells = grapheme_width(grapheme)
+
+    if cells <= width,
+      do: cell_bytes(rest, width - cells, bytes + byte_size(grapheme)),
+      else: bytes
   end
 
   @doc "A link's origin in a line: `since 3 Nov 15:10 · by melle · why`; empty without one."

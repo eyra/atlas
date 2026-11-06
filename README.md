@@ -70,9 +70,15 @@ run `ATLAS_NO_UPDATE=1 bin/atlas tui --env test` from this checkout.
 
 ### Console presentation (UC-Atlas-44)
 
-Console lists use bordered title/count headings, bold row titles, muted metadata,
-thin separators and an explicit selected-row marker. Long titles and metadata wrap
-within the available width, including inside framed parts. Supplied highlight
+Console lists use bordered title/count headings and one terminal line per item:
+selection marker, aligned ID/title columns and a muted summary column sized once per
+list. There are no separator rows. The summary keeps supplied owner/status/progress
+text but omits Control's trailing ` · since …` provenance and cause; full explanations
+remain in item details. No workflow state is inferred. Long values truncate with an
+ellipsis; narrow widths prioritize identity/title and omit metadata when it cannot
+fit. This also applies inside References panes; item-detail fields and editor text
+retain their existing layout. Truncation preserves
+graphemes and budgets terminal cells for wide characters. Supplied highlight
 tones appear as labeled badges (`[OK]`, `[Pending]`, `[Error]`, `[Info]`); unknown
 tones retain their label without claiming a known status. The renderer never
 infers workflow status from a row's title or detail.
