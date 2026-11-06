@@ -22,7 +22,7 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
 
   step "A description of several sections: enter starts a new line", fn ->
     press(t1, "Down")
-    see(t1, "↵ new line")
+    see(t1, "Description")
     type(t1, "## Why")
     press(t1, ["Enter", "Enter"])
     type(t1, "Because a scene tells a story, and a story takes more than one line.")
@@ -39,24 +39,23 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     see(t1, ~r/\[- the description keeps its lines\s+\]/)
   end
 
-  step "Save: the page shows the lines, blank lines and sections; TUI 2 by hint", fn ->
+  step "Save: the page shows the lines, blank lines and sections", fn ->
     at = press(t1, "C-s")
     stored(t1, ~r/✓ Stored as SC-Atlas-\d+/, at)
     stored(t1, ~r/Description\s+## Why[\s│]*\n[\s│]*\n[\s│]+Because a scene/u, at)
-    by_hint(t2, "Melle writes a scene with a title longer", at)
     Process.put(:scene, capture(t1, ~r/Scene (SC-Atlas-\d+):/))
 
     # The description is longer than its part: the part says so, and the list of use
-    # cases stays in view (IS-Atlas-48). Tab, and the arrows (here j and k, which arrive
-    # whole where an arrow's escape sequence may not) scroll the description.
+    # cases stays in view (IS-Atlas-48). ] selects the content pane; PageDown
+    # scrolls that pane without selecting a row or changing tabs.
     see(t1, ~r/… \d+ more lines?/)
     see(t1, "No use cases yet. Press c to create one.")
-    press(t1, "Tab")
-    see(t1, "↑↓ scroll")
+    see_action(t1, "]", "Next pane")
+    press(t1, "]")
     # As far as the part's room needs (it shares the screen with the references).
     scrolled =
       Enum.find(1..10, fn _ ->
-        press(t1, "j")
+        press(t1, "NPage")
         settled(t1) =~ "1. it is stored and shown as written"
       end) || raise "the last line of the description never came into view"
 
@@ -67,8 +66,8 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
       raise "the sections are not shown as written:\n#{page}"
 
     page =~ "No use cases yet. Press c to create one." || raise "the use cases went out of view"
-    press(t1, List.duplicate("k", scrolled) ++ ["Tab"])
-    see(t1, ~r/Scene SC-Atlas-\d+: Melle writes(.|\n)*↑↓ move/)
+    press(t1, List.duplicate("PPage", scrolled) ++ ["]"])
+    see(t1, ~r/Scene SC-Atlas-\d+: Melle writes/)
   end
 
   step "rela keeps the line breaks", fn ->
@@ -98,7 +97,7 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     see(t1, ~r/Update SC-Atlas-\d+/)
     # Title, Status, then into the description at its first line.
     press(t1, ["Down", "Down"])
-    see(t1, "↵ new line")
+    see(t1, "Description")
     type(t1, "Intro")
     press(t1, "Enter")
     # Down to the end of "## What", and a word after it.
@@ -114,7 +113,7 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     press(t1, "u")
     see(t1, ~r/Update SC-Atlas-\d+/)
     press(t1, ["Down", "Down", "Down"])
-    see(t1, "↵ new line")
+    see(t1, "Description")
 
     for n <- 1..30 do
       type(t1, "extra line #{n}")

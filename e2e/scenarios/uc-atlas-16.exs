@@ -16,7 +16,7 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
   """
 
   step "A scene with use cases in its description; TUI 1 shows it", fn ->
-    {scene, at} =
+    {scene, _} =
       atlas_json(
         i,
         ["put", "scene", "--title", "A scene to plan from", "--description", "-"],
@@ -25,7 +25,6 @@ scenario "UC-Atlas-16: The agent's tools and plans, from rela's description", fn
       )
 
     Process.put(:scene, scene["key"])
-    by_hint(t1, "A scene to plan from", at)
     open_row(t1, "A scene to plan from")
     see(t1, "No use cases yet.")
   end

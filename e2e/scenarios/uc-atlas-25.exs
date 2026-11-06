@@ -8,8 +8,10 @@ scenario "UC-Atlas-25: See how far a scene and its use cases are", fn %{
                                                                       } ->
   key = fn args -> atlas_json(i, args) |> elem(0) |> Map.fetch!("key") end
   keys = fn -> Process.get(:uc25) end
-  # A row: its id first, then its title, then this detail at its end (IS-Atlas-57).
-  row = fn key, detail -> ~r/#{Regex.escape(key)}  .*  #{Regex.escape(detail)}\s*(│|$)/mu end
+  # Console cards show their detail beneath the id and title.
+  row = fn key, detail ->
+    ~r/#{Regex.escape(key)}  [^\n]*\n[\s│]+#{Regex.escape(detail)}\s*(│|$)/mu
+  end
 
   step "Lists show progress from the children: TUI 1 on a scene, TUI 2 on the scenes", fn ->
     scene = key.(["put", "scene", "--title", "A scene to follow"])
@@ -24,8 +26,9 @@ scenario "UC-Atlas-25: See how far a scene and its use cases are", fn %{
     # Both issues are new, so in Specification; a use case without issues shows its group.
     see(t1, row.(built, "Specification · 2/2"))
     see(t1, row.(empty, "Refine"))
-    refute_see(t1, ~r/#{Regex.escape(empty)}  .*Refine ·/u)
+    refute_see(t1, ~r/#{Regex.escape(empty)}  [^\n]*\n[\s│]+Refine ·/u)
     # The least far use case wins: the one still in Refine.
+    press(t2, "End")
     see(t2, row.(scene, "Refine · 1/2"))
   end
 

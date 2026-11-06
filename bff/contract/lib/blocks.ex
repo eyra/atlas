@@ -11,8 +11,9 @@ defmodule AtlasBFFContract.Blocks do
   `bff/targets/json/blocks.json` for clients in other languages.
   """
   use AtlasBFF.Schema
-  models_from(AtlasBFFContract.Runtime)
+  models_from(AtlasBFFContract.Workers)
   protocol(AtlasBFFContract.Runtime.__schema__().protocol)
+  protocol(AtlasBFFContract.Workers.__schema__().protocol)
 
   # 0.7.0: markup names meaning; part (main, related) replaces border and columns.
   # 0.8.0: a pair may carry its origin: the fact that set it (since, by, cause).
@@ -456,6 +457,9 @@ defmodule AtlasBFFContract.Blocks do
   # `_` for a kind and `_parent` for a relation are values a client that knows only keys
   # passes; Control resolves them from rela's description.
   defpage :home, "/"
+  defpage :workers, "/workers"
+  defpage :worker, "/workers/:machine/:worker/:turn/:attempt"
+  defpage :worker_guidance, "/workers/:machine/:worker/:turn/:attempt/guidance"
   defpage :kinds, "/_kinds"
   defpage :list, "/k/:kind"
   defpage :new, "/k/:kind/new"
@@ -486,6 +490,7 @@ defmodule AtlasBFFContract.Blocks do
   ]
 
   defendpoint :create, "/k/:kind/new", @submit
+  defendpoint :queue_worker_guidance, "/workers/:machine/:worker/:turn/:attempt/guidance", @submit
   defendpoint :create_under, "/k/:kind/new/:relation/:parent", @submit
   defendpoint :update, "/k/:kind/:key/edit", @submit
   defendpoint :delete, "/k/:kind/:key/delete", @submit

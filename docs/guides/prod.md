@@ -10,13 +10,27 @@ Prod runs on Fly (IS-Atlas-79, below), like test since IS-Atlas-26 (`docs/guides
 atlas
 ```
 
-The same as `atlas tui --env prod`. It opens the tunnel to prod's Control on Fly in the background (`fly proxy 7593:7591 -a eyra-atlas`, flyctl's WireGuard; flyctl must be logged in to organisation eyra), then a TUI. The header says `Atlas · prod` in white on red; test's header says `Atlas · test`, plain.
+The same as `atlas tui --env prod`. It opens the tunnel to prod's Control on Fly in the background (`fly proxy 7593:7591 -a eyra-atlas`, flyctl's WireGuard; flyctl must be logged in to organisation eyra), then Console. The header identifies the environment: `Atlas Console · prod` or `Atlas Console · test`.
 
 More:
 - `atlas status`: the tunnel, and both apps' machines, checks and deployed build (the image label `master-<commit>`).
 - `atlas logs`: the core's log on Fly; rela's is `fly logs -a eyra-atlas-rela`.
 - `atlas stop`, `atlas restart`: close or reopen this Mac's tunnel; prod keeps running on Fly.
 - `atlas env`: which environment a command works on.
+
+Before reusing or opening a tunnel, `atlas` sends a read-only Control hello through
+it. A local listening port alone is not enough: flyctl can keep that port open
+while its WireGuard tunnel or private DNS is unavailable. An unresponsive existing
+proxy is reopened; a new proxy must reach Control within a minute before a client
+starts. This changes only the local proxy, never the Fly machines or stored data,
+and never retries a client's write. `atlas status` reports an unavailable upstream
+separately from a closed tunnel.
+
+The probe proves transport, not State/rela health. An explicit hello refusal (for
+example an outdated client) also proves transport works; the client reports that
+refusal without a pointless proxy restart. Use `fly/smoke.sh prod` for read-only
+application checks. Persistent private-DNS or WireGuard failures still require
+Fly connectivity to recover; no public address is needed.
 
 **Prod runs master's build.** A merge to master deploys it (d-0014). A merge to develop changes this Mac's clients (the main clone follows develop) but not prod's core, so a new feature reaches prod only with the next merge to master. Control lets a client newer than itself in, and sends an older one away.
 

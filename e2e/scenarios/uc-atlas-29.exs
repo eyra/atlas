@@ -1,5 +1,5 @@
 # UC-Atlas-29, IS-Atlas-56: test a use case from My work, and answer. The answers are the
-# flow definition's (the state's todo.answers): on the page and in the footer, for its
+# flow definition's (the state's todo.answers): on the page and in the legend, for its
 # owner only. Accept is IS-Atlas-64's accepted_by, reused; Reject asks only for a note and
 # removes it, so Flow reads it as reopened: back to the coordinator, with the note.
 import AtlasE2E.Scenario
@@ -21,17 +21,8 @@ end
 # Back to the start page, Assigned to you: esc until it is there (a use case goes back to
 # its scene, a scene to the scenes, the scenes to the start).
 to_start = fn t ->
-  Enum.reduce_while(1..6, nil, fn _, _ ->
-    if settled(t) =~ ~r/Atlas · test.*\sAssigned to you$/m do
-      {:halt, :ok}
-    else
-      press(t, "Escape")
-      Process.sleep(700)
-      {:cont, nil}
-    end
-  end)
-
-  see(t, ~r/Atlas · test.*\sAssigned to you$/m)
+  start_page(t)
+  see_list(t, "Assigned to you")
 end
 
 scenario "UC-Atlas-29: Test a use case from My work: accept or reject", fn %{t1: t1, instance: i} ->
@@ -66,9 +57,9 @@ scenario "UC-Atlas-29: Test a use case from My work: accept or reject", fn %{t1:
     to_start.(t1)
     open_row(t1, "A use case to reject")
     see(t1, "Use case #{use_case}: A use case to reject")
-    # The answers, in the footer, from the flow definition.
-    see(t1, "f Reject")
-    see(t1, "a Accept")
+    # The answers, in the Console legend, from the flow definition.
+    see_action(t1, "f", "Reject")
+    see_action(t1, "a", "Accept")
     press(t1, "f")
     see(t1, "Reject #{use_case}")
     type(t1, "The footer is wrong")
@@ -77,7 +68,7 @@ scenario "UC-Atlas-29: Test a use case from My work: accept or reject", fn %{t1:
     shows.(i, use_case, "Expected", "Rework: The footer is wrong")
     shows.(i, use_case, "Assigned to", "coordinator")
     # No longer Melle's: no answers for him on it now.
-    gone(t1, "f Reject")
+    refute_action(t1, "f", "Reject")
   end
 
   step "Accept, from My work: done, and it leaves My work", fn ->

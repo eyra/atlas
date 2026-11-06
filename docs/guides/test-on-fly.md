@@ -19,6 +19,13 @@ atlas stop --env test       # closes this Mac's tunnel; test keeps running on Fl
 
 The tunnel is `fly proxy 7693:7691 -a eyra-atlas-test`, flyctl's WireGuard into test's network, running in the background like the core used to. It needs flyctl logged in to organisation eyra (`fly auth whoami`); nothing else on the Mac (no VPN, no root). Its files are in `~/.local/share/atlas/test-on-fly/`.
 
+Before passing the tunnel to a client, the launcher checks a read-only Control
+handshake, not only the local port. It reopens an unresponsive existing proxy and
+waits up to a minute for a new proxy to reach Control. `status` reports a broken
+upstream as unavailable even if flyctl still listens locally. This restarts no Fly
+machine and replays no client writes. A hello refusal is left to the client to
+report; a handshake alone does not prove State/rela health.
+
 `atlas up --env test` is gone: a merge to develop deploys test (CI job `deploy-test`, which runs `fly/deploy.sh test`):
 
 1. On rela's machine, on a copy of its data: does this build's description describe all of it? When it does not, nothing is deployed and test keeps its build; that data needs a migration first (below).
@@ -57,6 +64,23 @@ and CLI JSON errors. Human text and exit statuses stay the same. Clients that ig
 the optional field keep working; smoke fails closed if an older server drops the code.
 
 `atlas status --env test` shows the build as the image label `develop-<commit>`. Prod is deployed the same way from master: `docs/guides/prod.md`.
+
+## Test-only worker access
+
+The image derives `rela/atlas-test.json` from the canonical description and
+`fly/test/worker-access.json`. Only test's core selects it; production still selects
+`rela/atlas.json`, with no worker grants added. Test also exposes the generic Workers
+tab. Named actors `melle` and `releasewriter` may read and submit; `releaseviewer`
+may only read. All other actors remain denied. A listed actor must still exist in
+State; the grant does not create a person or authenticate a new identity.
+
+Test enables release RPC only on loopback (`atlas@localhost`, loopback EPMD and
+distribution sockets), reachable administratively through Fly SSH. This permits
+synthetic execution fixtures to use the real Bus/State admission path without
+exposing a remote Runtime writer endpoint or changing production distribution.
+Fixture scripts must first require `AtlasBus.environment() == "test"`, use distinct
+fixture keys and stop/end only their own synthetic turns. Immutable guidance and
+receipt evidence remains retained; no raw deletion bypass is used for cleanup.
 
 ## The secrets CI needs
 

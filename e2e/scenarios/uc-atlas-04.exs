@@ -59,8 +59,9 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
   step "o opens it in the browser, on its page and on its row in the issue", fn ->
     # Since IS-Atlas-83 an assignable fact also has h Hand to…; the link comes after the
     # actions (in test, `! Failures…` is the last of those, IS-Atlas-23).
-    see(t1, "d Delete pull request   h Hand to…")
-    see(t1, ~r/…   (! Failures…   )?o Open in browser/)
+    see_action(t1, "d", "Delete pull request")
+    see_action(t1, "h", "Hand to…")
+    see_action(t1, "o", "Open in browser")
     at = press(t1, "o")
     opened(i, url, at, 1)
     see(t1, "Opened #{url} in the browser")
@@ -68,7 +69,7 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
     press(t1, "Escape")
     see(t1, issue)
     see(t1, ~r/› .*#{Regex.escape(url)}/)
-    see(t1, "o Open in browser")
+    see_action(t1, "o", "Open in browser")
     at = press(t1, "o")
     opened(i, url, at, 2)
     see(t1, issue)
@@ -104,7 +105,7 @@ scenario "UC-Atlas-04: Link the pull requests of an issue", fn %{t1: t1, t2: t2,
     press(t1, "d")
     see(t1, "cannot be deleted")
     see(t1, ~r/still has 1 pull request\. Remove it first/)
-    press(t1, "Enter")
+    press(t1, "Escape")
     see(t1, issue)
   end
 

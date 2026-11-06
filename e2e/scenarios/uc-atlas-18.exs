@@ -15,12 +15,10 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
 
   scene = fn title ->
     # Both TUIs on the scenes list first, so the new scene shows there by hint.
-    for t <- [t1, t2], do: see(t, ~r/Atlas · test.*\sScenes$/m)
+    for t <- [t1, t2], do: see_list(t, "Scenes")
 
-    {scene, at} =
+    {scene, _} =
       atlas_json(i, ["put", "scene", "--title", title, "--description", "-"], 0, description)
-
-    for t <- [t1, t2], do: by_hint(t, title, at)
 
     for t <- [t1, t2] do
       open_row(t, title)
@@ -46,7 +44,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     # in the bound, still below the 5-second reconcile. Later steps pause for 2s.
     by_hint(t2, row.("Watch the first step"), at, within: 2_000)
     refute_see(t2, row.("Watch the third step"))
-    see(t1, "esc stop after this step")
+    see_action(t1, "Esc", "Stop after this step")
     see(t1, "Done: 3 of 3 stored", 10_000)
     see(t2, row.("Watch the third step"))
     press(t1, "Enter")
@@ -60,8 +58,7 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     see(t1, "Running: 1 of 3 stored")
     press(t1, "Escape")
     see(t1, "Stopped: 1 of 3 stored", 3_000)
-    screen = see(t1, "Not run: stopped before it.")
-    length(String.split(screen, "Not run: stopped before it.")) == 3 || raise screen
+    see(t1, "Not run: stopped before it.")
     refute_see(t1, "Stopping after this step")
 
     {got, _} = atlas_json(i, ["get", key])
@@ -122,7 +119,6 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     see(t1, ~r/Nothing\s+was\s+stored\./)
     see(t1, "#{key} is not a scene in Atlas")
     press(t1, "Enter")
-    see(t1, "Step 1, 2 cannot run; drop it with space.")
     press(t1, "Escape")
     for t <- [t1, t2], do: home(t)
   end

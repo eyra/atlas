@@ -90,7 +90,7 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
 
   step "Accepted: done; nothing is expected of anyone", fn ->
     %{use_case: use_case} = Process.get(:uc27)
-    see(t1, "a Accept", reconcile_wait)
+    see_action(t1, "a", "Accept", reconcile_wait)
     press(t1, "a")
     see(t1, "will be accepted by melle")
     at = press(t1, "y")
@@ -101,7 +101,7 @@ scenario "UC-Atlas-27: Flow moves a use case to Melle when all of it is done", f
 
   step "Reopened with a note: Rework, with the note", fn ->
     %{use_case: use_case} = Process.get(:uc27)
-    see(t1, "a Reopen")
+    see_action(t1, "a", "Reopen")
     press(t1, "a")
     see(t1, "Reopen #{use_case}")
     type(t1, "The footer is wrong")

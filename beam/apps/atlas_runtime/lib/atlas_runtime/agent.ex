@@ -10,8 +10,8 @@ defmodule AtlasRuntime.Agent do
   An agent that crashes is a process that exits abnormally; the turn monitors it. `stop/1`
   ends the agent's turn from Runtime's side (silent, too long, no longer the owner).
 
-  The ports: `stub` (`AtlasRuntime.Agent.Stub`, for tests and the end-to-end test) and
-  `claude` (`AtlasRuntime.Agent.Claude`, Claude Code headless, IS-Atlas-18).
+  The ports: `stub` (synthetic), `claude` (Claude Code headless), and `codex`
+  (official Codex CLI, one explicitly configured goal; read-only unless workspace-write is selected).
   """
 
   @doc "Start the agent for `turn` (`%{key, item, agent}`); messages go to the caller."
@@ -194,7 +194,11 @@ defmodule AtlasRuntime.Agent do
     _ -> false
   end
 
-  @ports %{"stub" => AtlasRuntime.Agent.Stub, "claude" => AtlasRuntime.Agent.Claude}
+  @ports %{
+    "stub" => AtlasRuntime.Agent.Stub,
+    "claude" => AtlasRuntime.Agent.Claude,
+    "codex" => AtlasRuntime.Agent.Codex
+  }
 
   @doc "The port a machine's settings name for an agent, or nil."
   def port(%{"port" => name}), do: @ports[name]

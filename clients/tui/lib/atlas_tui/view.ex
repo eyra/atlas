@@ -42,43 +42,16 @@ defmodule AtlasTui.View do
   def render(%Model{} = model, width, height, reconcile_seconds) do
     width = max(width, 1)
     height = max(height, 1)
-    # What waits for the user, on every page: Control's words for it.
-    count = if model.count, do: " · " <> model.count, else: ""
-
-    header = [
-      [
-        {env_style(model.env), " Atlas · #{model.env}"},
-        {:pending, count},
-        {:dim,
-         pad_left(
-           model.title <> " ",
-           width - 13 - String.length(model.env) - String.length(count)
-         )}
-      ],
-      [{:dim, String.duplicate("─", width)}]
-    ]
-
-    header = if model.console, do: AtlasTui.ConsoleView.header(model, width), else: header
-
-    # The footer: help (on more lines when it does not fit on one), a rule, the notice and
-    # the status line. A page longer than its room adds scrolling to the help.
-    room_for = fn help ->
-      max(height - length(header) - 3 - length(footer_help(model, help)), 1)
-    end
-
-    short = help_lines(help(model, false), width)
-    {lines, long} = laid_out(model, width, room_for.(short))
-    help = help_lines(help(model, long), width)
-    room = room_for.(help)
-
-    {lines, _} =
-      if room == room_for.(short), do: {lines, long}, else: laid_out(model, width, room)
+    header = AtlasTui.ConsoleView.header(model, width)
+    help = footer_help(model)
+    room = max(height - length(header) - 3 - length(help), 1)
+    {lines, _long} = laid_out(model, width, room)
 
     body = window(lines, model, room)
     body = body ++ Elixir.List.duplicate([], room - length(body))
 
     footer =
-      footer_help(model, help) ++
+      help ++
         [
           [{:dim, String.duplicate("─", width)}],
           console_notice(model),
@@ -96,13 +69,6 @@ defmodule AtlasTui.View do
       end)
 
   @doc "The screen as ANSI, ready to write from the top-left corner."
-  def to_ansi(lines, theme \\ :legacy)
-
-  def to_ansi(lines, :legacy) do
-    rows = Enum.map(lines, fn line -> [Enum.map(line, &segment/1), "\e[0m\e[K"] end)
-    ["\e[H", Enum.intersperse(rows, "\r\n"), "\e[J"]
-  end
-
   def to_ansi(lines, theme) do
     base = AtlasTui.Palette.ansi(:plain, theme)
 
@@ -119,23 +85,11 @@ defmodule AtlasTui.View do
     ["\e[H", Enum.intersperse(rows, "\r\n"), base, "\e[J"]
   end
 
-  # Prod stands out (white on red), so Melle never takes one environment for the other.
-  defp env_style("prod"), do: :prod
-  defp env_style(_env), do: :bold
-
-  defp segment({:plain, text}), do: ["\e[0m", text]
-  defp segment({:prod, text}), do: ["\e[0;1;97;41m", text]
-  defp segment({:bold, text}), do: ["\e[0;1m", text]
-  defp segment({:dim, text}), do: ["\e[0;2m", text]
-  defp segment({:border, text}), do: ["\e[0;2m", text]
-  defp segment({:selected, text}), do: ["\e[0;7m", text]
-  defp segment({:cursor, text}), do: ["\e[0;7m", text]
-  defp segment({:ok, text}), do: ["\e[0;32m", text]
-  defp segment({:error, text}), do: ["\e[0;31m", text]
-  defp segment({:pending, text}), do: ["\e[0;33m", text]
-  defp segment({:info, text}), do: ["\e[0;36m", text]
-
   # Body
+
+  defp body(%Model{console: %{expected: target, restoring: false}}, _width, _room)
+       when target != nil,
+       do: [[], [{:pending, " Loading…"}]]
 
   defp body(%Model{console: %{legend: legend}} = model, width, room) when legend != nil,
     do: AtlasTui.LegendView.render(model, width, room)
@@ -162,8 +116,8 @@ defmodule AtlasTui.View do
   # room exactly, each part scrolled on its own; a part that is cut says so itself.
   defp laid_out(model, width, room) do
     if model.connected and model.blocks != [] and model.plan == nil and
-         !(model.console && model.console.legend) and
-         Model.parts(model) != [],
+         model.console.legend == nil and
+         (model.console.expected == nil or model.console.restoring) and Model.parts(model) != [],
        do: parts(content(model), model, width, room),
        else: plain_layout(model, width, room)
   end
@@ -388,8 +342,8 @@ defmodule AtlasTui.View do
     |> Enum.concat()
   end
 
-  # Markup this TUI draws: a part as a box with its title, a section as a heading. It does
-  # not draw highlights yet; their blocks show as they are.
+  # Parts frame content; Console highlights retain the supplied semantic tone as
+  # a text badge as well as a color, without inferring status from entity text.
   defp markup(%Section{title: title}, children, model, width, room) do
     rule = String.duplicate("─", max(width - String.length(title) - 3, 0))
     [[{:bold, " " <> title}, {:dim, " " <> rule}], []] ++ nodes(children, model, width, room)
@@ -410,23 +364,48 @@ defmodule AtlasTui.View do
     [[{:dim, top}]] ++ lines ++ [[{:dim, " └" <> String.duplicate("─", inner) <> "┘"}]]
   end
 
-  defp markup(%Highlight{}, children, model, width, room),
-    do: nodes(children, model, width, room)
+  defp markup(%Highlight{tone: tone}, children, model, width, room) do
+    {style, label} =
+      case tone do
+        "ok" -> {:ok, "OK"}
+        "pending" -> {:pending, "Pending"}
+        "error" -> {:error, "Error"}
+        "info" -> {:info, "Info"}
+        other -> {:dim, other || "Status"}
+      end
 
-  # Rows in columns: the id (as wide as the list's longest), the label (the rest, cut
-  # with "…" only when it must be) and the detail (at most a third of the width).
-  defp block(%ListBlock{} = list, at, %{console: console} = model, width, _room)
-       when console != nil do
+    badge = for line <- list_wrap("[#{label}]", width), do: [{style, line}]
+    badge ++ nodes(children, model, width, max(room - length(badge), 1))
+  end
+
+  # Console rows retain their complete labels and metadata at narrow widths.
+  defp block(%ListBlock{} = list, at, model, width, _room) do
     rows = list.rows || []
     inner = max(width - 4, 1)
 
     heading =
-      if list.title,
-        do: [
-          [{:bold, " " <> list.title}, {:dim, " · #{length(rows)}"}],
-          [{:border, " " <> String.duplicate("─", max(width - 2, 0))}]
-        ],
-        else: []
+      if list.title do
+        title = list.title <> " · #{length(rows)}"
+
+        if width >= 5 do
+          inner = width - 4
+
+          lines =
+            for line <- list_wrap(title, inner),
+                do: [
+                  {:border, "│ "},
+                  {:bold, line},
+                  {:border, String.duplicate(" ", inner - String.length(line)) <> " │"}
+                ]
+
+          [[{:border, "┌" <> String.duplicate("─", width - 2) <> "┐"}]] ++
+            lines ++ [[{:border, "└" <> String.duplicate("─", width - 2) <> "┘"}]]
+        else
+          for line <- list_wrap(title, width), do: [{:bold, line}]
+        end
+      else
+        []
+      end
 
     content =
       rows
@@ -477,56 +456,6 @@ defmodule AtlasTui.View do
       if(rows == [], do: empty, else: content |> Enum.intersperse(separator) |> Enum.concat())
   end
 
-  defp block(%ListBlock{} = list, at, model, width, _room) do
-    rows = list.rows || []
-    id_width = rows |> Enum.map(&String.length(&1.id || "")) |> Enum.max(fn -> 0 end)
-    id_column = if id_width > 0, do: id_width + 2, else: 0
-    detail = rows |> Enum.map(&String.length(&1.detail || "")) |> Enum.max(fn -> 0 end)
-    detail_column = if detail > 0, do: min(detail, div(width, 3)) + 2, else: 0
-    label_width = max(width - 4 - id_column - detail_column, 12)
-
-    rows =
-      case list.rows do
-        [] ->
-          # What fills an empty list may take more than a line: it wraps.
-          for line <- Text.wrap(list.empty || "Nothing here.", width - 4),
-              do: [{:dim, "   " <> line}]
-
-        rows ->
-          rows
-          |> Enum.with_index()
-          |> Enum.flat_map(fn {row, i} ->
-            selected = at + i == model.selected
-            style = if selected, do: :selected, else: :plain
-            marker = if selected, do: " › ", else: "   "
-
-            id = if id_column > 0, do: pad(row.id || "", id_width) <> "  ", else: ""
-            label = {style, marker <> id <> pad(cut(row.label, label_width), label_width)}
-            dim = if selected, do: :selected, else: :dim
-
-            # A detail longer than its column (why a fact is yours, say) goes under the
-            # label, whole, rather than cut at the edge.
-            if row.detail && String.length(row.detail) > detail_column - 2 do
-              indent = String.duplicate(" ", 3 + id_column)
-
-              [
-                [label]
-                | for(
-                    line <- Text.wrap(row.detail, width - 4 - id_column),
-                    do: [{:dim, indent <> line}]
-                  )
-              ]
-              |> List.update_at(0, &(&1 ++ [{dim, ""}]))
-            else
-              [[label, {dim, if(row.detail, do: "  " <> row.detail, else: "")}]]
-            end
-          end)
-      end
-
-    # A list in a section leaves its title to the section.
-    if list.title, do: [[{:bold, " " <> list.title}], []] ++ rows, else: rows
-  end
-
   # Values keep their line breaks and blank lines; a heading line (`#`) is bold.
   defp block(%Item{} = item, _at, _model, width, _room) do
     fields =
@@ -565,20 +494,9 @@ defmodule AtlasTui.View do
   end
 
   defp block(%Confirm{} = confirm, _at, _model, width, _room) do
-    choices =
-      if confirm.confirm_to,
-        do: [
-          [
-            {:plain, "   "},
-            {:error, "[y] #{confirm.confirm_label || "Yes"}"},
-            {:plain, "   [n] Cancel"}
-          ]
-        ],
-        else: [[{:plain, "   [enter] Back"}]]
-
     title(confirm.title, width) ++
       [[]] ++
-      Enum.map(Text.wrap(confirm.text, width - 4), &[{:plain, "   " <> &1}]) ++ [[]] ++ choices
+      Enum.map(Text.wrap(confirm.text, width - 4), &[{:plain, "   " <> &1}])
   end
 
   # An agent's plan: what was asked, what it says, and each step with the values of the
@@ -878,103 +796,19 @@ defmodule AtlasTui.View do
 
   # Footer
 
-  # The help, or the request line while `:` is open.
-  defp footer_help(%Model{console: %{legend: legend}}, _help) when legend != nil, do: []
+  defp footer_help(%Model{console: %{expected: target, restoring: false}})
+       when target != nil,
+       do: []
 
-  defp footer_help(%Model{console: console, ask: text}, _help)
-       when console != nil and is_binary(text),
-       do: [[{:bold, " Request "}, {:plain, text}, {:cursor, " "}]]
+  defp footer_help(%Model{console: %{legend: legend}}) when legend != nil, do: []
 
-  defp footer_help(%Model{console: console} = model, _help) when console != nil,
-    do: AtlasTui.LegendView.affordance(model)
+  defp footer_help(%Model{ask: text}) when is_binary(text),
+    do: [[{:bold, " Request "}, {:plain, text}, {:cursor, " "}]]
 
-  defp footer_help(%Model{ask: text}, _help) when is_binary(text),
-    do: [
-      [{:bold, " : "}, {:plain, text}, {:cursor, " "}, {:dim, "   ↵ ask the agent   esc close"}]
-    ]
-
-  defp footer_help(_model, help), do: Enum.map(help, &[{:dim, " " <> &1}])
-
-  defp help(%Model{console: console}, _long) when console != nil, do: ""
-
-  defp help(model, long) do
-    cond do
-      not model.connected ->
-        "q quit"
-
-      Model.step_form(model) && multiline_focused?(model) ->
-        "↵ new line   ↑↓←→ move   tab next field   ctrl-s keep   esc back to the plan"
-
-      Model.step_form(model) ->
-        "↑↓ move   type to edit   ctrl-s keep   esc back to the plan"
-
-      plan = model.plan ->
-        plan_help(plan)
-
-      Model.form(model) && multiline_focused?(model) ->
-        "↵ new line   ↑↓←→ move   tab next field   ctrl-s save   esc cancel"
-
-      Model.form(model) ->
-        "↑↓ move   ←→ choose   type to edit   ↵ next   ctrl-s save   esc cancel"
-
-      confirm = Model.confirm(model) ->
-        if confirm.confirm_to, do: "y confirm   n cancel", else: "↵ back"
-
-      true ->
-        Enum.map_join(Model.actions(model) ++ Model.links(model), "   ", &"#{&1.key} #{&1.label}") <>
-          nav(model, long)
-    end
-  end
-
-  defp plan_help(%Plan{state: "planning"}), do: "esc cancel"
-
-  defp plan_help(%Plan{state: "proposed", steps: []}), do: ": ask again   esc close"
-
-  defp plan_help(%Plan{state: "proposed"}),
-    do:
-      "↑↓ move   space keep/drop   e edit   ↵ run the kept steps   : change the request   esc cancel"
-
-  defp plan_help(%Plan{state: "running"}), do: "esc stop after this step"
-  defp plan_help(%Plan{}), do: "↵ close   : ask again   q quit"
-
-  # The help's entries ("key what", three spaces apart) on as many lines as they need;
-  # an entry is never split.
-  defp help_lines(help, width) do
-    help
-    |> String.split("   ", trim: true)
-    |> Enum.reduce([], fn
-      entry, [] ->
-        [entry]
-
-      entry, [line | done] ->
-        if String.length(line <> "   " <> entry) < width,
-          do: [line <> "   " <> entry | done],
-          else: [entry, line | done]
-    end)
-    |> Enum.reverse()
-  end
-
-  defp multiline_focused?(model) do
-    items = Model.focusable(Model.step_form(model) || Model.form(model))
-    match?(%Input{kind: "multiline"}, Enum.at(items, min(model.focus, length(items) - 1)))
-  end
+  defp footer_help(model), do: AtlasTui.LegendView.affordance(model)
 
   defp cursor_line?(line), do: Enum.any?(line, &match?({:cursor, _}, &1))
   defp selected_line?(line), do: Enum.any?(line, &match?({:selected, _}, &1))
-
-  defp nav(model, long) do
-    move =
-      cond do
-        Model.parts(model) != [] and not Model.selecting?(model) -> "   ↑↓ scroll   ↵ open"
-        Model.list(model) -> "   ↑↓ move   ↵ open"
-        true -> ""
-      end
-
-    move = if Model.parts(model) != [], do: move <> "   tab next part", else: move
-    move = if long, do: move <> "   pgup/pgdn scroll", else: move
-    back = if model.back, do: "   esc back", else: ""
-    move <> "   r refresh   : ask" <> back <> "   q quit"
-  end
 
   defp notice(%Model{notice: nil}), do: []
 
@@ -1035,8 +869,6 @@ defmodule AtlasTui.View do
   defp cut(text, n) do
     if String.length(text) > n, do: String.slice(text, 0, max(n - 1, 0)) <> "…", else: text
   end
-
-  defp pad_left(text, n), do: String.pad_leading(text, max(n, 0))
 
   @doc "A link's origin in a line: `since 3 Nov 15:10 · by melle · why`; empty without one."
   def origin_text(nil), do: ""

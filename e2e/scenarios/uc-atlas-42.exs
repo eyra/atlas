@@ -1,4 +1,4 @@
-# IS-Atlas-119: a native shell beside two unchanged legacy TUIs, on private stubs.
+# IS-Atlas-119: native boot and two Console TUIs, on private stubs.
 import AtlasE2E.Scenario
 
 scenario "UC-Atlas-42: Boot returns a native configured shell without navigating", fn ctx ->
@@ -36,11 +36,25 @@ scenario "UC-Atlas-42: Boot returns a native configured shell without navigating
     socket
   end
 
-  step "Two legacy TUIs still browse and the existing CLI still reads", fn ->
-    see(t1, "Atlas · test")
-    see(t2, "Atlas · test")
+  step "Two Console TUIs browse and the existing CLI still reads", fn ->
+    see(t1, "Atlas Console · test")
+    see(t2, "Atlas Console · test")
     {kinds, _} = atlas_json(i, ["help"])
     is_list(kinds) || raise inspect(kinds)
+  end
+
+  step "The real TUIs cycle Console tabs and return to Scenes", fn ->
+    for t <- [t1, t2] do
+      see(t, "▸ Scenes")
+      press(t, "Tab")
+      see(t, "▸ Open work")
+      see_list(t, "Open work")
+      ready(t)
+      press(t, "BTab")
+      see(t, "▸ Scenes")
+      see_list(t, "Scenes")
+      ready(t)
+    end
   end
 
   socket = connect.()
@@ -101,8 +115,8 @@ scenario "UC-Atlas-42: Boot returns a native configured shell without navigating
         :gen_tcp.close(other)
       end
 
-      see(t1, "Atlas · test")
-      see(t2, "Atlas · test")
+      see(t1, "Atlas Console · test")
+      see(t2, "Atlas Console · test")
     end
   after
     :gen_tcp.close(socket)

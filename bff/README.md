@@ -189,4 +189,19 @@ client-before-server deployment is needed for this slice. Deployments still go
 through coordinator review. A later version bump must distribute compatible
 clients before advancing Control, since older versions are refused at hello.
 
+### Worker Control contract
+
+`contract/lib/workers.ex` adds versioned worker inspection, exact-turn guidance,
+query, history and receipt messages on the Control channel. It reuses Runtime's
+execution identity; `Blocks` imports both protocols and their models. Existing
+list/item/form blocks implement the worker pages, so the block wire version remains
+0.14.0; typed worker messages independently require version 0.1.0.
+
+Generate with the same `mix atlas.gen` command. Named actor grants, durable outcome
+semantics, bounds, generic-page limits and the outstanding Runtime integration are
+documented in [the guidance contract](../docs/contracts/guidance.md#control-worker-access-and-guidance).
+
+
 <sub>Written by an AI agent (Codex · GPT-6 · herdr-projects atlas · t-0026).</sub>
+
+<sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>

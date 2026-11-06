@@ -47,7 +47,7 @@ defmodule Mix.Tasks.Atlas.E2e do
         t2 = Tui.start(instance, socket, "tui2", "TUI 2")
 
         for t <- [t1, t2], do: AtlasE2E.Scenario.ready(t, 120_000)
-        for t <- [t1, t2], do: AtlasE2E.Scenario.see(t, "Atlas · test")
+        for t <- [t1, t2], do: AtlasE2E.Scenario.see(t, "Atlas Console · test")
         settle_disk()
 
         Enum.reduce_while(scenarios, :ok, fn {file, scenario}, :ok ->

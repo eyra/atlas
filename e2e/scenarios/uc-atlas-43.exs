@@ -1,4 +1,4 @@
-# IS-Atlas-120: real Control projections beside unchanged legacy TUIs, private stubs only.
+# IS-Atlas-120: real Control projections and Console TUIs, private stubs only.
 import AtlasE2E.Scenario
 
 scenario "UC-Atlas-43: Console actions are scoped typed blocks and share ordinary authority",
@@ -33,7 +33,7 @@ scenario "UC-Atlas-43: Console actions are scoped typed blocks and share ordinar
              ])
 
            try do
-             step "Console acknowledges a real projection while legacy TUIs keep browsing", fn ->
+             step "Console acknowledges a real projection while Console TUIs keep browsing", fn ->
                send_message.(
                  s,
                  ConsoleActionProtocol.message(:hello, :hello,
@@ -46,8 +46,8 @@ scenario "UC-Atlas-43: Console actions are scoped typed blocks and share ordinar
 
                %{"op" => "welcome", "surface" => "console"} = read.(s)
                {:ok, _} = AtlasBFFContract.Console.compile(page.(s))
-               see(t1, "Atlas · test")
-               see(t2, "Atlas · test")
+               see(t1, "Atlas Console · test")
+               see(t2, "Atlas Console · test")
              end
 
              step "Declared keys bind the same scoped blocks grouped by legend markup", fn ->
@@ -102,8 +102,8 @@ scenario "UC-Atlas-43: Console actions are scoped typed blocks and share ordinar
                stored = page.(s)
                stored["reason"] == "stored" || raise inspect(stored)
                {:ok, _} = AtlasBFFContract.Console.compile(stored)
-               see(t1, "Atlas · test")
-               see(t2, "Atlas · test")
+               see(t1, "Atlas Console · test")
+               see(t2, "Atlas Console · test")
              end
            after
              :gen_tcp.close(s)

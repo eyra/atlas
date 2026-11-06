@@ -211,6 +211,49 @@
     },
     {
       "call": "open",
+      "name": "workers",
+      "page": "workers",
+      "params": [],
+      "path": "/workers",
+      "replies": {
+        "page": "view model"
+      },
+      "wire": "open"
+    },
+    {
+      "call": "open",
+      "name": "worker",
+      "page": "worker",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt",
+      "replies": {
+        "page": "view model"
+      },
+      "wire": "open"
+    },
+    {
+      "call": "open",
+      "name": "worker_guidance",
+      "page": "worker_guidance",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt/guidance",
+      "replies": {
+        "page": "view model"
+      },
+      "wire": "open"
+    },
+    {
+      "call": "open",
       "name": "kinds",
       "page": "kinds",
       "params": [],
@@ -408,6 +451,23 @@
         "kind"
       ],
       "path": "/k/:kind/new",
+      "replies": {
+        "refused": "view model",
+        "stored": "view model"
+      },
+      "takes": "values",
+      "wire": "submit"
+    },
+    {
+      "call": "submit",
+      "name": "queue_worker_guidance",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt/guidance",
       "replies": {
         "refused": "view model",
         "stored": "view model"
@@ -1205,6 +1265,341 @@
     {
       "fields": [
         {
+          "name": "harness",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "harness_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "configured_model",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "reported_model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "capability_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "queued_input",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "durable_accept_query",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "consumption_evidence",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "worker_descriptor"
+    },
+    {
+      "fields": [
+        {
+          "name": "available",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "worker_guidance_availability"
+    },
+    {
+      "fields": [
+        {
+          "name": "execution",
+          "required": true,
+          "type": "runtime_execution"
+        },
+        {
+          "name": "descriptor",
+          "required": true,
+          "type": "worker_descriptor"
+        },
+        {
+          "name": "item",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "item_title",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "item_to",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "activity",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "activity_at",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "lease_until",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "outcome",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "confirmed_at",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "guidance",
+          "required": true,
+          "type": "worker_guidance_availability"
+        }
+      ],
+      "name": "worker_view"
+    },
+    {
+      "fields": [
+        {
+          "name": "client_key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "cause",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "worker_guidance_input"
+    },
+    {
+      "fields": [
+        {
+          "name": "proven",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "uncertain",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "closures",
+          "required": true,
+          "type": "list of string"
+        }
+      ],
+      "name": "worker_receipt_projection"
+    },
+    {
+      "fields": [
+        {
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "actor",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "client_key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "body_digest",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "worker",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "mode",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "execution",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "cause",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_at",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_position",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "projection",
+          "required": true,
+          "type": "worker_receipt_projection"
+        },
+        {
+          "name": "receipt_count",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "name": "worker_interaction"
+    },
+    {
+      "fields": [
+        {
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "interaction",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "worker",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "execution",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "stage",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "evidence_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "cause",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "writer",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_at",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_position",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "admission_id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "consumption_id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "worker_receipt"
+    },
+    {
+      "fields": [
+        {
           "name": "label",
           "required": true,
           "type": "string"
@@ -1718,6 +2113,34 @@
       "name": "home",
       "params": [],
       "path": "/",
+      "returns": "view model"
+    },
+    {
+      "name": "workers",
+      "params": [],
+      "path": "/workers",
+      "returns": "view model"
+    },
+    {
+      "name": "worker",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt",
+      "returns": "view model"
+    },
+    {
+      "name": "worker_guidance",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt/guidance",
       "returns": "view model"
     },
     {
@@ -2795,6 +3218,313 @@
           }
         }
       ]
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_overview",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "confirmed_at": "string",
+            "id": "string",
+            "workers": "list of worker_view"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_overview_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_overview_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_overview",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_inspect",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "id": "string",
+            "view": "worker_view"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_inspect_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_inspect_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_inspect",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_submit",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "id": "string",
+            "interaction": "worker_interaction"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_submit_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_submit_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "guidance": "worker_guidance_input",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_submit",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_query",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+            "interaction": "worker_interaction"
+          },
+          "required": {
+            "found": "boolean",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_query_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_query_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "client_key": "string",
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_query",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_history",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "cursor": "string",
+            "id": "string",
+            "interactions": "list of worker_interaction",
+            "more": "boolean"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_history_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_history_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "cursor": "string"
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_history",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_receipts",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "cursor": "string",
+            "id": "string",
+            "more": "boolean",
+            "receipts": "list of worker_receipt"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_receipts_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_receipts_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "cursor": "string"
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "interaction": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_receipts",
+          "version": "0.1.0"
+        }
+      }
     },
     {
       "channel": "control",

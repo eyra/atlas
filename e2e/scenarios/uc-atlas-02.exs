@@ -88,7 +88,7 @@ scenario "UC-Atlas-02: Manage the use cases of a scene", fn %{t1: t1, t2: t2} ->
     see(t1, "cannot be deleted")
     see(t1, ~r/still has 1 use case\. Remove it first/)
     see(t1, "Atlas never deletes it along with its parent")
-    press(t1, "Enter")
+    press(t1, "Escape")
     see(t1, ~r/Scene SC-Atlas-\d+: A scene with use cases/)
   end
 end

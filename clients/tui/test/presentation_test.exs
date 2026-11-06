@@ -3,11 +3,13 @@ defmodule AtlasTui.PresentationTest do
   alias AtlasTui.{Console, Model, Palette, View}
 
   defp model do
+    model = Model.new("test")
+
     model = %{
-      Model.new("test")
+      model
       | connected: true,
         console: %{
-          Console.new()
+          model.console
           | phase: :ready,
             stale: false,
             shell: %{
@@ -111,6 +113,80 @@ defmodule AtlasTui.PresentationTest do
     text = model |> View.render(60, 20, 5) |> View.plain()
     assert text =~ "not connected"
     assert text =~ "✗ Cannot save"
+  end
+
+  test "supplied highlight tones remain labeled without color and do not infer workflow state" do
+    for {tone, label, style} <- [
+          {"ok", "OK", :ok},
+          {"pending", "Pending", :pending},
+          {"error", "Error", :error},
+          {"info", "Info", :info},
+          {"custom", "custom", :dim}
+        ] do
+      m = model()
+
+      m = %{
+        m
+        | markup: [
+            %{
+              "kind" => "highlight",
+              "start" => "list",
+              "end" => "list",
+              "value" => %AtlasTui.Blocks.Highlight{tone: tone}
+            }
+          ]
+      }
+
+      rows = View.render(m, 60, 40, 5)
+      assert View.plain(rows) =~ "[#{label}]"
+      assert Enum.any?(rows, &Enum.member?(&1, {style, "[#{label}]"}))
+      assert View.plain(rows) =~ "W-01"
+      refute model() |> View.render(60, 40, 5) |> View.plain() =~ "[#{label}]"
+    end
+  end
+
+  test "list headings retain their count across the minimum framing width" do
+    for width <- 1..20 do
+      rows = View.render(model(), width, 240, 5)
+      heading = for row <- rows, {:bold, text} <- row, into: "", do: text
+      assert String.replace(heading, ~r/\s/u, "") =~ "Widgets·2"
+      for row <- rows, do: assert(Enum.sum(Enum.map(row, &String.length(elem(&1, 1)))) <= width)
+    end
+  end
+
+  test "pending targets keep the shell but hide previous content and action affordances" do
+    model = model()
+
+    for legend <- [nil, %{scroll: 0}],
+        width <- [60, 150] do
+      pending = %{
+        model
+        | console: %{model.console | expected: "/k/part", restoring: false, legend: legend}
+      }
+
+      text = pending |> View.render(width, 30, 5) |> View.plain()
+      assert text =~ "Atlas Console"
+      assert text =~ "Loading…"
+      refute text =~ "W-01"
+      refute text =~ "Second title"
+      refute text =~ "Keys"
+    end
+  end
+
+  test "reconnection restoration retains the actual request draft rather than a loading body" do
+    model = model()
+    {model, []} = Model.agent_action(model, "Ask", nil)
+    {model, []} = Model.literal(model, {:char, "Draft request"})
+
+    restoring = %{
+      model
+      | console: %{model.console | expected: model.path, restoring: true}
+    }
+
+    text = restoring |> View.render(90, 30, 5) |> View.plain()
+    assert text =~ "Draft request"
+    assert text =~ "W-01"
+    refute text =~ "Loading…"
   end
 
   defp luminance({r, g, b}) do

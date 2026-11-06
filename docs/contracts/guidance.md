@@ -1,4 +1,4 @@
-# Durable guidance foundation (IS-Atlas-105)
+# Durable exact-turn guidance (IS-Atlas-105 / IS-Atlas-109)
 
 The selected description maps execution, interaction and receipt roles to kinds and
 properties. Foundation supplies the three immutable entities. No Eyra work kinds
@@ -35,7 +35,7 @@ keys, not schema entities or a data conversion.
 Interaction submission also carries by, asserted by an admitted Control session.
 State refuses injected actor/environment/timestamp/position values. This retains
 the existing admitted-client identity model. Local BEAM applications are trusted.
-Control derives the client actor and checks current eligibility in IS-109.
+Control derives the client actor and checks current eligibility as described below.
 
 State refuses ordinary CRUD on these roles. Identity scopes are:
 - execution: environment, turn, attempt;
@@ -62,7 +62,7 @@ uncertainty and stale/unsupported/rejected closures. Late evidence never regress
 proof. Contradictory admission identities flag uncertainty. Uncertainty is conservative
 and remains in history after proof improves. Historical evidence stays on its
 original attempt; receipts change no ownership, leases, outcomes or acceptance.
-Live eligibility and admission versus closure remain later Control/Runtime work.
+Control checks live eligibility; harness admission and reconciliation require Runtime's lifecycle.
 
 Interaction create/replay/exact reads return immutable identity, a bounded projection
 and receipt_count, never an embedded evidence history. Read the receipt role with
@@ -81,8 +81,8 @@ newly reserved position cannot invalidate an already admitted boundary record.
 Exact record reads enforce those bounds too. An out-of-contract
 oversized retained record fails visibly rather than returning a non-advancing empty
 page or silently discarding its contents. Summary projections retain only bounded
-proof/uncertainty/closure state, regardless of evidence count. Control supplies
-opaque client cursors later.
+proof/uncertainty/closure state, regardless of evidence count. Control wraps State
+positions in execution- and viewer-scoped opaque cursors.
 
 The current backend still scans collections internally; indexed storage can replace
 that through State/Rela. Response bounds are not an indexed-query guarantee. All
@@ -92,7 +92,81 @@ The schema adds three kinds and optional turn attempt. Tests preserve every prev
 definition and field order. No migration is required; closure/provenance packaging
 includes the additions. Tests use private synthetic disk stores and pinned HTTP rela,
 concurrent barriers and a deterministic loss after storage/before response. No models
-or production data participate. Client Send and harness admission remain disabled
-until IS-106–109 provide and prove their contracts.
+or production data participate. Real harness delivery still requires a Runtime
+that registers attempts and reconciles interactions and receipts.
 
 <sub>Written by an AI agent (Codex · GPT-6 · herdr-projects atlas · t-0024).</sub>
+
+## Control worker access and guidance
+
+`AtlasBFFContract.Workers` owns six typed Control operations:
+`worker_overview`, `worker_inspect`, `worker_submit`, `worker_query`,
+`worker_history` and `worker_receipts`. Each request carries `channel: "control"`,
+`version: "0.1.0"` and a correlation `id`; results and errors retain that id.
+The exact target is the shared nested `runtime_execution`: worker
+`{environment, machine, worker}`, plus `turn` and `attempt`. Missing fences,
+unknown fields and unsupported versions refuse; Control never invents an attempt
+or redirects guidance to a replacement.
+
+Access is description-owned and defaults to denied. Configure separate named
+admitted actor keys, not actor kinds:
+
+```json
+{
+  "guidance": {
+    "control": {
+      "read": {"actors": ["H-1", "H-2"]},
+      "submit": {"actors": ["H-1"]}
+    }
+  }
+}
+```
+
+This fragment accompanies the existing execution/interaction/receipt mappings;
+it does not replace them. Read permits worker inspection and retained history.
+Submit is independent. Missing, malformed or unlisted grants deny; Control also
+confirms the admitted actor still exists in State. Request payloads cannot choose
+the actor. This retains the admitted-Control-session trust model, not a new
+authentication mechanism. No production grants are enabled by this change.
+
+A new submission requires the exact registered descriptor and current turn:
+same machine, worker and attempt, running, no outcome, unexpired lease, exactly
+one running turn for that worker, and current item ownership without pending
+handover. The descriptor must report version-1 queued-input, durable accept-query
+and consumption-evidence support. Unsupported capability remains visible but cannot
+send. Missing/unfenced running executions fail visibly rather than appearing ready.
+
+Guidance contains only `client_key`, literal `body` and `cause`. Slash-prefixed
+text is not a Runtime command. A stored State interaction means queued, never
+delivered. Exact same-key retries return the original immutable interaction even
+after the turn closes; different body, cause or target conflicts. Control never
+automatically resends a guidance write. An acknowledgement timeout reports
+`outcome_unknown`; `worker_query` with the original actor/client key and target
+recovers the durable outcome without replay.
+
+History and receipt responses request at most 50 State records and retain State's
+64-KiB page bounds. Cursors bind environment, viewer, execution and, for receipts,
+interaction. They are pagination state, not authorization credentials. Queries
+never turn another actor's submission into the caller's. Historical evidence
+remains readable after closure, independently of current send eligibility.
+
+Existing generic list/item/form blocks expose `/workers`,
+`/workers/:machine/:worker/:turn/:attempt` and the corresponding `/guidance` form.
+The detail includes item title/link, harness/version, separately configured and
+reported model, activity, lease and confirmation time. Unknown reported model or
+activity timestamp stays unknown; confirmation time is not an activity heartbeat.
+The generic detail shows the first bounded history page and explicitly indicates
+more; typed history/receipt operations traverse all retained evidence. Full
+conversation rendering and live token output are separate client work.
+Shell configuration may include a `/workers` tab without introducing a new block.
+
+`beam/integration/worker_control.exs` exercises actual TCP Control sessions,
+Bus and State with a private durable synthetic backend. Its e2e entry point is
+`e2e/test/worker_control_test.exs`. It proves named grants, exact fencing, literal
+form submission, two-client history, duplicate conflicts, scoped paging, reconnect,
+unsupported adapters and recovery after a real post-commit lost acknowledgement.
+This is an automated test fixture, not a required local Runtime installation.
+The current local-first Runtime prototype does not register executions or reconcile
+guidance; this server contract does not claim that integration or Codex live input.
+
+<sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>

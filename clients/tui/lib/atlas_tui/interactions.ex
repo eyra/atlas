@@ -83,9 +83,7 @@ defmodule AtlasTui.Interactions do
   def dispatch(model, nil), do: {model, []}
 
   def dispatch(model, event) do
-    valid =
-      is_nil(model.console.expected) &&
-        event[:focus] == focus(model) && event[:shell_revision] == shell_revision(model)
+    valid = event[:focus] == focus(model) && event[:shell_revision] == shell_revision(model)
 
     resolved = if valid, do: Contract.resolve(model.console.projection, event, current(model))
 
@@ -98,7 +96,11 @@ defmodule AtlasTui.Interactions do
             (model.console.legend != nil and
                operation["name"] in ~w(legend_close scroll_up scroll_down page_previous page_next))
 
-        if local || (model.connected && model.console.phase == :ready),
+        pending_allowed =
+          is_nil(model.console.expected) or
+            operation["name"] in ["tab_next", "tab_previous", "quit"]
+
+        if pending_allowed && (local || (model.connected && model.console.phase == :ready)),
           do: execute(model, operation, action["props"]["label"]),
           else: {model, []}
 
@@ -109,8 +111,13 @@ defmodule AtlasTui.Interactions do
 
   def key(model, key) do
     case capture(model, key) do
-      nil -> if(model.console.legend, do: {model, []}, else: Model.literal(model, key))
-      event -> dispatch(model, event)
+      nil ->
+        if model.console.legend || model.console.expected,
+          do: {model, []},
+          else: Model.literal(model, key)
+
+      event ->
+        dispatch(model, event)
     end
   end
 

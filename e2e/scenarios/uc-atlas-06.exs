@@ -21,9 +21,9 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
 
     for t <- [t1, t2] do
       home(t)
-      see(t, "g Agents")
+      see_action(t, "g", "Agents")
       press(t, "g")
-      see(t, ~r/Atlas · test.*\sAgents$/m)
+      see_list(t, "Agents")
       see(t, ~r/ada\s+Ada\s+0 assigned/)
     end
   end
@@ -55,7 +55,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
       atlas_json(i, ["set", "AS-#{key}", "deadline=2020-01-02 12:00", "--cause", "due then"])
 
     got["values"]["deadline"] == "2020-01-02T12:00:00Z" || raise inspect(got["values"])
-    by_hint(t1, ~r/AS-#{key}\s+#{key}\s+Late · deadline 2020-01-02 12:00/, at)
+    by_hint(t1, "Late · deadline 2020-01-02 12:00", at)
 
     {text, 0, _} = atlas(i, ["get", key])
     text =~ "Deadline: 2020-01-02 12:00 UTC · late" || raise text
@@ -64,7 +64,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
   step "A deadline still to come is not late; one that is no time is refused", fn ->
     key = Process.get(:uc06)
     {_, at} = atlas_json(i, ["set", "AS-#{key}", "deadline=2099-01-02T12:00:00Z"])
-    by_hint(t1, ~r/AS-#{key}\s+#{key}\s+Deadline 2099-01-02 12:00/, at)
+    by_hint(t1, "Deadline 2099-01-02 12:00", at)
     refute_see(t1, "Late ·")
 
     {%{"refused" => [why | _]}, _} =
@@ -77,8 +77,8 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
     key = Process.get(:uc06)
     open_row(t1, "AS-#{key}")
     see(t1, "Assignment AS-#{key}: #{key}")
-    screen = see(t1, "u Update")
-    screen =~ "d Delete" && raise "an Assignment goes with its fact: #{screen}"
+    see_action(t1, "u", "Update assignment")
+    refute_action(t1, "d", "Delete assignment")
     press(t1, "u")
     see(t1, "Update AS-#{key}")
     see(t1, "Deadline")
@@ -92,7 +92,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
     Process.put(:uc06hand, key)
     home(t1)
     open_row(t1, "A scene handed over at once")
-    see(t1, "h Hand to…")
+    see_action(t1, "h", "Hand to…")
     press(t1, "h")
     see(t1, "Hand to… #{key}")
 
@@ -158,9 +158,9 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
        fn ->
          handed = Process.get(:uc06hand)
          home(t1)
-         see(t1, "l Open work")
+         see_action(t1, "l", "Open work")
          press(t1, "l")
-         see(t1, ~r/Atlas · test.*\s+Open work$/m)
+         see_list(t1, "Open work")
          # A long list goes below the screen; its rows are checked from the command line.
 
          row = fn ->
