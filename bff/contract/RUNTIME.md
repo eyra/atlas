@@ -123,4 +123,17 @@ Declarations do not grant permission or prove capability. Server controls action
 availability and per-request authorization; Console preserves the declared target
 and availability ceiling. No direct Console-to-Runtime path is introduced.
 
+### Private integrated producer verification
+
+From `beam`, run `MIX_ENV=test mix run integration/worker_control.exs`.
+The native-output scenario uses the real Codex adapter/runner and Runtime Turn
+with a bounded deterministic protocol executable, not a paid model or user daemon.
+Output travels through the real addressed Bus and admitted Control TCP sessions,
+without endpoint injection. It exercises two viewers, Unicode/sensitive-field
+projection, a lagging viewer's retention gap while the fast viewer receives every
+event, reconnect cursors, private-store epoch replacement and replay after producer
+closure. The same fixture retains separate durable lost-ack/receipt recovery checks.
+It does not establish interactive Console UI acceptance, model-generated output,
+or native guidance support; the deterministic producer advertises no such support.
+
 <sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>
