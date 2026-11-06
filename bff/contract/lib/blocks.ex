@@ -403,6 +403,9 @@ defmodule AtlasBFFContract.Blocks do
     field :to, :string
     field :url, :string
     field :intent, :string
+    field :execution, :runtime_execution
+    field :cursor, :string
+    field :interaction_source, :string
   end
 
   defmodel :console_scope do
