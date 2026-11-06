@@ -429,17 +429,15 @@ defmodule AtlasControl.Pages do
     end
   end
 
-  # What is assigned to `by` (`start.assigned` in the description): the facts of every kind
-  # the relation starts at that point at `by` through it (the Assignments), and the facts
-  # whose component (`components/2`) they are, one step on: only those, so State works out
-  # progress and completion for them alone.
+  # What is assigned to `by` (`start.assigned` in the description): read its Assignments
+  # once, then their owner kinds. assigned_facts/2 joins only those selected Assignments;
+  # nested linked reads would fetch the same full Assignment list again for every owner.
   def reads({:assigned, by}, description) do
     relation = assigned_rule(description)["relation"]
     froms = get_in(description, ["relations", relation, "from"]) || []
 
     for(from <- froms, do: {from, %{"linked" => %{relation => by}}}) ++
-      for {component, owner} <- owner_kinds(description, froms),
-          do: {owner, %{"linked" => %{component => %{relation => by}}}}
+      for {_component, owner} <- owner_kinds(description, froms), do: {owner, %{}}
   end
 
   # Open work (`start.open`): every fact of the kinds the start's relation starts at (the

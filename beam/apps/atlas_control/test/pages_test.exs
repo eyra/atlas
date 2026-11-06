@@ -1375,10 +1375,10 @@ defmodule AtlasControl.PagesTest do
                   }
                 })
 
-  test "what is assigned through a component shows as the fact it belongs to" do
+  test "assigned components select only their owners from full owner lists" do
     assert Pages.reads({:assigned, "ada"}, @carded_start) == [
              {"card", %{"linked" => %{"held_by" => "ada"}}},
-             {"widget", %{"linked" => %{"card" => %{"held_by" => "ada"}}}}
+             {"widget", %{}}
            ]
 
     held = fn key, of, since, cause ->
@@ -1410,6 +1410,14 @@ defmodule AtlasControl.PagesTest do
     assert [%{"id" => "W-1", "label" => "One", "to" => "/k/widget/W-1"} = row] = list["rows"]
     assert row["detail"] =~ ~r/^Paint it · since 3 Nov \d\d:00 · hers$/
     assert Pages.assigned_count(@carded_start, [cards, widgets]) == "1 held"
+
+    selected_widgets = %{"facts" => Enum.take(widgets["facts"], 2)}
+
+    assert Pages.render({:assigned, "ada"}, @carded_start, [cards, widgets]) ==
+             Pages.render({:assigned, "ada"}, @carded_start, [cards, selected_widgets])
+
+    assert Pages.assigned_facts(@carded_start, [%{"facts" => []}, widgets]) == []
+    assert Pages.assigned_count(@carded_start, [%{"facts" => []}, widgets]) == "0 held"
   end
 
   # Open work: the list of the cards is what is held, for everyone; a card is due by a time.
