@@ -23,7 +23,7 @@ defmodule AtlasTui.WorkerOutputConnection do
   """
   use GenServer
 
-  alias AtlasBFFContract.Workers.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
   alias AtlasTui.{Console, Protocol}
 
   # Match App's connect/handshake conventions without adding user settings.

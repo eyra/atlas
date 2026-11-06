@@ -9,7 +9,7 @@ defmodule AtlasTui.WorkerOutput do
   closes the isolated Control connection (or unsubscribes before closing it).
   Cursors remain opaque and are never interpreted as State history positions.
   """
-  alias AtlasBFFContract.Workers.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
   alias AtlasTui.Blocks
 
   @max_events 1000

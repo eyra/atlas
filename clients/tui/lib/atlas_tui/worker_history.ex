@@ -1,7 +1,7 @@
 defmodule AtlasTui.WorkerHistory do
   @moduledoc "Exact-execution, explicitly paged durable interaction and receipt reads."
 
-  alias AtlasBFFContract.Workers.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
   alias AtlasTui.Blocks
 
   defstruct execution: nil,
