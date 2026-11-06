@@ -2,9 +2,9 @@ Code.require_file(Path.join(__DIR__, "attachment.exs"))
 
 defmodule AtlasRuntime.Playground do
   use GenServer
-  alias AtlasBFFContract.Runtime.Protocol, as: Wire
-  alias AtlasBFFContract.Runtime.MachineProtocol, as: MachineWire
-  alias AtlasBFFContract.Runtime.AttachmentProtocol, as: AttachmentWire
+  alias AtlasBFFContract.Wire.Runtime.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.MachineProtocol, as: MachineWire
+  alias AtlasBFFContract.Wire.Runtime.AttachmentProtocol, as: AttachmentWire
   alias AtlasRuntime.Talk
 
   @worker "breaker"
