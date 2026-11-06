@@ -33,6 +33,7 @@ defmodule AtlasBFFContract.Models.Workers do
     field :item_title, :string
     field :item_to, :string
     field :state, :string, required: true
+    field :reason, :string
     field :activity, :string
     field :activity_at, :string
     field :lease_until, :string

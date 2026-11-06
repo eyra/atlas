@@ -1455,6 +1455,11 @@
           "type": "string"
         },
         {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "activity",
           "required": false,
           "type": "string"

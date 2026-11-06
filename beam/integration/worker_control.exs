@@ -91,6 +91,7 @@ defmodule WorkerControlTest do
           "ended" => "ended",
           "lease" => "lease",
           "activity" => "activity",
+          "why" => "why",
           "outcome" => "outcome"
         }
       },
@@ -769,6 +770,59 @@ defmodule WorkerControlTest do
              request(reader, :worker_submit, %{"execution" => target(), "guidance" => guidance()})
 
     assert {:error, %{"error" => %{"code" => "forbidden"}}} = request(ungranted, :worker_overview)
+  end
+
+  test "blocked reason survives typed inspection and fallback without granting guidance", c do
+    a = connect(c.port)
+    denied = connect(c.port, "H-3")
+
+    on_exit(fn ->
+      :gen_tcp.close(a)
+      :gen_tcp.close(denied)
+    end)
+
+    reason = "Permission required — keep literal α"
+
+    {:ok, []} =
+      Rela.change(c.rela, "runs", "R-1", %{"state" => "blocked", "why" => reason}, nil, %{})
+
+    assert {:result, %{"view" => view}} =
+             request(a, :worker_inspect, %{"execution" => target()})
+
+    assert view["state"] == "blocked"
+    assert view["reason"] == reason
+    assert view["guidance"] == %{"available" => false, "reason" => "stale_execution"}
+
+    for suffix <- ["", "/guidance"] do
+      send_message(a, %{"op" => "open", "to" => "/workers/box/W-1/R-1/attempt-1" <> suffix})
+      page = next(a, &(&1["op"] == "page"))
+      fields = hd(page["blocks"])["props"]["fields"]
+      assert %{"label" => "State", "value" => "blocked"} in fields
+      assert %{"label" => "State reason", "value" => reason} in fields
+      refute Enum.any?(page["blocks"], &(&1["type"] == "form"))
+    end
+
+    assert {:error, %{"error" => %{"code" => "stale_execution"}}} =
+             request(a, :worker_submit, %{"execution" => target(), "guidance" => guidance()})
+
+    assert {:ok, []} = Rela.list(c.rela, "interactions")
+
+    assert {:error, %{"error" => %{"code" => "forbidden"}}} =
+             request(denied, :worker_inspect, %{"execution" => target()})
+
+    send_message(denied, %{"op" => "open", "to" => "/workers/box/W-1/R-1/attempt-1"})
+    forbidden = next(denied, &(&1["op"] == "page"))
+    refute JSON.encode!(forbidden) =~ reason
+    refute JSON.encode!(forbidden) =~ "blocked"
+
+    {:ok, []} = Rela.change(c.rela, "runs", "R-1", %{"fence" => "replacement"}, nil, %{})
+
+    assert {:error, %{"error" => %{"code" => "stale_execution"}}} =
+             request(a, :worker_inspect, %{"execution" => target()})
+
+    send_message(a, %{"op" => "open", "to" => "/workers/box/W-1/R-1/attempt-1/guidance"})
+    stale = next(a, &(&1["op"] == "page"))
+    refute JSON.encode!(stale) =~ reason
   end
 
   @tag unsupported: true
