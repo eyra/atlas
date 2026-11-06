@@ -213,7 +213,7 @@ defmodule WorkerControlTest do
     |> Task.await()
   end
 
-  defp connect(port, actor \\ "H-1") do
+  defp connect(port, actor \\ "H-1", surface \\ nil) do
     {:ok, socket} =
       :gen_tcp.connect(~c"127.0.0.1", port, [
         :binary,
@@ -227,7 +227,8 @@ defmodule WorkerControlTest do
       "env" => "test",
       "client" => "private-proof",
       "as" => actor,
-      "spec" => AtlasControl.Blocks.version()
+      "spec" => AtlasControl.Blocks.version(),
+      "surface" => surface
     })
 
     assert %{"op" => "welcome"} = next(socket, &(&1["op"] == "welcome"))
@@ -254,6 +255,139 @@ defmodule WorkerControlTest do
     reply = next(socket, &(&1["id"] == id))
     assert {:ok, variant, ^reply} = Wire.decode_reply(operation, reply)
     {variant, reply}
+  end
+
+  test "real output delivery isolates viewers and preserves retention gaps and authority", c do
+    output = start_supervised!({AtlasRuntime.Output, name: nil, max_events: 2})
+    start_supervised!({AtlasRuntime.OutputEndpoint, machine: "box", output: output})
+    assert :ok = AtlasRuntime.Output.open(target(), self(), output)
+
+    assert :ok =
+             AtlasRuntime.Output.append(target(), %{"kind" => "text", "text" => "one"}, output)
+
+    a = connect(c.port)
+    b = connect(c.port, "H-2")
+    denied = connect(c.port, "H-3")
+    console = connect(c.port, "H-1", "console")
+    on_exit(fn -> Enum.each([a, b, denied, console], &:gen_tcp.close/1) end)
+    send_message(console, %{"op" => "open", "to" => "/workers/box/W-1/R-1/attempt-1"})
+    page = next(console, &(&1["op"] == "page"))
+    assert {:ok, projection} = AtlasBFFContract.Console.compile(page)
+    actions = Enum.map(projection.actions, & &1["props"])
+    output_action = Enum.find(actions, &(&1["operation"]["name"] == "worker_output_subscribe"))
+    assert output_action["available"]
+    assert output_action["operation"]["execution"] == target()
+    receipt_action = Enum.find(actions, &(&1["operation"]["name"] == "worker_receipts"))
+    assert receipt_action["scope"]["on"] == "guidance-history"
+    assert receipt_action["operation"]["interaction_source"] == "selected_history"
+    assert receipt_action["operation"]["execution"] == target()
+    assert {:result, first} = request(a, :worker_output_subscribe, %{"execution" => target()})
+    assert {:result, second} = request(b, :worker_output_subscribe, %{"execution" => target()})
+    refute first["subscription"] == second["subscription"]
+    assert first["view"]["output"]["available"]
+
+    assert {:error, forbidden} =
+             request(denied, :worker_output_subscribe, %{"execution" => target()})
+
+    assert forbidden["error"]["code"] == "forbidden"
+    refute Map.has_key?(forbidden, "view")
+
+    assert {:error, wrong_owner} =
+             request(b, :worker_output_next, Map.take(first, ~w(subscription cursor)))
+
+    assert wrong_owner["error"]["code"] == "invalid_subscription"
+
+    assert {:result, initial} =
+             request(a, :worker_output_next, Map.take(first, ~w(subscription cursor)))
+
+    assert Enum.map(initial["events"], & &1["text"]) == ["one"]
+
+    for text <- ["two", "three", "four"] do
+      assert :ok =
+               AtlasRuntime.Output.append(target(), %{"kind" => "text", "text" => text}, output)
+    end
+
+    assert {:result, slow} =
+             request(b, :worker_output_next, Map.take(second, ~w(subscription cursor)))
+
+    assert slow["reset"] == %{
+             "reason" => "retention_gap",
+             "from_sequence" => 1,
+             "to_sequence" => 2
+           }
+
+    assert slow["view"]["execution"] == target()
+    assert Enum.map(slow["events"], & &1["text"]) == ["three", "four"]
+
+    assert {:result, fast} =
+             request(a, :worker_output_next, Map.take(initial, ~w(subscription cursor)))
+
+    assert fast["reset"]["from_sequence"] == 2
+    assert fast["reset"]["to_sequence"] == 2
+    assert fast["stream"]["execution"] == target()
+
+    assert {:result, _} =
+             request(a, :worker_output_unsubscribe, Map.take(first, ["subscription"]))
+
+    assert {:result, _} =
+             request(a, :worker_output_unsubscribe, Map.take(first, ["subscription"]))
+
+    assert :ok =
+             AtlasRuntime.Output.append(
+               target(),
+               %{"kind" => "text", "text" => "still running"},
+               output
+             )
+
+    assert Process.alive?(output)
+
+    assert {:result, resumed} =
+             request(a, :worker_output_subscribe, %{
+               "execution" => target(),
+               "cursor" => fast["cursor"]
+             })
+
+    assert {:result, tail} =
+             request(a, :worker_output_next, Map.take(resumed, ~w(subscription cursor)))
+
+    assert Enum.map(tail["events"], & &1["text"]) == ["still running"]
+    assert :ok = AtlasRuntime.Output.finish(target(), output)
+
+    assert {:result, ended} =
+             request(a, :worker_output_next, Map.take(tail, ~w(subscription cursor)))
+
+    assert ended["stream"]["ended"]
+    assert ended["events"] == []
+
+    assert {:error, invalid} =
+             request(a, :worker_output_next, %{
+               "subscription" => resumed["subscription"],
+               "cursor" => "wrong-scope"
+             })
+
+    assert invalid["error"]["code"] == "invalid_cursor"
+    refute Map.has_key?(invalid, "reset")
+
+    stop_supervised!(AtlasRuntime.OutputEndpoint)
+    stop_supervised!(AtlasRuntime.Output)
+    replacement = start_supervised!({AtlasRuntime.Output, name: nil, max_events: 2})
+    start_supervised!({AtlasRuntime.OutputEndpoint, machine: "box", output: replacement})
+    assert :ok = AtlasRuntime.Output.open(target(), self(), replacement)
+
+    assert :ok =
+             AtlasRuntime.Output.append(
+               target(),
+               %{"kind" => "text", "text" => "new epoch"},
+               replacement
+             )
+
+    assert {:result, reset} =
+             request(a, :worker_output_next, Map.take(ended, ~w(subscription cursor)))
+
+    assert reset["reset"] == %{"reason" => "epoch_changed"}
+    assert reset["view"]["execution"] == target()
+    refute reset["stream"]["epoch"] == ended["stream"]["epoch"]
+    assert Enum.map(reset["events"], & &1["text"]) == ["new epoch"]
   end
 
   test "two real clients share stored guidance and recover exact same-key submission after closure",

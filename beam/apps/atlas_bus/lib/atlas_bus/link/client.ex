@@ -93,7 +93,8 @@ defmodule AtlasBus.Link.Client do
         envelope = Link.envelope_in(map)
 
         if envelope.environment == AtlasBus.environment() &&
-             AtlasBus.Envelope.validate(envelope) == :ok do
+             AtlasBus.Envelope.validate(envelope) == :ok &&
+             Link.deliver_allowed?(name, state.settings["machine"], envelope) do
           for {pid, _} <- Registry.lookup(AtlasBus.Endpoints, name),
               do: send(pid, {:atlas_bus, envelope, content})
         end

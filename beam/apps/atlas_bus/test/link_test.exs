@@ -44,6 +44,22 @@ defmodule AtlasBus.LinkTest do
     end
   end
 
+  defp attach_remote(socket, name) do
+    :ok = :gen_tcp.send(socket, Link.encode("attach", %{"endpoint" => name}))
+    eventually(fn -> Registry.lookup(AtlasBus.Endpoints, name) != [] end)
+  end
+
+  defp send_remote(socket, name, envelope, content \\ %{}) do
+    :gen_tcp.send(
+      socket,
+      Link.encode("send", %{
+        "endpoint" => name,
+        "envelope" => Link.envelope_out(envelope),
+        "content" => content
+      })
+    )
+  end
+
   test "hello binds the token to both environment and machine", %{port: port} do
     for more <- [%{"token" => "wrong"}, %{"environment" => "prod"}, %{"machine" => "other"}] do
       s = connect(port, more)
@@ -54,7 +70,7 @@ defmodule AtlasBus.LinkTest do
   end
 
   test "endpoint impersonation and forged acknowledgements close the link", %{port: port} do
-    for name <- ["state", "flow", "runtime@other", "runtime@laptop-other"] do
+    for name <- ["state", "flow", "control/output", "runtime@other", "runtime@laptop-other"] do
       s = connect(port)
       assert recv(s)["op"] == "welcome"
       :gen_tcp.send(s, Link.encode("attach", %{"endpoint" => name}))
@@ -136,5 +152,179 @@ defmodule AtlasBus.LinkTest do
     :gen_tcp.close(s)
     eventually(fn -> Registry.lookup(AtlasBus.Endpoints, name) == [] end)
     assert Registry.lookup(AtlasBus.Listeners, "parcel") == []
+  end
+
+  test "Control output requests and answers retain IDs, payload and authenticated sender", %{
+    port: port
+  } do
+    control = "control/output-test"
+    name = "runtime@laptop/output"
+    :ok = AtlasBus.attach(control)
+    socket = connect(port)
+    assert recv(socket)["op"] == "welcome"
+    attach_remote(socket, name)
+
+    request = %{Envelope.new("request", "runtime.output") | address: name}
+
+    payload = %{
+      "id" => request.id,
+      "request" => %{"runtime_output_snapshot" => %{"cursor" => nil}}
+    }
+
+    assert :ok = AtlasBus.send(request, payload)
+    frame = recv(socket)
+    assert frame["op"] == "deliver"
+    assert frame["endpoint"] == name
+    assert frame["content"] == payload
+    received = Link.envelope_in(frame["envelope"])
+    assert received == %{request | sender: control}
+    assert received.position == nil
+
+    reply = %{Envelope.reply(received, "answer") | sender: "runtime@other/output"}
+    result = %{"id" => request.id, "result" => %{"events" => []}}
+    assert :ok = send_remote(socket, name, reply, result)
+    id = request.id
+
+    assert_receive {:atlas_bus,
+                    %Envelope{
+                      class: "answer",
+                      kind: "runtime.output",
+                      id: ^id,
+                      sender: ^name,
+                      address: ^control,
+                      position: nil
+                    }, ^result},
+                   1_000
+
+    :gen_tcp.close(socket)
+  end
+
+  test "the core only delivers output requests from Control to the machine output endpoint", %{
+    port: port
+  } do
+    :ok = AtlasBus.attach("control/output-permissions")
+    socket = connect(port)
+    assert recv(socket)["op"] == "welcome"
+    output = "runtime@laptop/output"
+    turn = "runtime@laptop/T-output"
+    attach_remote(socket, output)
+    attach_remote(socket, turn)
+    request = %{Envelope.new("request", "runtime.output") | address: output}
+
+    for envelope <- [
+          %{request | kind: "another-kind"},
+          %{request | address: turn},
+          %{request | position: 1},
+          %{request | class: "answer"}
+        ] do
+      assert :ok = AtlasBus.send(envelope, %{})
+      assert :gen_tcp.recv(socket, 0, 50) == {:error, :timeout}
+    end
+
+    assert :ok = AtlasBus.send(request, %{"allowed" => true})
+    assert recv(socket)["content"] == %{"allowed" => true}
+    :gen_tcp.close(socket)
+  end
+
+  test "a non-Control sender cannot deliver an output request by claiming Control", %{port: port} do
+    :ok = AtlasBus.attach("not-control")
+    socket = connect(port)
+    assert recv(socket)["op"] == "welcome"
+    name = "runtime@laptop/output"
+    attach_remote(socket, name)
+
+    request = %{
+      Envelope.new("request", "runtime.output")
+      | address: name,
+        sender: "control/forged"
+    }
+
+    assert :ok = AtlasBus.send(request, %{})
+    assert :gen_tcp.recv(socket, 0, 50) == {:error, :timeout}
+    :gen_tcp.close(socket)
+  end
+
+  test "remote requests and out-of-scope output answers close the link", %{port: port} do
+    output = "runtime@laptop/output"
+    answer = %{Envelope.new("answer", "runtime.output") | address: "control/output-replies"}
+
+    for {name, envelope} <- [
+          {output, %{answer | class: "request", sender: "control/forged", address: output}},
+          {output, %{answer | class: "request", kind: "another-kind"}},
+          {output, %{answer | class: "fact"}},
+          {output, %{answer | class: "read"}},
+          {output, %{answer | class: "stored"}},
+          {output, %{answer | address: "state"}},
+          {output, %{answer | address: "control/"}},
+          {output, %{answer | address: "control-other/replies"}},
+          {output, %{answer | address: nil}},
+          {output, %{answer | position: 1}},
+          {output, %{answer | id: ""}},
+          {output, %{answer | environment: "prod"}},
+          {"runtime@laptop/T-output", answer}
+        ] do
+      socket = connect(port)
+      assert recv(socket)["op"] == "welcome"
+      attach_remote(socket, name)
+      assert :ok = send_remote(socket, name, envelope)
+      assert recv(socket)["op"] == "refused"
+      assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+      eventually(fn -> Registry.lookup(AtlasBus.Endpoints, name) == [] end)
+      :gen_tcp.close(socket)
+    end
+  end
+
+  test "the client also enforces output request direction, scope and envelope validation", %{
+    port: port
+  } do
+    name = "runtime@laptop/output"
+    :ok = AtlasBus.attach(name)
+    socket = connect(port)
+    assert recv(socket)["op"] == "welcome"
+    state = %{socket: socket, settings: %{"machine" => "laptop"}}
+
+    request = %{
+      Envelope.new("request", "runtime.output")
+      | address: name,
+        sender: "control/output"
+    }
+
+    for {endpoint, envelope} <- [
+          {name, %{request | kind: "another-kind"}},
+          {name, %{request | sender: "runtime@laptop"}},
+          {name, %{request | sender: "control/"}},
+          {name, %{request | sender: nil}},
+          {name, %{request | address: "runtime@other/output"}},
+          {name, %{request | address: nil}},
+          {"runtime@other/output", %{request | address: "runtime@other/output"}},
+          {name, %{request | class: "answer"}},
+          {name, %{request | position: 1}},
+          {name, %{request | environment: "prod"}},
+          {name, %{request | id: ""}}
+        ] do
+      line =
+        Link.encode("deliver", %{
+          "endpoint" => endpoint,
+          "envelope" => Link.envelope_out(envelope),
+          "content" => %{}
+        })
+        |> IO.iodata_to_binary()
+
+      assert {:noreply, ^state} = Link.Client.handle_info({:tcp, socket, line}, state)
+      refute_receive {:atlas_bus, _, _}, 10
+    end
+
+    line =
+      Link.encode("deliver", %{
+        "endpoint" => name,
+        "envelope" => Link.envelope_out(request),
+        "content" => %{"id" => request.id}
+      })
+      |> IO.iodata_to_binary()
+
+    assert {:noreply, ^state} = Link.Client.handle_info({:tcp, socket, line}, state)
+    id = request.id
+    assert_receive {:atlas_bus, ^request, %{"id" => ^id}}
+    :gen_tcp.close(socket)
   end
 end

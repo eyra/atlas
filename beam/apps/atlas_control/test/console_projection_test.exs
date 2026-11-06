@@ -36,6 +36,65 @@ defmodule AtlasControl.ConsoleProjectionTest do
   defp current,
     do: %{path: "/k/widget", context: "browse", generation: 1, on: "items", row: "one"}
 
+  test "declared worker operations share normal action scope, availability and validation" do
+    execution = %{
+      "worker" => %{"environment" => "test", "machine" => "machine", "worker" => "worker"},
+      "turn" => "turn",
+      "attempt" => "1"
+    }
+
+    declaration = %{
+      label: "Connect or retry output",
+      keys: ["o"],
+      operation: %{
+        "name" => "worker_output_subscribe",
+        "execution" => execution,
+        "cursor" => "accepted-output-cursor"
+      },
+      on: "items",
+      row: nil,
+      available: false,
+      reason: "Output unavailable"
+    }
+
+    page = put_in(native(), ["blocks", Access.at(0), "props", "rows"], [])
+    assert {:ok, projected} = AtlasControl.Console.project(page, 1, [declaration])
+    assert {:ok, projection} = Console.compile(projected)
+    action = Enum.find(projection.actions, &(&1["props"]["label"] == declaration.label))
+    assert action["props"]["operation"] == declaration.operation
+    assert action["props"]["scope"]["on"] == "items"
+    refute action["props"]["available"]
+    assert {:error, :unavailable_binding} = Console.capture(projection, "o", current())
+
+    enabled = %{declaration | available: true, reason: nil}
+    assert {:ok, projected} = AtlasControl.Console.project(page, 1, [enabled])
+    assert {:ok, projection} = Console.compile(projected)
+    assert {:ok, event} = Console.capture(projection, "o", current())
+    assert {:ok, action} = Console.resolve(projection, event, current())
+    assert action["props"]["operation"] == declaration.operation
+
+    assert {:error, :stale_or_unavailable_action} =
+             Console.resolve(projection, event, %{current() | path: "/workers"})
+
+    for operation <- [
+          Map.put(declaration.operation, "interaction", "wrong-cursor-domain"),
+          Map.put(declaration.operation, "execution", %{"turn" => "turn"}),
+          %{
+            "name" => "worker_output_next",
+            "subscription" => "viewer-token",
+            "cursor" => "cursor"
+          },
+          %{
+            "name" => "worker_receipts",
+            "execution" => execution,
+            "interaction_source" => "arbitrary"
+          }
+        ] do
+      assert {:error, _} =
+               AtlasControl.Console.project(page, 1, [%{enabled | operation: operation}])
+    end
+  end
+
   test "bindings and legend consume the same scoped action objects" do
     assert {:ok, page} = AtlasControl.Console.project(native(), 2)
     assert {:ok, projection} = Console.compile(page)
