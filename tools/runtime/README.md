@@ -66,6 +66,20 @@ go build -ldflags "-X main.repoRoot=$PWD" -o "$HOME/.local/bin/atlas-runtime" to
 
 The binary points to this checkout for service startup; rebuild if the checkout moves. Restart an existing daemon after updating the service/adapter code so it loads the new version (stopping the service also stops any active agent). The service is not implemented in Go and does not live inside the client process. Existing Atlas-connected launcher tooling is left untouched.
 
+## Model-free native sandbox verification
+
+On macOS with Seatbelt, Python 3 and the official Codex CLI installed, run from `beam/apps/atlas_runtime`:
+
+```sh
+MIX_ENV=test mix run --no-start ../../../tools/runtime/verify_sandbox.exs
+```
+
+This opt-in check requires no login or model call and starts no Runtime daemon or Atlas core applications. It uses isolated workspaces and empty Codex homes, then removes its own temporary files. The Runtime adapter and process runner launch a small protocol bridge that reads the actual forwarded `--sandbox` and `--cd` arguments. The bridge maps the two supported modes to Codex's documented [built-in permission profiles](https://developers.openai.com/codex/permissions), `:read-only` and `:workspace`, and invokes the official `codex sandbox` command to execute the same bounded shell write. The bridge reports the native exit status and stderr; it does not simulate denial or perform the write itself.
+
+Assertions require read-only to produce an actual `Operation not permitted` shell error, exit 1 and unchanged `before\n` bytes; workspace-write must exit 0 and produce exact `after\n` bytes. A wrong forwarded mode changes the native outcome and fails the check. CLI configuration/usage errors cannot pass as a read-only denial. Codex 0.166.0 was exercised; older CLIs lacking these built-in profiles will fail this explicit check rather than silently skip it.
+
+Boundary: this proves native sandbox enforcement and adapter-to-native mode selection through the bridge, not model-driven `codex exec` scheduling or its internal legacy-flag-to-profile conversion. It does not test broader filesystem/network confinement or other platforms. No production policy or adapter implementation is changed.
+
 ## Verified
 
 Installed CLI exercised against a separate real daemon: idempotent service start, real Codex completion reading a disposable file, concurrent-start refusal, output retrieval, explicit real Codex stop with native-process cleanup, daemon survival after agent stop, service stop/restart, and refusal without implicit startup when the service is stopped. A synthetic hanging executable also proved daemon shutdown cleans its active agent process group. All smoke daemons were stopped.
@@ -93,5 +107,7 @@ Independent installed-client/real-daemon history checks passed with deterministi
 2026-11-06: added explicit saved-turn continuation. Real Codex smoke selected an older successful conversation after a newer unrelated session and daemon restart; the new turn retained the older marker, native session, cwd and sandbox. Plain continuation from idle still refused; selected history remained unchanged. Go client regressions passed; all owned smoke processes stopped.
 
 Independent saved-resume verification passed: real Codex workspace-write after restart from a different client cwd, unchanged selected metadata, subsequent ordinary continuation, and 25 admission refusals without launching/replacing a turn. Deterministic native fixtures proved unavailable/mismatched session attempts fail without alternate-session launch, plus active-turn rejection and cancellation cleanup. Both isolated daemons were stopped; provider-side session deletion and abrupt-crash recovery were not tested.
+
+2026-11-06: closed the native write-denial evidence gap with the model-free verification above: 2 checks passed against official Codex 0.166.0, with real shell stderr/exit and exact on-disk bytes for both modes. The existing Codex adapter suite also passed all 9 tests.
 
 <sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>
