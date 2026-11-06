@@ -22,6 +22,57 @@ defmodule AtlasBFFContract.Runtime do
     field :json, :boolean
   end
 
+  defmodel :runtime_discovery_options do
+    field :machine, :string, required: true
+  end
+
+  defmodel :runtime_machine_availability do
+    field :target, :runtime_machine, required: true
+    field :registered, :boolean, required: true
+    field :basis, :string, required: true
+  end
+
+  protocol([
+    %{
+      name: :runtime_machine_discover,
+      channel: :control,
+      direction: :request,
+      cli: ["discover"],
+      request: %{
+        select: %{"op" => "machine_discover", "channel" => "control", "version" => @wire_version},
+        required: %{"id" => :string, "target" => :runtime_machine},
+        optional: %{"grant" => :string}
+      },
+      replies: [
+        %{
+          name: :result,
+          effect: :complete,
+          select: %{
+            "op" => "machine_discover_result",
+            "channel" => "control",
+            "version" => @wire_version
+          },
+          required: %{
+            "id" => :string,
+            "target" => :runtime_machine,
+            "availability" => :runtime_machine_availability
+          }
+        },
+        %{
+          name: :error,
+          effect: :error,
+          select: %{
+            "op" => "machine_discover_error",
+            "channel" => "control",
+            "version" => @wire_version
+          },
+          required: %{"id" => :string, "error" => :runtime_error},
+          optional: %{"target" => :runtime_machine}
+        }
+      ]
+    }
+  ])
+
   defmodel :runtime_machine_boot do
     field :environment, :string, required: true
     field :machine, :string, required: true
@@ -285,4 +336,9 @@ end
 defmodule AtlasBFFContract.Runtime.MachineProtocol do
   @moduledoc "Generated machine-scoped diagnostics, distinct from worker control."
   use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Runtime, channel: :runtime_machine
+end
+
+defmodule AtlasBFFContract.Runtime.DiscoveryProtocol do
+  @moduledoc "Generated exact-machine read capability over the existing Control protocol."
+  use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Runtime, channel: :control
 end

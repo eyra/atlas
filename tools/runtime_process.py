@@ -204,6 +204,7 @@ class LocalRuntime:
                 self._capture(record, 'tunnel', child)
             child_env = dict(os.environ, ATLAS_ROOT=str(self.root), ATLAS_ENV=self.target['environment'], ATLAS_ROLE='runtime', ATLAS_ENV_FILE=str(self.configuration), ATLAS_RUNTIME_HOME=str(self.base), ATLAS_RUNTIME_INSTANCE=instance, ATLAS_CLIENT_ENV_FILE=str(self.client_file), ATLAS_BUS_LINK_TOKEN=token, MIX_ENV='dev', PYTHONDONTWRITEBYTECODE='1', ELIXIR_ERL_OPTIONS='+S 1:1')
             child_env.pop('ATLAS_RUNTIME_DISCOVERY_TOKEN', None)
+            child_env.pop('ATLAS_RUNTIME_READ_TOKEN', None)
             with (self.base/'runtime.log').open('ab') as log:
                 child = subprocess.Popen(['mix', 'run', '--no-start', '--no-halt', *self._boot_args(instance)], cwd=self.root/'beam', env=child_env, stdout=log, stderr=log, stdin=subprocess.DEVNULL, start_new_session=True)
             self._capture(record, 'runtime', child)

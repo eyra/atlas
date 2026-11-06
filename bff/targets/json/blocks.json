@@ -765,6 +765,36 @@
     {
       "fields": [
         {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_discovery_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "registered",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "basis",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_availability"
+    },
+    {
+      "fields": [
+        {
           "name": "environment",
           "required": true,
           "type": "string"
@@ -1769,6 +1799,60 @@
     }
   ],
   "protocol": [
+    {
+      "channel": "control",
+      "cli": [
+        "discover"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_discover",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "availability": "runtime_machine_availability",
+            "id": "string",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_discover_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_discover_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "grant": "string"
+        },
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_discover",
+          "version": "0.1.0"
+        }
+      }
+    },
     {
       "channel": "runtime_machine",
       "cli": [

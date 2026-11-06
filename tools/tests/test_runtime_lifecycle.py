@@ -141,11 +141,12 @@ class OwnershipLifecycleTest(unittest.TestCase):
                 c.file.unlink()
                 for role in ('runtime','tunnel'): (c.base/f'{role}.pid').unlink()
                 def spawn(command, **kwargs):
+                    self.assertNotIn('ATLAS_RUNTIME_READ_TOKEN',kwargs['env'])
                     nonce=command[-1]
                     snapshots[111]['argv']=['beam',*c._boot_args(nonce)]
                     c._write(c.base/('runtime-ready-'+nonce+'.json'),json.dumps(dict(target=c.target,instance=nonce if receipt_kind=='matching' else 'foreign',pid=111)))
                     return SimpleNamespace(pid=111,poll=lambda: 1 if receipt_kind=='exited' else None)
-                with patch.dict(os.environ,ATLAS_BUS_LINK_TOKEN='private-stub-token'),patch.object(module.subprocess,'Popen',side_effect=spawn) as popen,patch.object(module.os,'kill') as kill:
+                with patch.dict(os.environ,ATLAS_BUS_LINK_TOKEN='private-stub-token',ATLAS_RUNTIME_READ_TOKEN='private-read-only-secret'),patch.object(module.subprocess,'Popen',side_effect=spawn) as popen,patch.object(module.os,'kill') as kill:
                     if receipt_kind=='matching':
                         result=c.start(); self.assertEqual(result['phase'],'started'); self.assertEqual(result['processes']['runtime']['pid'],111)
                         self.assertEqual(c.start()['instance'],result['instance'])

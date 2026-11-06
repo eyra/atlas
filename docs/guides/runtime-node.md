@@ -97,6 +97,40 @@ or model is added. Successful diagnostic exit means a report was produced, not
 that Runtime is ready. Contract codecs must be built explicitly before any CLI
 operation; start uses the existing Mix node boot, which can compile that checkout.
 
+Authorized discovery (remaining IS127): `atlas runtime discover --env test
+--machine macbook --json` uses the ordinary generated agent client and existing
+Control listener. It never opens/manages a proxy, starts a service or signals a
+process. Supply already-authorized Control connectivity. A missing connection,
+timeout or unsupported older Control remains an error, never machine absence.
+
+A separate explicit read capability is required on every request. For a private
+server, opt in with `control.runtime_read_token_env` naming an environment variable
+whose JSON object maps exact machine names to their read tokens. Leave this field
+absent for default denial. The client reads its one token from
+`ATLAS_RUNTIME_READ_TOKEN`, never an argument or hello/as. Use independent random
+read tokens; never reuse the Bus link writer credential. This change installs none.
+Only private synthetic examples/configurations were used to verify it.
+
+Control revalidates normal hello admission, exact environment/machine and the
+read grant before accessing the Bus registry. It reuses the existing Bus token
+comparison primitive, with a separate configured read realm. No actor string,
+migration claim, person/role lookup or Bus writer token implicitly grants this
+operation. Missing, malformed, wildcard, wrong-scope or revoked grants fail closed;
+revocation is checked each request. This is a machine-scoped bearer capability,
+not authenticated human sign-in or a new role engine. No live defaults change.
+
+The reply contains only the requested exact machine's `registered` flag and
+`bus_endpoint_registry` basis. An exact `runtime@machine` entry counts; a turn
+endpoint alone does not. This is a point-in-time endpoint observation, not a probe
+of link responsiveness, worker lifecycle, models or leases. There is no global
+machine enumeration. Typed refusals, registry failure and transport/malformed or
+identity-mismatched replies are distinct from a successful unregistered result.
+Result/error correlation and nested target are checked; ordinary hint traffic
+remains independent under one fixed request deadline. The CLI may compile its
+ordinary client as usual, but never builds/starts Runtime. Local status does not
+probe credentials or infer remote access from the existence of this command.
+The read token is stripped from the environment of explicitly started Runtime nodes.
+
 Delivery remains the Bus's best effort contract: reads/facts retry and reconcile from
 State. Machine leases and Flow failover across machines remain follow-up work; this
 link does not end a sleeping machine's turns on another machine's behalf.

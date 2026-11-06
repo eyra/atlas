@@ -53,6 +53,13 @@ defmodule AtlasAgent.CLI do
   # Help asks Control what can be made: the kinds come from rela's description, never
   # from this code. `atlas help [<kind>]`, `atlas <command> [<kind>] --help`.
   # `atlas help` prints bin/atlas's own usage first, so only the kinds come from here.
+  defp parse(["runtime-discover" | args]) do
+    case AtlasAgent.Protocol.options(:runtime_discovery_options, args) do
+      {:ok, options} -> {:ok, {:runtime_discovery, options["machine"]}}
+      {:invalid, why} -> {:error, why}
+    end
+  end
+
   defp parse(["help" | rest]), do: {:ok, {:help, List.first(rest), false}}
 
   defp parse(["turn"]), do: {:ok, :turn}
@@ -110,6 +117,9 @@ defmodule AtlasAgent.CLI do
   defp parse_command(_), do: {:error, usage()}
 
   # A write answers with the item as it is now stored.
+  defp run({:runtime_discovery, machine}, client),
+    do: AtlasAgent.RuntimeDiscovery.read(client, machine)
+
   defp run({:put, kind, values, parent, cause}, client),
     do: client |> AtlasAgent.put(kind, values, parent, cause) |> then_get(client)
 
@@ -174,6 +184,23 @@ defmodule AtlasAgent.CLI do
   defp as(other, _what), do: other
 
   # Output
+
+  defp show({:runtime_discovery, reply, code}, true), do: json(reply, code)
+
+  defp show({:runtime_discovery, reply, code}, false) do
+    if code == 0,
+      do:
+        IO.puts(
+          "Runtime #{reply["target"]["machine"]}: endpoint #{if reply["availability"]["registered"], do: "registered", else: "absent"}; health unproven"
+        ),
+      else:
+        IO.puts(
+          :stderr,
+          "Runtime discovery: #{reply["error"]["code"]}: #{reply["error"]["message"]}"
+        )
+
+    code
+  end
 
   defp show({:turn, context}, true), do: json(context, 0)
 
