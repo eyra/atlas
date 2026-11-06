@@ -137,6 +137,8 @@ It is description, plus Control's list of the kind the start's relation starts a
   - the list of the Assignment kind (`/k/assignment`, no new page in the contract) is Open work. It reads every Assignment and every fact they belong to, and shows the open ones.
   - `atlas list assignment` gives the same rows, one per open fact, by the fact's key.
 
+Control gathers Open work's unfiltered collection reads in one internal State request. Within that request, State reuses successful raw collection results when progress or completion needs the same collection again; pagination, enrichment and the complete page output stay unchanged. The data is discarded when the request ends, failed reads are not cached, and every later page request reads fresh data. This does not introduce a public protocol operation or a cross-request cache.
+
 ### Try
 
 | Step | Keys / command | What you should see |
