@@ -259,6 +259,117 @@ defmodule AtlasBFFContract.Runtime do
     field :retryable, :boolean, required: true
   end
 
+  defmodel :runtime_attachment_options do
+    field :turn, :string, required: true
+    field :attempt, :string, required: true
+  end
+
+  # Private snapshot profile: no lifecycle, guidance, output or replay admission.
+  defmodel :runtime_attachment_capabilities do
+    field :snapshot, :boolean, required: true
+    field :control, :boolean, required: true
+    field :guidance, :boolean, required: true
+    field :output, :boolean, required: true
+    field :replay, :boolean, required: true
+  end
+
+  @attachment_fields %{
+    "target" => :runtime_worker,
+    "execution" => :runtime_execution,
+    "capabilities" => :runtime_attachment_capabilities,
+    "turn" => :runtime_turn
+  }
+  protocol(
+    for action <- [:attach, :status, :detach] do
+      %{
+        name: String.to_atom("execution_#{action}"),
+        channel: :runtime_attachment,
+        direction: :request,
+        cli: [Atom.to_string(action)],
+        request: %{
+          select: %{
+            "op" => "execution_#{action}",
+            "channel" => "control",
+            "version" => @wire_version
+          },
+          required: %{
+            "id" => :string,
+            "target" => :runtime_worker,
+            "execution" => :runtime_execution
+          }
+        },
+        replies: [
+          %{
+            name: :result,
+            effect: :complete,
+            select: %{
+              "op" => "execution_result",
+              "channel" => "control",
+              "version" => @wire_version
+            },
+            required: Map.put(@attachment_fields, "id", :string)
+          },
+          %{
+            name: :error,
+            effect: :error,
+            select: %{
+              "op" => "execution_error",
+              "channel" => "control",
+              "version" => @wire_version
+            },
+            required: %{
+              "id" => :string,
+              "target" => :runtime_worker,
+              "execution" => :runtime_execution,
+              "error" => :runtime_error
+            }
+          }
+        ]
+      }
+    end ++
+      [
+        %{
+          name: :execution_snapshot,
+          channel: :runtime_attachment,
+          direction: :push,
+          replies: [
+            %{
+              name: :status,
+              effect: :progress,
+              select: %{
+                "op" => "execution_snapshot",
+                "channel" => "event",
+                "version" => @wire_version
+              },
+              required: Map.put(@attachment_fields, "sequence", :integer)
+            }
+          ]
+        },
+        %{
+          name: :execution_closed,
+          channel: :runtime_attachment,
+          direction: :push,
+          replies: [
+            %{
+              name: :closed,
+              effect: :progress,
+              select: %{
+                "op" => "execution_closed",
+                "channel" => "event",
+                "version" => @wire_version
+              },
+              required: %{
+                "sequence" => :integer,
+                "target" => :runtime_worker,
+                "execution" => :runtime_execution,
+                "error" => :runtime_error
+              }
+            }
+          ]
+        }
+      ]
+  )
+
   @result %{
     name: :result,
     select: %{"op" => "result", "channel" => "control", "version" => @wire_version},
@@ -341,4 +452,9 @@ end
 defmodule AtlasBFFContract.Runtime.DiscoveryProtocol do
   @moduledoc "Generated exact-machine read capability over the existing Control protocol."
   use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Runtime, channel: :control
+end
+
+defmodule AtlasBFFContract.Runtime.AttachmentProtocol do
+  @moduledoc "Generated execution-bound snapshot profile; not a guidance or lifecycle API."
+  use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Runtime, channel: :runtime_attachment
 end

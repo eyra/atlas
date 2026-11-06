@@ -182,9 +182,9 @@ def main():
     if len(args) < 3 or args[0] not in ('playground', 'attach'):
         raise ValueError('prototype: atlas playground init|stop|probe DIR [COMMAND ...]; atlas attach WORKER --prototype DIR')
     if args[0] == 'attach':
-        if len(args) != 4 or args[2] != '--prototype':
+        if len(args) not in (4, 8) or args[2] != '--prototype':
             raise ValueError('prototype: atlas attach breaker --prototype DIR')
-        return subprocess.call(beam('attach', Path(args[3]).resolve(), args[1], no_start=True), cwd=ROOT/'beam', env=ENV)
+        return subprocess.call(beam('attach', Path(args[3]).resolve(), args[1], *args[4:], no_start=True), cwd=ROOT/'beam', env=ENV)
     action, directory, *words = args[1:]
     directory = Path(directory).expanduser().resolve()
     if action == 'init':

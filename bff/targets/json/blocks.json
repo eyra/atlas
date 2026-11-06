@@ -1160,6 +1160,51 @@
     {
       "fields": [
         {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_attachment_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "snapshot",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "control",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "guidance",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "output",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "replay",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_attachment_capabilities"
+    },
+    {
+      "fields": [
+        {
           "name": "label",
           "required": true,
           "type": "string"
@@ -2005,6 +2050,210 @@
           "version": "0.1.0"
         }
       }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "attach"
+      ],
+      "direction": "request",
+      "name": "execution_attach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_attach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "execution_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_status",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "detach"
+      ],
+      "direction": "request",
+      "name": "execution_detach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_detach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "direction": "push",
+      "name": "execution_snapshot",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "status",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "sequence": "integer",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "event",
+            "op": "execution_snapshot",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "runtime_attachment",
+      "direction": "push",
+      "name": "execution_closed",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "closed",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "sequence": "integer",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "event",
+            "op": "execution_closed",
+            "version": "0.1.0"
+          }
+        }
+      ]
     },
     {
       "channel": "runtime",

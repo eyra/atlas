@@ -1,3 +1,7 @@
+Code.require_file(Path.expand("../../clients/agent/lib/atlas_agent/runtime_session.ex", __DIR__))
+
+Code.require_file(Path.join(__DIR__, "attachment.exs"))
+
 defmodule RuntimePlayground.Server do
   use GenServer
   alias AtlasBFFContract.Runtime.Protocol, as: Wire
@@ -71,7 +75,16 @@ defmodule RuntimePlayground.Server do
 
     File.chmod!(path, 0o600)
     spawn_link(fn -> accept(listener) end)
-    state = %{dir: dir, rela: rela, engine: nil, subscribers: MapSet.new(), sequence: 0}
+
+    state = %{
+      dir: dir,
+      rela: rela,
+      engine: nil,
+      subscribers: MapSet.new(),
+      sequence: 0,
+      attachments: %{}
+    }
+
     status(state)
 
     File.write!(
@@ -147,6 +160,35 @@ defmodule RuntimePlayground.Server do
   end
 
   def handle_call({:request, bytes, viewer}, _from, state) do
+    case AtlasBFFContract.Runtime.AttachmentProtocol.decode_request_json(bytes) do
+      {:ok, name, request} -> attachment_request(name, request, viewer, state)
+      _ -> legacy_request(bytes, viewer, state)
+    end
+  end
+
+  defp attachment_request(name, request, viewer, state) do
+    {kind, reply} = RuntimePlayground.Attachment.reply(name, request, status(state), @target)
+
+    attachments =
+      cond do
+        kind == :ok and name == :execution_detach ->
+          if entry = state.attachments[viewer], do: Process.demonitor(entry.monitor, [:flush])
+          Map.delete(state.attachments, viewer)
+
+        kind == :ok and name == :execution_attach ->
+          monitor =
+            if entry = state.attachments[viewer], do: entry.monitor, else: Process.monitor(viewer)
+
+          Map.put(state.attachments, viewer, %{execution: request["execution"], monitor: monitor})
+
+        true ->
+          state.attachments
+      end
+
+    {:reply, reply, %{state | attachments: attachments}}
+  end
+
+  defp legacy_request(bytes, viewer, state) do
     case Wire.decode_request_json(bytes) do
       {:ok, name, request} ->
         if request["target"] == @target do
@@ -312,12 +354,43 @@ defmodule RuntimePlayground.Server do
 
     File.write!(state.dir <> "/events.jsonl", bytes <> "\n", [:append])
     for pid <- state.subscribers, do: send(pid, {:snapshot, bytes})
+
+    attachments =
+      Map.new(
+        Enum.filter(state.attachments, fn {pid, %{execution: execution, monitor: monitor}} ->
+          {name, fields, keep} =
+            case RuntimePlayground.Attachment.select(snapshot, execution, @target) do
+              {:ok, turn} ->
+                {:execution_snapshot, RuntimePlayground.Attachment.fields(execution, turn), true}
+
+              {:error, code} ->
+                {:execution_closed, RuntimePlayground.Attachment.error(execution, code), false}
+            end
+
+          event =
+            AtlasBFFContract.Runtime.AttachmentProtocol.encode_event(
+              name,
+              Map.put(fields, :sequence, sequence)
+            )
+
+          send(pid, {:snapshot, event})
+          unless keep, do: Process.demonitor(monitor, [:flush])
+          keep
+        end)
+      )
+
     Process.send_after(self(), :tick, 1000)
-    {:noreply, %{state | sequence: sequence}}
+    {:noreply, %{state | sequence: sequence, attachments: attachments}}
   end
 
   def handle_info({:DOWN, _, :process, pid, _}, state),
-    do: {:noreply, %{state | subscribers: MapSet.delete(state.subscribers, pid)}}
+    do:
+      {:noreply,
+       %{
+         state
+         | subscribers: MapSet.delete(state.subscribers, pid),
+           attachments: Map.delete(state.attachments, pid)
+       }}
 
   def handle_info({_, {:data, _}}, state), do: {:noreply, state}
   def handle_info({_, {:exit_status, code}}, _), do: raise("private rela exited #{code}")
@@ -325,93 +398,57 @@ defmodule RuntimePlayground.Server do
 end
 
 defmodule RuntimePlayground.Client do
-  alias AtlasBFFContract.Runtime.Protocol, as: Wire
-
   defmodule Session do
     @moduledoc false
-    alias AtlasBFFContract.Runtime.Protocol, as: Wire
-    @limit 8
-    @timeout 10_000
-    def limit, do: @limit
-    def timeout, do: @timeout
-    def new(target), do: %{target: target, pending: %{}}
-
-    def request(session, words, now) do
-      if map_size(session.pending) >= @limit do
-        {:error, :backpressure, session}
-      else
-        id = Integer.to_string(System.unique_integer([:positive]))
-
-        case Wire.cli(words, %{id: id, target: session.target}) do
-          {:ok, name, frame} ->
-            entry = %{name: name, expires: now + @timeout}
-            {:ok, frame, put_in(session, [:pending, id], entry)}
-
-          {:invalid, why} ->
-            {:error, why, session}
-        end
-      end
-    end
-
-    def expire(session, now) do
-      {expired, remaining} =
-        Enum.split_with(session.pending, fn {_, entry} -> entry.expires <= now end)
-
-      {%{session | pending: Map.new(remaining)}, Enum.map(expired, &elem(&1, 0))}
-    end
-
-    def wait(session, now) do
-      Enum.reduce(session.pending, 1000, fn {_, entry}, wait ->
-        min(wait, max(entry.expires - now, 0))
-      end)
-    end
-
-    def accept(session, bytes, now) do
-      case Wire.decode_event_json(bytes) do
-        {:ok, _, frame} ->
-          if bound?(frame, session.target),
-            do: {:ok, :event, frame, session},
-            else: {:invalid, "event target mismatch", session}
-
-        _ ->
-          accept_reply(session, bytes, now)
-      end
-    end
-
-    defp accept_reply(session, bytes, now) do
-      with {:ok, %{"id" => id}} <- JSON.decode(bytes),
-           %{name: name, expires: expires} when expires > now <- session.pending[id],
-           {:ok, kind, frame} <- Wire.decode_reply_json(name, bytes) do
-        if bound?(frame, session.target) do
-          {:ok, kind, frame, %{session | pending: Map.delete(session.pending, id)}}
-        else
-          {:invalid, "reply target mismatch", session}
-        end
-      else
-        _ -> {:invalid, "malformed, expired, duplicate or unknown reply", session}
-      end
-    end
-
-    defp bound?(%{"op" => "error"} = frame, target),
-      do: not Map.has_key?(frame, "target") or frame["target"] == target
-
-    defp bound?(frame, target) do
-      frame["target"] == target and frame["status"]["target"] == target and
-        Enum.all?(frame["status"]["turns"], &(&1["execution"]["worker"] == target))
-    end
+    defdelegate limit(), to: AtlasAgent.RuntimeSession
+    defdelegate timeout(), to: AtlasAgent.RuntimeSession
+    defdelegate new(target), to: AtlasAgent.RuntimeSession
+    defdelegate request(session, words, now), to: AtlasAgent.RuntimeSession
+    defdelegate accept(session, bytes, now), to: AtlasAgent.RuntimeSession
+    defdelegate expire(session, now), to: AtlasAgent.RuntimeSession
+    defdelegate wait(session, now), to: AtlasAgent.RuntimeSession
   end
 
   def run(mode, dir, worker, words) do
     target = %{"environment" => "private", "machine" => "runtime-playground", "worker" => worker}
     {:ok, socket} = connect(dir, 5)
-    session = Session.new(target)
+
+    session =
+      if mode == "attach" and match?(["--" <> _ | _], words) do
+        case AtlasBFFContract.Runtime.AttachmentProtocol.options(
+               :runtime_attachment_options,
+               words
+             ) do
+          {:ok, options} ->
+            AtlasAgent.RuntimeSession.attach(%{
+              worker: target,
+              turn: options["turn"],
+              attempt: options["attempt"]
+            })
+
+          {:invalid, why} ->
+            raise ArgumentError, why
+        end
+      else
+        Session.new(target)
+      end
 
     if mode == "probe" do
       {:ok, session} = issue(socket, words, session)
       probe(socket, session)
     else
+      if session.execution do
+        IO.puts(
+          "\nRuntime Playground · SC11 / UC46 / IS139 · PRIVATE STUB\nActual Runtime/Bus/State/Flow through private IS125 controller, not deployed Control.\nExact execution #{session.execution["turn"]}/#{session.execution["attempt"]}; snapshot-only read-only.\nCommands: status | reconnect | detach. Guidance, harness output and replay unsupported.\nPrivate owner-only socket authority; no machine-read grant used.\nPrivate files: #{dir}\n"
+        )
+      else
+        IO.puts(
+          "\nRuntime Playground · UC46 / IS125 · PRIVATE STUB\nActual Runtime + Bus + State + Flow; no model or guidance support.\nWorker lifecycle is independent of this viewer.\nCommands: start | stop | status | mode active/idle/silent/crash-once/crash\n          reconnect | detach (leaves worker running)\nPrivate files: #{dir}\n"
+        )
+      end
+
       IO.puts(
-        "\nRuntime Playground · UC46 / IS125 · PRIVATE STUB\nActual Runtime + Bus + State + Flow; no model or guidance support.\nWorker lifecycle is independent of this viewer.\nCommands: start | stop | status | mode active/idle/silent/crash-once/crash\n          reconnect | detach (leaves worker running)\nAt most 8 outstanding requests; replies expire after 10 seconds (outcome unknown).\nPrivate files: #{dir}\n"
+        "At most 8 outstanding requests; replies expire after 10 seconds (outcome unknown)."
       )
 
       parent = self()
@@ -520,6 +557,20 @@ defmodule RuntimePlayground.Client do
             IO.puts("ERROR " <> inspect(frame["error"]))
             loop(socket, dir, next)
 
+          {:ok, _, %{"op" => "execution_closed"} = frame, _next} ->
+            IO.puts(
+              "Subscription closed: " <> frame["error"]["code"] <> "; no successor selected."
+            )
+
+            :gen_tcp.close(socket)
+
+          {:ok, _, %{"turn" => turn}, next} ->
+            IO.puts(
+              "execution=#{turn["execution"]["turn"]}/#{turn["execution"]["attempt"]} state=#{turn["state"]} activity=#{turn["activity"]} lease=#{turn["lease_until"]}"
+            )
+
+            loop(socket, dir, next)
+
           {:ok, _, frame, next} ->
             show(frame["status"])
             loop(socket, dir, next)
@@ -548,7 +599,7 @@ defmodule RuntimePlayground.Client do
 
     case connect(dir, 5) do
       {:ok, next} ->
-        {:ok, fresh} = issue(next, ["attach"], Session.new(session.target))
+        {:ok, fresh} = issue(next, ["attach"], AtlasAgent.RuntimeSession.reconnect(session))
         loop(next, dir, fresh)
 
       {:error, why} ->

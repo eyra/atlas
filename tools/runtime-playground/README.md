@@ -47,6 +47,35 @@ an owner-only local Unix socket; it is not a production remote endpoint. Its
 directory is mode 0700 and socket mode 0600. Herdr only displays the terminal and
 is not part of the product protocol.
 
+IS139 adds an **explicit execution-bound, read-only profile** to this same private
+controller/socket. After an operator explicitly starts the private worker, inspect
+`bin/atlas playground probe DIR status`, then copy its actual running turn and
+attempt (never invent one):
+
+```sh
+bin/atlas attach breaker --prototype DIR --turn TURN --attempt ATTEMPT
+```
+
+The shared DSL generates option parsing, codecs, validators and data types. The
+shared client session lives in `clients/agent/lib/atlas_agent/runtime_session.ex`.
+This profile offers `status`, `reconnect`, and `detach` only. Negotiated capabilities
+are snapshot=true and control/guidance/output/replay=false. Events are current
+State-derived turn snapshots, **not harness output or an IS110 replay cursor**.
+Every result, error and event binds outer and nested worker/turn/attempt identities.
+Repeated snapshot sequences are refused; reconnect resets snapshot sequencing and
+reattaches the same execution with no outstanding control replay. When that
+execution ends or disappears, its subscription closes with a typed stale-execution
+event; no successor is selected. Separate viewers never start or stop workers.
+
+This is the existing IS125 private controller, **not deployed Atlas Control**.
+Owner-only directory/socket access is the prototype authority. The IS127 machine
+registry read grant confers no worker attach/control permission and is not sent.
+IS128 retains ordinary Control integration through IS109 and bounded output/cursors
+through IS110; both services are currently unimplemented dependencies. No guidance
+receipt pipeline, remote listener or output store is introduced here. The original
+worker-only operator profile remains compatible. Frozen human instances are not
+modified or upgraded by this source change.
+
 Stop the complete private instance from another terminal:
 
 ```sh
