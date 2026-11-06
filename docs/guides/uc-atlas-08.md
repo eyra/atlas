@@ -3,6 +3,13 @@
 An agent keeps its scene while its running turn breaks it down. Creating the first
 child updates Expected immediately. Flow saves the deferred handover in State and
 applies it after Runtime records the turn's end. Restarting Flow loses no handover.
+Runtime treats a nonempty description-defined handover field as a barrier to a new
+turn, while retaining the existing turn's ownership and authority. Only Flow clears
+that barrier, by transferring ownership or cancelling the pending move. Runtime snapshots
+local processes and turns before ownership so an old ownership reply cannot be paired
+with a newer ended turn to bypass a handover saved between those reads (IS-Atlas-123). A normal end,
+crash, silence or restart therefore cannot repeatedly replace the old owner's turn
+and starve the transfer. Without a pending handover, same-owner continuation remains.
 A later human assignment cancels that deferred move and Runtime stops the old turn.
 
 The agent uses Control, just like other clients:
@@ -26,7 +33,8 @@ this change does not start a model or grant commands to deployed agents.
 
 The private stub test is `atlas e2e uc-atlas-08`. It creates two use cases and an issue
 under each before ending the turn, sees both in the TUI, checks the outcome and subsequent
-handover to the coordinator, and checks a human cancellation of a second turn. The file
+handover to the coordinator without a replacement turn, and checks a human cancellation
+of a second turn. The file
 runs after the shared ownership scenarios because introducing their coordinator earlier
 would change those scenarios' initial fixtures.
 
@@ -36,4 +44,4 @@ The outcome and handover properties are additive schema changes. Delivery must f
 the normal backup-before-pull and description rollout rules. No prod migration or
 activation has been performed by this implementation.
 
-<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0015).</sub>
+<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0027).</sub>

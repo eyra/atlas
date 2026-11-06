@@ -16,6 +16,7 @@ defmodule AtlasAgent.CLI do
 
   Every command takes --json: it then prints one JSON value on stdout, the item, the
   list, or `{"refused": [reasons]}` / `{"error": text}`. Without it, short text.
+  A failed list also retains `code` when Control supplies a typed State failure.
   A value of `-` is read from stdin; `--<field>-file <path>` (put) and `<field>=@<path>`
   (set) read it from a file, for text of several lines. Which kinds exist and which
   fields a form asks for come from Control; a wrong one is answered with what it asks.
@@ -130,6 +131,9 @@ defmodule AtlasAgent.CLI do
     end
   end
 
+  defp run({:list, kind, nil}, client),
+    do: client |> AtlasAgent.list(kind, nil, typed_errors: true) |> as(:list)
+
   defp run({:list, kind, parent}, client),
     do: client |> AtlasAgent.list(kind, parent) |> as(:list)
 
@@ -207,6 +211,13 @@ defmodule AtlasAgent.CLI do
     IO.puts(:stderr, "atlas: " <> text)
     if json?, do: json(%{"error" => text}, 2), else: 2
   end
+
+  defp show({:error, text, code}, true) do
+    IO.puts(:stderr, "atlas: " <> text)
+    json(%{"error" => text, "code" => code}, 2)
+  end
+
+  defp show({:error, text, _code}, false), do: show({:error, text}, false)
 
   defp json(value, status) do
     IO.puts(JSON.encode!(value))

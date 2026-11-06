@@ -136,8 +136,8 @@ scenario "UC-Atlas-07: Runtime runs an agent's turns, and keeps their leases", f
     %{scene: scene, use_case: use_case} = Process.get(:uc07)
     home(t1)
 
-    for key <- Enum.map(1..4, &"TU-AS-#{use_case}-#{&1}") ++ [use_case, scene],
-        do: {_, 0, _} = atlas(i, ["delete", key])
+    AtlasE2E.Instance.cleanup_turn_fixtures(i, Enum.map(1..4, &"TU-AS-#{use_case}-#{&1}"))
+    for key <- [use_case, scene], do: {_, 0, _} = atlas(i, ["delete", key])
 
     gone(t1, "A scene with a turn")
   end

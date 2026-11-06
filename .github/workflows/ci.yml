@@ -47,6 +47,7 @@ jobs:
       - run: mix format --check-formatted
       # Fails when a file in bff/targets differs from what the contract generates, or is left over.
       - run: mix atlas.gen --check
+      - run: mix test
 
   beam:
     name: Bus, State, Control
@@ -118,6 +119,11 @@ jobs:
       - run: ATLAS_RELA_BIN="$ATLAS_E2E_RELA_BIN" rela/scripts/start-test.sh install
       - run: python3 rela/scripts/assemble.py --check
       - run: python3 -m unittest discover -s rela/tests -v
+      - name: Guidance against the pinned private HTTP store
+        working-directory: beam
+        env:
+          MIX_ENV: test
+        run: mix test apps/atlas_state/test/guidance_native_test.exs
       - run: sudo apt-get update && sudo apt-get install -y tmux lsof netcat-openbsd jq
       # rela-server, pinned in rela/scripts/start-test.sh; it downloads it when missing.
       - uses: actions/cache@v4
@@ -148,9 +154,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ATLAS_RELA_BIN: ${{ github.workspace }}/.rela-bin
-    # One deploy at a time; a newer merge waits for the running one.
+    # Readiness order is not commit order. Keep queued jobs, then admit only the
+    # current develop head inside the slot. Never cancel midway through a pair.
     concurrency:
       group: fly-deploy-test
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -170,7 +178,7 @@ jobs:
         run: |
           [ -n "$ATLAS_FLY_TOKEN_RELA" ] || { echo "::error::Add the secret FLY_API_TOKEN_TEST_RELA (fly tokens create deploy -a eyra-atlas-test-rela)"; exit 1; }
           [ -n "$ATLAS_FLY_TOKEN_CORE" ] || { echo "::error::Add the secret FLY_API_TOKEN_TEST (fly tokens create deploy -a eyra-atlas-test)"; exit 1; }
-          fly/deploy.sh test "develop-$GITHUB_SHA"
+          fly/deploy-test-current.sh "develop-$GITHUB_SHA"
 
   deploy-prod:
     name: Deploy prod on Fly, and a smoke check

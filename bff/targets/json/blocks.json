@@ -112,6 +112,11 @@
           "name": "cancel_to",
           "required": true,
           "type": "string"
+        },
+        {
+          "name": "code",
+          "required": false,
+          "type": "string"
         }
       ],
       "name": "confirm"
@@ -155,6 +160,41 @@
         }
       ],
       "name": "plan"
+    },
+    {
+      "fields": [
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "keys",
+          "required": true,
+          "type": "list of string"
+        },
+        {
+          "name": "operation",
+          "required": true,
+          "type": "console_operation"
+        },
+        {
+          "name": "scope",
+          "required": true,
+          "type": "console_scope"
+        },
+        {
+          "name": "available",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "console_action"
     }
   ],
   "endpoints": [
@@ -500,6 +540,18 @@
       "wire": "submit"
     },
     {
+      "call": "boot",
+      "name": "boot",
+      "params": [],
+      "path": "",
+      "replies": {
+        "error": "boot_error",
+        "shell": "shell"
+      },
+      "takes": "boot_request",
+      "wire": "boot"
+    },
+    {
       "call": "turn",
       "name": "turn",
       "params": [],
@@ -631,6 +683,21 @@
           "type": "string"
         },
         {
+          "name": "context",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "legend"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
           "name": "role",
           "required": true,
           "type": "string"
@@ -665,6 +732,251 @@
     }
   ],
   "models": [
+    {
+      "fields": [
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "worker",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_worker"
+    },
+    {
+      "fields": [
+        {
+          "name": "worker",
+          "required": true,
+          "type": "runtime_worker"
+        },
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_execution"
+    },
+    {
+      "fields": [
+        {
+          "name": "status",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "start",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "stop",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "stub_mode",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_controls"
+    },
+    {
+      "fields": [
+        {
+          "name": "harness",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "harness_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "capability_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "configured_model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "reported_model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "queued_input",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "durable_accept_query",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "consumption_evidence",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "literal_text",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_harness_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "controls",
+          "required": true,
+          "type": "runtime_controls"
+        },
+        {
+          "name": "harness",
+          "required": false,
+          "type": "runtime_harness_capabilities"
+        }
+      ],
+      "name": "runtime_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "execution",
+          "required": true,
+          "type": "runtime_execution"
+        },
+        {
+          "name": "item",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "activity",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "lease_until",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "outcome",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_turn"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_worker"
+        },
+        {
+          "name": "engine_running",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "capabilities",
+          "required": true,
+          "type": "runtime_capabilities"
+        },
+        {
+          "name": "item",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "owner",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "expected",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "handover",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "cannot_run",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "turns",
+          "required": true,
+          "type": "list of runtime_turn"
+        }
+      ],
+      "name": "runtime_status"
+    },
+    {
+      "fields": [
+        {
+          "name": "code",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "retryable",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_error"
+    },
     {
       "fields": [
         {
@@ -883,6 +1195,146 @@
     {
       "fields": [
         {
+          "name": "name",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "url",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "intent",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "console_operation"
+    },
+    {
+      "fields": [
+        {
+          "name": "page",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "context",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "on",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "row",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "console_scope"
+    },
+    {
+      "fields": [
+        {
+          "name": "id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "label",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "to",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "shell_tab"
+    },
+    {
+      "fields": [
+        {
+          "name": "to",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "boot_request"
+    },
+    {
+      "fields": [
+        {
+          "name": "title",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "env",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "spec",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "revision",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "tabs",
+          "required": true,
+          "type": "list of shell_tab"
+        },
+        {
+          "name": "initial_to",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "active_tab",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "shell"
+    },
+    {
+      "fields": [
+        {
+          "name": "error",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "boot_error"
+    },
+    {
+      "fields": [
+        {
+          "name": "surface",
+          "required": false,
+          "type": "string"
+        },
+        {
           "name": "env",
           "required": true,
           "type": "string"
@@ -907,6 +1359,11 @@
     },
     {
       "fields": [
+        {
+          "name": "surface",
+          "required": false,
+          "type": "string"
+        },
         {
           "name": "env",
           "required": true,
@@ -1163,6 +1620,596 @@
   ],
   "protocol": [
     {
+      "channel": "runtime",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "runtime_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "status",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "start"
+      ],
+      "direction": "request",
+      "name": "runtime_start",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "start",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "stop"
+      ],
+      "direction": "request",
+      "name": "runtime_stop",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "stop",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "attach"
+      ],
+      "direction": "request",
+      "name": "runtime_attach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "attach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "detach"
+      ],
+      "direction": "request",
+      "name": "runtime_detach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "detach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "active"
+      ],
+      "direction": "request",
+      "name": "runtime_active",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "active",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "idle"
+      ],
+      "direction": "request",
+      "name": "runtime_idle",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "idle",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "silent"
+      ],
+      "direction": "request",
+      "name": "runtime_silent",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "silent",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "crash-once"
+      ],
+      "direction": "request",
+      "name": "runtime_crash_once",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "crash once",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "crash"
+      ],
+      "direction": "request",
+      "name": "runtime_crash",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "crash",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "direction": "push",
+      "name": "runtime_status_event",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "status",
+          "required": {
+            "sequence": "integer",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "event",
+            "op": "status",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "boot",
+      "replies": [
+        {
+          "absent": [
+            "error"
+          ],
+          "effect": "complete",
+          "name": "shell",
+          "optional": {
+            "active_tab": "string"
+          },
+          "required": {
+            "env": "string",
+            "initial_to": "string",
+            "revision": "string",
+            "spec": "string",
+            "tabs": "list",
+            "title": "string"
+          },
+          "select": {
+            "op": "boot"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "present": [
+            "error"
+          ],
+          "required": {
+            "error": "string"
+          },
+          "select": {
+            "op": "boot"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "to": "string"
+        },
+        "select": {
+          "op": "boot"
+        }
+      }
+    },
+    {
       "channel": "control",
       "direction": "request",
       "name": "open",
@@ -1171,6 +2218,7 @@
           "effect": "complete",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1207,6 +2255,7 @@
           "effect": "complete",
           "name": "stored",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1228,6 +2277,7 @@
           "effect": "complete",
           "name": "refused",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1249,6 +2299,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1289,6 +2340,9 @@
         {
           "effect": "progress",
           "name": "welcome",
+          "optional": {
+            "surface": "string"
+          },
           "required": {
             "env": "string",
             "spec": "string"
@@ -1301,6 +2355,7 @@
           "effect": "complete",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1324,7 +2379,8 @@
       ],
       "request": {
         "optional": {
-          "as": "string"
+          "as": "string",
+          "surface": "string"
         },
         "required": {
           "client": "string",
@@ -1384,6 +2440,7 @@
           "effect": "complete",
           "name": "stored",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1405,6 +2462,7 @@
           "effect": "complete",
           "name": "refused",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1455,6 +2513,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1488,6 +2547,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",
@@ -1516,6 +2576,7 @@
           "effect": "progress",
           "name": "page",
           "optional": {
+            "actions_revision": "string",
             "at": "string",
             "back": "string",
             "count": "string",

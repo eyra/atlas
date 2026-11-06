@@ -96,6 +96,9 @@ scenario "UC-Atlas-08: break down several children before the turn hands over", 
     )
 
     wait_for.(i, scene, "Assigned to", "coordinator")
+    # IS-Atlas-123: a replacement must never race the durable deferred handover.
+    {_, replacement_status, _} = atlas(i, ["get", "TU-AS-#{scene}-2", "--json"])
+    replacement_status != 0 || raise "the old owner got a replacement before handover"
     {_, status, _} = atlas(agent, ["turn", "--json"])
     status != 0 || raise "the old agent still has a current turn"
   end
@@ -132,7 +135,8 @@ scenario "UC-Atlas-08: break down several children before the turn hands over", 
     wait_for.(i, scene["key"], "Assigned to", "melle")
     {_, status, _} = atlas(agent, ["turn", "end", "too late", "--json"])
     status != 0 || raise "cancelled agent could still end a turn"
-    for key <- [turn, uc["key"], scene["key"]], do: atlas_json(i, ["delete", key])
+    AtlasE2E.Instance.cleanup_turn_fixtures(i, [turn])
+    for key <- [uc["key"], scene["key"]], do: atlas_json(i, ["delete", key])
   end
 
   step "Clean up this scenario's plan", fn ->
@@ -144,7 +148,7 @@ scenario "UC-Atlas-08: break down several children before the turn hands over", 
       atlas_json(i, ["delete", uc])
     end
 
-    atlas_json(i, ["delete", turn])
+    AtlasE2E.Instance.cleanup_turn_fixtures(i, [turn])
     atlas_json(i, ["delete", scene])
     gone(t1, "Breakdown stays in one turn")
   end

@@ -25,6 +25,37 @@ The tunnel is `fly proxy 7693:7691 -a eyra-atlas-test`, flyctl's WireGuard into 
 2. rela, then the core.
 3. A smoke check that reads only (`fly/smoke.sh test`).
 
+The test deployment job serializes the entire rela/core pair without cancelling
+an in-flight update. Pending jobs queue instead of replacing one another. After
+acquiring its slot, `fly/deploy-test-current.sh` compares the checkout/build label
+with the current authenticated `origin/develop` head. A stale job exits successfully
+without any Fly operations; unresolved or inconsistent identities fail closed.
+If develop advances after admission, the admitted pair finishes normally, and a
+later eligible job deploys the newer head. CI readiness order alone never determines
+which source revision may deploy. Production delivery is unchanged.
+
+A successful stale skip is not delivery evidence: confirm the intended paired
+image labels, manifest checks and positive smoke result in the deployment log.
+
+The deployment verifies the packaged description manifest on both apps before smoke.
+Smoke checks the image label and reads Control's advertised kinds. Ordinary kinds
+must return successful lists. Kinds mapped by the packaged description's guidance
+roles must instead return CLI exit 2 with the exact typed State code
+`exact_identity_required`. A timeout, missing code, malformed JSON, unavailable
+backend, unknown kind, or unexpected list success fails smoke with the kind and cause.
+It never infers a code from the human error text or skips a kind without probing it.
+
+This verifies the deployed scoped-read guard and the Control/CLI path, without
+enumerating restricted collections or creating live guidance facts. It does not prove
+positive scoped reads of stored guidance on the deployed environment. Actual State
+tests use private synthetic execution, interaction and receipt records to prove valid
+exact/execution/parent scopes, invalid scopes and writer authority separately. Private
+composition tests run smoke's client against the real CLI, Control, State and rela.
+
+State failure codes pass through the existing failure confirm's optional `code` field
+and CLI JSON errors. Human text and exit statuses stay the same. Clients that ignore
+the optional field keep working; smoke fails closed if an older server drops the code.
+
 `atlas status --env test` shows the build as the image label `develop-<commit>`. Prod is deployed the same way from master: `docs/guides/prod.md`.
 
 ## The secrets CI needs
@@ -86,3 +117,5 @@ A hold ends without a move with `fly ssh console -a <app> -C "rm /data/hold"` on
 - A deploy refused before it starts: this build's description does not describe data rela holds on Fly. The job names it; test keeps its build. Migrate it (above).
 - Held: the machines log `held: /data/hold is there`. A `fetch-from-fly --hold` is waiting for its `move-to-fly`.
 - `fly ssh console -a eyra-atlas-test-rela` opens a shell on rela's machine; its data is in `/data/rela`.
+
+<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0027).</sub>

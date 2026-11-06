@@ -106,6 +106,155 @@ entities:
       outcome:
         type: string
         description: The agent's fact about what it did; Runtime reads it and ends the turn
+      attempt:
+        type: string
+        description: Runtime execution fence; a new attempt never inherits old guidance.
+  worker_execution:
+    label: Worker execution
+    plural: worker_executions
+    id_type: manual
+    description: Immutable durable execution; only the State guidance operation writes
+      this record.
+    properties:
+      environment:
+        type: string
+        required: true
+      worker:
+        type: string
+        required: true
+      turn:
+        type: string
+        required: true
+      attempt:
+        type: string
+        required: true
+      machine:
+        type: string
+        required: true
+      harness:
+        type: string
+        required: true
+      harness_version:
+        type: string
+        required: true
+      configured_model:
+        type: string
+        required: true
+      reported_model:
+        type: string
+      capability_version:
+        type: string
+        required: true
+      queued_input:
+        type: boolean
+        required: true
+      durable_accept_query:
+        type: boolean
+        required: true
+      consumption_evidence:
+        type: boolean
+        required: true
+      recorded_position:
+        type: integer
+        required: true
+      recorded_at:
+        type: datetime
+        required: true
+  interaction:
+    label: Interaction
+    plural: interactions
+    id_type: manual
+    description: Immutable durable interaction; only the State guidance operation writes
+      this record.
+    properties:
+      environment:
+        type: string
+        required: true
+      actor:
+        type: string
+        required: true
+      client_key:
+        type: string
+        required: true
+      body:
+        type: string
+        required: true
+      body_digest:
+        type: string
+        required: true
+      worker:
+        type: string
+        required: true
+      turn:
+        type: string
+        required: true
+      attempt:
+        type: string
+        required: true
+      mode:
+        type: string
+        required: true
+      execution:
+        type: string
+        required: true
+      cause:
+        type: string
+        required: true
+      recorded_position:
+        type: integer
+        required: true
+      recorded_at:
+        type: datetime
+        required: true
+  interaction_receipt:
+    label: Interaction receipt
+    plural: interaction_receipts
+    id_type: manual
+    description: Immutable durable receipt; only the State guidance operation writes
+      this record.
+    properties:
+      environment:
+        type: string
+        required: true
+      interaction:
+        type: string
+        required: true
+      worker:
+        type: string
+        required: true
+      turn:
+        type: string
+        required: true
+      attempt:
+        type: string
+        required: true
+      execution:
+        type: string
+        required: true
+      stage:
+        type: string
+        required: true
+      evidence_id:
+        type: string
+        required: true
+      admission_id:
+        type: string
+      consumption_id:
+        type: string
+      reason:
+        type: string
+      writer:
+        type: string
+        required: true
+      cause:
+        type: string
+        required: true
+      recorded_position:
+        type: integer
+        required: true
+      recorded_at:
+        type: datetime
+        required: true
 relations:
   assigned_to:
     label: assigned to

@@ -119,7 +119,10 @@ defmodule AtlasE2E.CompositionTest do
   test "foundation alone serves Control tools without software or Eyra", ctx do
     start(ctx, "foundation")
     kinds = command(ctx, ["help"]) |> Enum.map(& &1["kind"])
-    assert Enum.sort(kinds) == ~w(agent assignment person turn)
+
+    assert Enum.sort(kinds) ==
+             ~w(agent assignment interaction interaction_receipt person turn worker_execution)
+
     tools = command(ctx, ["tools"]) |> JSON.encode!()
 
     for name <- ["scene", "use_case", "issue", "pull_request", "accepted_by"],
@@ -127,6 +130,33 @@ defmodule AtlasE2E.CompositionTest do
 
     person = command(ctx, ["put", "person", "--name", "Tester"])
     assert person["key"] == "tester"
+
+    # IS-124: the real CLI/Control/State chain preserves the scope guard. The smoke
+    # client reads this private composition and creates no guidance records.
+    before = Path.wildcard(Path.join(ctx.dir, "store/rela/entities/**/*.md"))
+    python = System.get_env("ATLAS_CONFIG_PYTHON") || "python3"
+
+    {out, status} =
+      System.cmd(
+        python,
+        [
+          Path.join(@root, "fly/smoke-reads.py"),
+          Path.join(ctx.dir, "bin/atlas"),
+          Path.join(ctx.dir, "rela/atlas.json"),
+          "test",
+          "private-foundation"
+        ],
+        env: ctx.env,
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, out
+    assert out =~ "smoke: person: 1"
+
+    for kind <- ["worker_execution", "interaction", "interaction_receipt"],
+        do: assert(out =~ "#{kind}: scoped-read guard verified")
+
+    assert before == Path.wildcard(Path.join(ctx.dir, "store/rela/entities/**/*.md"))
   end
 
   test "incident uses stub turns and merged Issues, with independent person resolution", ctx do

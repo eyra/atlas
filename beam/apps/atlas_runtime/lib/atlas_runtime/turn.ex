@@ -24,7 +24,7 @@ defmodule AtlasRuntime.Turn do
 
   require Logger
 
-  alias AtlasRuntime.Talk
+  alias AtlasRuntime.{Agent, Guidance, Talk}
 
   def start_link(turn), do: GenServer.start_link(__MODULE__, turn, name: via(turn.key))
 
@@ -50,50 +50,52 @@ defmodule AtlasRuntime.Turn do
 
   @impl true
   def handle_continue(:start, turn) do
-    started = %{key: turn.key, item: turn.item, agent: turn.agent, kind: turn[:kind]}
+    now = now()
 
-    case turn.port.start(started, turn.port_opts) do
-      {:ok, agent} ->
-        ref = Process.monitor(agent)
-        now = now()
+    state =
+      Map.merge(turn, %{
+        agent_pid: nil,
+        ref: nil,
+        since: now,
+        active: now,
+        written: now,
+        what: nil,
+        leaving: nil,
+        guidance: nil,
+        attempt: AtlasBus.Envelope.new_id()
+      })
 
-        state =
-          Map.merge(turn, %{
-            agent_pid: agent,
-            ref: ref,
-            since: now,
-            active: now,
-            written: now,
-            what: nil,
-            leaving: nil
-          })
+    n = state.names
 
-        n = turn.names
+    values = %{
+      n.state => n.running,
+      n.machine => state.machine,
+      n.lease => at(now + state.silence),
+      n.activity => "started"
+    }
 
-        values = %{
-          n.state => n.running,
-          n.machine => turn.machine,
-          n.lease => at(now + turn.silence),
-          n.activity => "started"
-        }
+    values = if n[:attempt], do: Map.put(values, n.attempt, state.attempt), else: values
 
-        case put(state, "create", values, turn.cause) do
-          :ok ->
-            schedule(state)
-            {:noreply, state}
+    # The turn and its immutable execution identity precede any adapter/model input.
+    with :ok <- put(state, "create", values, state.cause),
+         {:ok, guidance} <- Guidance.register(state),
+         true <- now() < now + min(state.silence, state.max),
+         true <-
+           not Guidance.configured?(state) or match?({:eligible, _}, Guidance.eligible(state)),
+         {:ok, agent} <- state.port.start(Guidance.context(state), state.port_opts) do
+      state = %{state | agent_pid: agent, ref: Process.monitor(agent), guidance: guidance}
+      schedule(state)
 
-          {:error, why} ->
-            turn.port.stop(agent)
-            Logger.warning("runtime: #{turn.key} not started: #{why}")
-            {:stop, :normal, state}
-        end
+      if guidance != nil and state[:guidance_every] != :manual do
+        AtlasBus.listen(get_in(state.description, ["guidance", "interaction", "kind"]))
+        Process.send_after(self(), :guidance_tick, 0)
+      end
 
-      {:error, why} ->
-        Logger.warning(
-          "runtime: #{turn.key} not started: the agent did not start: #{inspect(why)}"
-        )
-
-        {:stop, :normal, turn}
+      {:noreply, state}
+    else
+      error ->
+        Logger.warning("runtime: #{state.key} not started: #{inspect(error)}")
+        finish_turn(state, "adapter startup or durable execution registration failed")
     end
   end
 
@@ -162,6 +164,25 @@ defmodule AtlasRuntime.Turn do
     end
   end
 
+  def handle_info(:guidance_tick, state) do
+    Process.send_after(self(), :guidance_tick, state[:guidance_every] || state.lease)
+    handle_info(:guidance, state)
+  end
+
+  def handle_info(:guidance, state) do
+    {_, guidance} = Guidance.round(state, state.guidance, state.agent_pid, :active)
+    {:noreply, %{state | guidance: guidance}}
+  end
+
+  def handle_info({:atlas_bus, %AtlasBus.Envelope{class: "stored"}, _}, state),
+    do: handle_info(:guidance, state)
+
+  # Events are only wakeups. Even typed evidence must be queried, never trusted here.
+  def handle_info({:agent, pid, {:guidance, _evidence}}, %{agent_pid: pid} = state) do
+    {_, guidance} = Guidance.round(state, state.guidance, state.agent_pid, :active)
+    {:noreply, %{state | guidance: guidance}}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
@@ -178,7 +199,13 @@ defmodule AtlasRuntime.Turn do
   def handle_cast({:leave, _why}, state), do: {:noreply, state}
 
   defp finish_turn(state, why) do
-    if state.agent_pid, do: state.port.stop(state.agent_pid)
+    if state.agent_pid do
+      Agent.close_input(state.port, state.agent_pid)
+      # Reconcile one bounded page before stopping; Engine handles remaining history.
+      Guidance.round(state, state.guidance, state.agent_pid, :closed)
+      Agent.stop(state.port, state.agent_pid)
+    end
+
     n = state.names
 
     values = %{n.state => n.ended, n.why => why, n.lease => "", n.ended_at => at(now())}

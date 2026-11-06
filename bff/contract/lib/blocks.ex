@@ -11,6 +11,8 @@ defmodule AtlasBFFContract.Blocks do
   `bff/targets/json/blocks.json` for clients in other languages.
   """
   use AtlasBFF.Schema
+  models_from(AtlasBFFContract.Runtime)
+  protocol(AtlasBFFContract.Runtime.__schema__().protocol)
 
   # 0.7.0: markup names meaning; part (main, related) replaces border and columns.
   # 0.8.0: a pair may carry its origin: the fact that set it (since, by, cause).
@@ -33,7 +35,8 @@ defmodule AtlasBFFContract.Blocks do
     "position" => :integer,
     "at" => :string,
     "count" => :string,
-    "refused" => :list
+    "refused" => :list,
+    "actions_revision" => :string
   }
   @open %{
     name: :page,
@@ -72,7 +75,38 @@ defmodule AtlasBFFContract.Blocks do
   }
   @plan %{name: :plan, select: %{"op" => "plan"}, effect: :progress, required: %{"block" => :map}}
 
+  # Boot is additive: existing hello/welcome/page clients keep their 0.14.0 exchange.
   protocol([
+    %{
+      name: :boot,
+      channel: :control,
+      direction: :request,
+      request: %{select: %{"op" => "boot"}, optional: %{"to" => :string}},
+      replies: [
+        %{
+          name: :shell,
+          select: %{"op" => "boot"},
+          absent: ["error"],
+          effect: :complete,
+          required: %{
+            "title" => :string,
+            "env" => :string,
+            "spec" => :string,
+            "revision" => :string,
+            "tabs" => :list,
+            "initial_to" => :string
+          },
+          optional: %{"active_tab" => :string}
+        },
+        %{
+          name: :error,
+          select: %{"op" => "boot"},
+          present: ["error"],
+          effect: :error,
+          required: %{"error" => :string}
+        }
+      ]
+    },
     %{
       name: :open,
       channel: :control,
@@ -104,14 +138,15 @@ defmodule AtlasBFFContract.Blocks do
       request: %{
         select: %{"op" => "hello"},
         required: %{"env" => :string, "client" => :string, "spec" => :string},
-        optional: %{"as" => :string}
+        optional: %{"as" => :string, "surface" => :string}
       },
       replies: [
         %{
           name: :welcome,
           select: %{"op" => "welcome"},
           effect: :progress,
-          required: %{"env" => :string, "spec" => :string}
+          required: %{"env" => :string, "spec" => :string},
+          optional: %{"surface" => :string}
         },
         Map.put(@open, :requires, [:welcome])
       ]
@@ -330,6 +365,8 @@ defmodule AtlasBFFContract.Blocks do
     field :confirm_label, :string
     field :confirm_to, :call
     field :cancel_to, :string, required: true
+    # Optional failure code from State; never inferred from the human explanation.
+    field :code, :string
   end
 
   # One step of an agent's plan: the form it fills (`label`, its title; `inputs`, its
@@ -357,6 +394,36 @@ defmodule AtlasBFFContract.Blocks do
     field :by, :string
     field :before, :string
     field :steps, {:list, :step}, required: true
+  end
+
+  # Opt-in Console presentation. These are auxiliary action content, not page layout.
+  defmodel :console_operation do
+    field :name, :string, required: true
+    field :to, :string
+    field :url, :string
+    field :intent, :string
+  end
+
+  defmodel :console_scope do
+    field :page, :string, required: true
+    field :revision, :string, required: true
+    field :context, :string, required: true
+    field :on, :string
+    field :row, :string
+  end
+
+  defblock :console_action do
+    field :label, :string, required: true
+    field :keys, {:list, :string}, required: true
+    field :operation, :console_operation, required: true
+    field :scope, :console_scope, required: true
+    field :available, :boolean, required: true
+    field :reason, :string
+  end
+
+  defmarkup :legend do
+    field :title, :string, required: true
+    field :context, :string, required: true
   end
 
   # Markup: kinds that cover a stretch of a view model's blocks. All markup nests, of
@@ -431,11 +498,43 @@ defmodule AtlasBFFContract.Blocks do
   # The session's other messages, in JSON lines over the socket (bff/README.md, Protocol).
   # Each endpoint's call is the message's "op".
 
+  # Native shell metadata, independent of page blocks and terminal key bindings.
+  defmodel :shell_tab do
+    field :id, :string, required: true
+    field :label, :string, required: true
+    field :to, :string, required: true
+  end
+
+  defmodel :boot_request do
+    field :to, :string
+  end
+
+  defmodel :shell do
+    field :title, :string, required: true
+    field :env, :string, required: true
+    field :spec, :string, required: true
+    field :revision, :string, required: true
+    field :tabs, {:list, :shell_tab}, required: true
+    field :initial_to, :string, required: true
+    field :active_tab, :string
+  end
+
+  defmodel :boot_error do
+    field :error, :string, required: true
+  end
+
+  defendpoint :boot,
+    wire: :boot,
+    call: :boot,
+    takes: :boot_request,
+    replies: [shell: :shell, error: :boot_error]
+
   # A client's first message: its environment, what it is, and the contract version it
   # implements. Control of another environment, or one newer than the client's version,
   # answers bye and closes; else welcome, then its start page. `as`: the key of the fact
   # an agent client is (an agent's, such as coordinator), when it says so; no sign-in yet.
   defmodel :hello do
+    field :surface, :string
     field :env, :string, required: true
     field :client, :string, required: true
     field :spec, :string, required: true
@@ -443,6 +542,7 @@ defmodule AtlasBFFContract.Blocks do
   end
 
   defmodel :welcome do
+    field :surface, :string
     field :env, :string, required: true
     field :spec, :string, required: true
   end

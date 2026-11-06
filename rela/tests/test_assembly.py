@@ -27,12 +27,41 @@ class AssemblyTest(unittest.TestCase):
 
     def test_equivalence_and_freshness(self):
         result = assemble.build(self.root, self.manifest)
-        self.assertEqual(result, self.original)
+        prior = copy.deepcopy(result)
+        self.assertEqual(prior.pop('shell')['title'], 'Atlas Console')
+        self.assertEqual(set(prior.pop('guidance')), {'execution', 'interaction', 'receipt'})
+        for kind in ('worker_execution', 'interaction', 'interaction_receipt'):
+            self.assertEqual(prior['entities'].pop(kind), {'top': False, 'by_hand': False})
+        prior['runtime']['turn'].pop('attempt')
+        prior['entities']['turn']['properties'].pop('attempt')
+        self.assertEqual(prior, self.original)
         assemble.build(self.root, self.manifest, check=True)
         path = self.root / 'modules/foundation/atlas.json'
         path.write_text(path.read_text() + '\n')
         with self.assertRaisesRegex(config.ConfigError, 'stale generated'):
             assemble.build(self.root, self.manifest, check=True)
+
+    def test_shell_navigation_references_and_uniqueness(self):
+        extra = assemble.build(self.root, self.manifest)
+        for mutate in [
+            lambda s: s['tabs'].append(dict(s['tabs'][0])),
+            lambda s: s['tabs'][0].update({'to': '/k/missing'}),
+            lambda s: s['tabs'][0].update({'to': '/k/scene/new'}),
+            lambda s: s['tabs'][0].update({'assigned': 'true'}),
+            lambda s: s['tabs'][0].update({'layout': 'terminal'}),
+            lambda s: s.update({'tabs': []}),
+        ]:
+            bad = copy.deepcopy(extra)
+            mutate(bad['shell'])
+            with self.assertRaises(config.ConfigError):
+                assemble.validate(bad, self.schema)
+
+    def test_component_key_templates_are_usable_and_bounded(self):
+        for template in ['', ' \t', None, 'x' * 2049]:
+            bad = copy.deepcopy(self.original)
+            bad['relations']['assignment']['component']['key'] = template
+            with self.assertRaises(config.ConfigError):
+                assemble.validate(bad, self.schema)
 
     def test_duplicate_leaves_arrays_and_json_keys(self):
         for value in [1, [], 'text', {}]:
@@ -67,6 +96,20 @@ class AssemblyTest(unittest.TestCase):
                 assemble.validate(extra, self.schema)
         with self.assertRaisesRegex(config.ConfigError, 'missing actor'):
             assemble.validate(self.original, self.schema, {'agent': [], 'person': []})
+
+    def test_guidance_mapping_is_complete_and_unambiguous(self):
+        current = assemble.read(ROOT / 'atlas.json')
+        for mutate in [
+            lambda x: x['guidance'].pop('receipt'),
+            lambda x: x['guidance']['interaction']['fields'].pop('actor'),
+            lambda x: x['guidance']['interaction']['fields'].update({'actor': 'body'}),
+            lambda x: x['guidance']['receipt'].update({'kind': 'interaction'}),
+            lambda x: x['runtime']['turn'].pop('attempt'),
+        ]:
+            extra = copy.deepcopy(current)
+            mutate(extra)
+            with self.assertRaises((config.ConfigError, KeyError)):
+                assemble.validate(extra, self.schema)
 
     def test_failure_retains_previous_artifacts(self):
         before = (self.root / 'atlas.json').read_bytes()

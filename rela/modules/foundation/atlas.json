@@ -19,7 +19,8 @@
       "activity": "activity",
       "why": "why",
       "ended_at": "ended_at",
-      "outcome": "outcome"
+      "outcome": "outcome",
+      "attempt": "attempt"
     },
     "agent": {
       "cannot_run": "cannot_run"
@@ -143,6 +144,11 @@
             "turn_owner"
           ],
           "multiline": true
+        },
+        "attempt": {
+          "set_by": [
+            "runtime"
+          ]
         }
       }
     },
@@ -174,6 +180,78 @@
           "lower": true,
           "error": "name must start with a letter, e.g. Coordinator"
         }
+      }
+    },
+    "worker_execution": {
+      "top": false,
+      "by_hand": false
+    },
+    "interaction": {
+      "top": false,
+      "by_hand": false
+    },
+    "interaction_receipt": {
+      "top": false,
+      "by_hand": false
+    }
+  },
+  "guidance": {
+    "execution": {
+      "kind": "worker_execution",
+      "fields": {
+        "environment": "environment",
+        "worker": "worker",
+        "turn": "turn",
+        "attempt": "attempt",
+        "machine": "machine",
+        "harness": "harness",
+        "harness_version": "harness_version",
+        "configured_model": "configured_model",
+        "reported_model": "reported_model",
+        "capability_version": "capability_version",
+        "queued_input": "queued_input",
+        "durable_accept_query": "durable_accept_query",
+        "consumption_evidence": "consumption_evidence",
+        "recorded_at": "recorded_at",
+        "recorded_position": "recorded_position"
+      }
+    },
+    "interaction": {
+      "kind": "interaction",
+      "fields": {
+        "environment": "environment",
+        "actor": "actor",
+        "client_key": "client_key",
+        "body": "body",
+        "body_digest": "body_digest",
+        "worker": "worker",
+        "turn": "turn",
+        "attempt": "attempt",
+        "mode": "mode",
+        "execution": "execution",
+        "cause": "cause",
+        "recorded_at": "recorded_at",
+        "recorded_position": "recorded_position"
+      }
+    },
+    "receipt": {
+      "kind": "interaction_receipt",
+      "fields": {
+        "environment": "environment",
+        "interaction": "interaction",
+        "worker": "worker",
+        "turn": "turn",
+        "attempt": "attempt",
+        "execution": "execution",
+        "stage": "stage",
+        "evidence_id": "evidence_id",
+        "admission_id": "admission_id",
+        "consumption_id": "consumption_id",
+        "reason": "reason",
+        "writer": "writer",
+        "cause": "cause",
+        "recorded_at": "recorded_at",
+        "recorded_position": "recorded_position"
       }
     }
   }
