@@ -36,15 +36,33 @@ defmodule AtlasRuntime.Agent.Codex do
       File.mkdir_p!(folder)
       helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
       kept = ~w(HOME USER LOGNAME PATH TMPDIR LANG LC_ALL LC_CTYPE CODEX_HOME)
-      unset = for {key, _} <- System.get_env(), key not in kept, do: {String.to_charlist(key), false}
-      port = Port.open({:spawn_executable, python}, [
-        :binary, :exit_status, {:line, 65_536},
-        {:args, [helper, command, Path.expand(workspace), Path.expand(folder), goal, sandbox]},
-        {:env, unset}
-      ])
+
+      unset =
+        for {key, _} <- System.get_env(), key not in kept, do: {String.to_charlist(key), false}
+
+      port =
+        Port.open({:spawn_executable, python}, [
+          :binary,
+          :exit_status,
+          {:line, 65_536},
+          {:args, [helper, command, Path.expand(workspace), Path.expand(folder), goal, sandbox]},
+          {:env, unset}
+        ])
+
       monitor = Process.monitor(owner)
-      {:ok, %{owner: owner, monitor: monitor, port: port, partial: "", completed: false,
-               failed: false, result: nil, process_exit: nil, stopping: nil}}
+
+      {:ok,
+       %{
+         owner: owner,
+         monitor: monitor,
+         port: port,
+         partial: "",
+         completed: false,
+         failed: false,
+         result: nil,
+         process_exit: nil,
+         stopping: nil
+       }}
     else
       {:stop, :codex_requires_command_workspace_goal_and_python}
     end
@@ -80,9 +98,11 @@ defmodule AtlasRuntime.Agent.Codex do
       state.stopping != nil and status == 0 and is_integer(state.process_exit) ->
         if state.stopping != :owner_gone, do: GenServer.reply(state.stopping, :ok)
         {:stop, :normal, %{state | port: nil}}
+
       status == 0 and state.process_exit == 0 and state.completed and not state.failed ->
         send(state.owner, {:agent, self(), {:ended, state.result || "Codex completed the goal"}})
         {:stop, :normal, %{state | port: nil}}
+
       true ->
         {:stop, {:codex_failed, status, state.process_exit}, %{state | port: nil}}
     end
@@ -101,8 +121,10 @@ defmodule AtlasRuntime.Agent.Codex do
     send(state.owner, {:agent, self(), {:activity, "codex: " <> activity}})
     state = if type == "turn.completed", do: %{state | completed: true}, else: state
     state = if type in ["turn.failed", "error"], do: %{state | failed: true}, else: state
+
     if type == "item.completed" and item["type"] == "agent_message" and is_binary(text),
-      do: %{state | result: String.slice(text, 0, 2_000)}, else: state
+      do: %{state | result: String.slice(text, 0, 2_000)},
+      else: state
   end
 
   defp consume(_, state), do: state
@@ -114,5 +136,6 @@ defmodule AtlasRuntime.Agent.Codex do
   rescue
     ArgumentError -> :ok
   end
+
   def terminate(_, _), do: :ok
 end

@@ -65,6 +65,23 @@ the optional field keep working; smoke fails closed if an older server drops the
 
 `atlas status --env test` shows the build as the image label `develop-<commit>`. Prod is deployed the same way from master: `docs/guides/prod.md`.
 
+## Test-only worker access
+
+The image derives `rela/atlas-test.json` from the canonical description and
+`fly/test/worker-access.json`. Only test's core selects it; production still selects
+`rela/atlas.json`, with no worker grants added. Test also exposes the generic Workers
+tab. Named actors `melle` and `releasewriter` may read and submit; `releaseviewer`
+may only read. All other actors remain denied. A listed actor must still exist in
+State; the grant does not create a person or authenticate a new identity.
+
+Test enables release RPC only on loopback (`atlas@localhost`, loopback EPMD and
+distribution sockets), reachable administratively through Fly SSH. This permits
+synthetic execution fixtures to use the real Bus/State admission path without
+exposing a remote Runtime writer endpoint or changing production distribution.
+Fixture scripts must first require `AtlasBus.environment() == "test"`, use distinct
+fixture keys and stop/end only their own synthetic turns. Immutable guidance and
+receipt evidence remains retained; no raw deletion bypass is used for cleanup.
+
 ## The secrets CI needs
 
 Two repository secrets, one deploy token per app (each can manage only its own app):
