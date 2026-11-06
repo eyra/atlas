@@ -446,7 +446,7 @@ defmodule AtlasTui.ConsoleTest do
     assert fallback.console.expected == "/k/widget"
 
     path = "/workers/box/W-1/R-1/attempt-1"
-    {detail, []} = Console.receive(model, page(path))
+    {detail, _history_read} = Console.receive(model, page(path))
     {pending, [_]} = Console.refresh(detail)
     {preserved, []} = Console.receive(pending, %{boot(path) | "active_tab" => nil})
     assert preserved.path == path

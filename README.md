@@ -68,6 +68,31 @@ Run `atlas tui --env test` (or `--env prod`) to open Console; there is no
 To try local uncommitted client work without the launcher's automatic update,
 run `ATLAS_NO_UPDATE=1 bin/atlas tui --env test` from this checkout.
 
+### Exact-turn worker conversations
+
+Worker detail keeps durable guidance history and ephemeral output separate.
+History and receipt reads are explicitly paged through Control's declared actions;
+receipt inspection binds only the selected loaded interaction for that exact
+environment, machine, worker, turn and attempt. A recorded interaction is not
+delivery or consumption evidence.
+
+Guidance is literal text, including multiline Unicode and command-looking input.
+Partial drafts and their submission keys survive reconnect and resize. Once sent,
+the payload is locked until its outcome is known: lost acknowledgements are queried
+by the original key before an explicit identical retry. Pre-admission validation
+refusals remain editable. An unavailable or stale target retains the draft without
+manufacturing a form or redirecting to a successor attempt.
+
+Output uses a separate authenticated Control connection with one outstanding
+request and bounded polling, so it does not queue behind guidance or navigation.
+Replay uses the last accepted opaque cursor; duplicates are suppressed, while
+out-of-order batches, retention loss and epoch resets are shown explicitly rather
+than implying continuity. The local display retains at most 1,000 events within
+its 224 KiB event budget and marks local omissions. Output closure is not worker
+completion, and output activity never proves a guidance receipt. Missing or
+unsupported capabilities remain explicit; native output support does not imply
+native durable guidance support.
+
 ### Console presentation (UC-Atlas-44)
 
 Console lists use bordered title/count headings and one terminal line per item:

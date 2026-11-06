@@ -14,7 +14,7 @@ defmodule AtlasTui.App do
     environment's other logs.
   """
 
-  alias AtlasTui.{Console, Keys, Model, View}
+  alias AtlasTui.{Console, Keys, Model, View, WorkerConversation, WorkerOutputConnection}
 
   # How long a lone escape byte waits for the rest of a key's sequence (`\e[B` is Down)
   # before it counts as Escape: `escape_ms` in the settings. The input is read a byte at
@@ -42,6 +42,11 @@ defmodule AtlasTui.App do
       settings: settings,
       reconcile: reconcile,
       socket: nil,
+      output: nil,
+      output_target: nil,
+      output_monitor: nil,
+      output_tick: nil,
+      output_retry: nil,
       buffer: "",
       escape_wait: settings["escape_ms"] || @escape_wait,
       agent: nil,
@@ -125,6 +130,49 @@ defmodule AtlasTui.App do
       :resized ->
         loop(draw(state))
 
+      {:worker_output_connection, pid, :ready} when pid == state.output ->
+        {model, outgoing} = WorkerConversation.output_connected(state.model)
+        loop(draw(effects(%{state | model: model}, outgoing)))
+
+      {:worker_output_connection, pid, {:message, message}} when pid == state.output ->
+        {model, outgoing} = WorkerConversation.output_receive(state.model, message)
+        loop(draw(effects(%{state | model: model}, outgoing)))
+
+      {:worker_output_connection, pid, {:closed, reason}} when pid == state.output ->
+        loop(draw(output_failed(state, reason)))
+
+      {:worker_output_connection, pid, {:rejected, _id, reason}} when pid == state.output ->
+        loop(draw(output_failed(state, reason)))
+
+      {:worker_output_connection, _old, _message} ->
+        loop(state)
+
+      {:DOWN, monitor, :process, pid, reason}
+      when monitor == state.output_monitor and pid == state.output ->
+        loop(draw(output_failed(state, reason)))
+
+      {:worker_output_poll, pid, token} when pid == state.output ->
+        case state.output_tick do
+          {_timer, ^token} ->
+            {model, outgoing} = WorkerConversation.output_next(state.model)
+            loop(effects(%{state | model: model, output_tick: nil}, outgoing))
+
+          _ ->
+            loop(state)
+        end
+
+      {:worker_output_retry, target, token} ->
+        case state.output_retry do
+          {_timer, ^token} when target == state.output_target ->
+            loop(draw(%{state | output_retry: nil}))
+
+          _ ->
+            loop(state)
+        end
+
+      {:worker_output_poll, _old, _token} ->
+        loop(state)
+
       :reconnect ->
         loop(draw(connect(state)))
 
@@ -166,6 +214,7 @@ defmodule AtlasTui.App do
     state = %{state | model: model}
 
     if :quit in effects do
+      stop_output(state)
       if state.socket, do: :gen_tcp.close(state.socket)
       if state.agent, do: Port.close(state.agent)
       :ok
@@ -192,6 +241,20 @@ defmodule AtlasTui.App do
       {:send, message}, state ->
         send_line(state, message)
         state
+
+      {:worker_output_send, message}, state ->
+        if state.output do
+          WorkerOutputConnection.send_request(state.output, message)
+          state
+        else
+          output_failed(state, :not_connected)
+        end
+
+      {:worker_output_poll, delay}, state ->
+        schedule_output_poll(state, delay)
+
+      :worker_output_restart, state ->
+        stop_output(state)
 
       {:open_url, url}, state ->
         AtlasTui.Browser.open(url, state.settings)
@@ -265,8 +328,83 @@ defmodule AtlasTui.App do
     {rows, model} = View.frame(state.model, width, height, state.reconcile)
     rows |> View.to_ansi(theme) |> IO.write()
 
-    %{state | model: model}
+    sync_output(%{state | model: model})
   end
+
+  defp sync_output(state) do
+    target = WorkerConversation.output_target(state.model)
+
+    cond do
+      target == nil ->
+        stop_output(state)
+
+      target == state.output_target and (state.output != nil or state.output_retry != nil) ->
+        state
+
+      true ->
+        state = stop_output(state)
+        {:ok, pid} = WorkerOutputConnection.start(self(), state.model.env, state.settings)
+        %{state | output: pid, output_target: target, output_monitor: Process.monitor(pid)}
+    end
+  end
+
+  defp stop_output(
+         %{output: nil, output_target: nil, output_tick: nil, output_retry: nil} = state
+       ),
+       do: state
+
+  defp stop_output(state) do
+    if state.output, do: WorkerOutputConnection.stop(state.output)
+    if state.output_monitor, do: Process.demonitor(state.output_monitor, [:flush])
+    cancel_output_timer(state.output_tick)
+    cancel_output_timer(state.output_retry)
+
+    model =
+      if state.model.conversation != nil and
+           state.model.conversation.execution == state.output_target,
+         do: WorkerConversation.output_disconnected(state.model),
+         else: state.model
+
+    %{
+      state
+      | model: model,
+        output: nil,
+        output_target: nil,
+        output_monitor: nil,
+        output_tick: nil,
+        output_retry: nil
+    }
+  end
+
+  defp output_failed(state, reason) do
+    target = state.output_target
+    state = stop_output(state)
+    token = make_ref()
+    timer = Process.send_after(self(), {:worker_output_retry, target, token}, @reconnect)
+
+    notice = %{
+      tone: "error",
+      source: :worker_output,
+      text: "Worker output disconnected (#{inspect(reason)}); guidance is independent."
+    }
+
+    %{
+      state
+      | output_target: target,
+        output_retry: {timer, token},
+        model: %{state.model | notice: notice}
+    }
+  end
+
+  defp schedule_output_poll(%{output_tick: nil, output: pid} = state, delay) when pid != nil do
+    token = make_ref()
+    timer = Process.send_after(self(), {:worker_output_poll, pid, token}, delay)
+    %{state | output_tick: {timer, token}}
+  end
+
+  defp schedule_output_poll(state, _delay), do: state
+  defp cancel_output_timer(nil), do: :ok
+  defp cancel_output_timer({timer, _token}), do: Process.cancel_timer(timer)
 
   defp size do
     with {:ok, width} <- :io.columns(), {:ok, height} <- :io.rows() do
