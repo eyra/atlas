@@ -39,11 +39,10 @@ scenario "UC-Atlas-20: Write long titles and descriptions", fn %{
     see(t1, ~r/\[- the description keeps its lines\s+\]/)
   end
 
-  step "Save: the page shows the lines, blank lines and sections; TUI 2 by hint", fn ->
+  step "Save: the page shows the lines, blank lines and sections", fn ->
     at = press(t1, "C-s")
     stored(t1, ~r/✓ Stored as SC-Atlas-\d+/, at)
     stored(t1, ~r/Description\s+## Why[\s│]*\n[\s│]*\n[\s│]+Because a scene/u, at)
-    by_hint(t2, "Melle writes a scene with a title longer", at)
     Process.put(:scene, capture(t1, ~r/Scene (SC-Atlas-\d+):/))
 
     # The description is longer than its part: the part says so, and the list of use

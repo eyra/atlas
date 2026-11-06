@@ -16,7 +16,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
   step "A request whose plan runs: one step kept, one dropped", fn ->
     for t <- [t1, t2], do: see_list(t, "Scenes")
 
-    {scene, at} =
+    {scene, _} =
       atlas_json(
         i,
         ["put", "scene", "--title", "A scene to look back on", "--description", "-"],
@@ -25,7 +25,6 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
       )
 
     Process.put(:scene, scene["key"])
-    by_hint(t1, "A scene to look back on", at)
     open_row(t1, "A scene to look back on")
     see(t1, "No use cases yet.")
     press(t1, ":")

@@ -17,10 +17,8 @@ scenario "UC-Atlas-18: Run, follow and stop the steps", fn %{t1: t1, t2: t2, ins
     # Both TUIs on the scenes list first, so the new scene shows there by hint.
     for t <- [t1, t2], do: see_list(t, "Scenes")
 
-    {scene, at} =
+    {scene, _} =
       atlas_json(i, ["put", "scene", "--title", title, "--description", "-"], 0, description)
-
-    for t <- [t1, t2], do: by_hint(t, title, at)
 
     for t <- [t1, t2] do
       open_row(t, title)

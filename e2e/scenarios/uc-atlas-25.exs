@@ -28,6 +28,7 @@ scenario "UC-Atlas-25: See how far a scene and its use cases are", fn %{
     see(t1, row.(empty, "Refine"))
     refute_see(t1, ~r/#{Regex.escape(empty)}  [^\n]*\n[\s│]+Refine ·/u)
     # The least far use case wins: the one still in Refine.
+    press(t2, "End")
     see(t2, row.(scene, "Refine · 1/2"))
   end
 

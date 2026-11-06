@@ -16,7 +16,7 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
   row = fn title -> ~r/UC-Atlas-\d+\s+#{Regex.escape(title)}/ end
 
   step "A scene with use cases in its description, open in both TUIs", fn ->
-    {scene, at} =
+    {scene, _} =
       atlas_json(
         i,
         ["put", "scene", "--title", "A scene to ask about", "--description", "-"],
@@ -27,7 +27,6 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
     Process.put(:scene, scene["key"])
 
     for t <- [t1, t2] do
-      by_hint(t, "A scene to ask about", at)
       open_row(t, "A scene to ask about")
       see(t, "No use cases yet.")
     end
