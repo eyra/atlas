@@ -19,6 +19,7 @@ defmodule AtlasTui.Model do
   @scroll_step 10
 
   defstruct console: nil,
+            conversation: nil,
             env: nil,
             connected: false,
             path: nil,
@@ -282,7 +283,10 @@ defmodule AtlasTui.Model do
 
   def key(model, :ctrl_c), do: {model, [:quit]}
 
-  def key(model, key), do: AtlasTui.Interactions.key(model, key)
+  def key(model, key) do
+    {model, effects} = AtlasTui.Interactions.key(model, key)
+    {AtlasTui.WorkerConversation.capture(model), effects}
+  end
 
   @doc "Literal editor input; Console commands are dispatched only from BFF actions."
   def literal(model, {:char, _} = key) do
@@ -689,6 +693,9 @@ defmodule AtlasTui.Model do
 
   # A form's submit_to (or a confirm's confirm_to) names the endpoint and its params; the
   # submit carries them as they are. A step form being edited has none: it stays here.
+  defp submit(model, %Blocks.Call{endpoint: "queue_worker_guidance", params: params}, values),
+    do: AtlasTui.WorkerConversation.submit(model, params, values)
+
   defp submit(model, %Blocks.Call{endpoint: endpoint, params: params}, values) do
     message = %{
       "op" => "submit",

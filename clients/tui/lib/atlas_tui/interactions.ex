@@ -65,15 +65,40 @@ defmodule AtlasTui.Interactions do
 
   def active_for(model, context) do
     case Contract.active(model.console.projection, %{current(model) | context: context}) do
-      {:ok, actions} -> actions
-      _ -> []
+      {:ok, actions} ->
+        Enum.map(actions, fn action ->
+          if action["props"]["available"] and
+               not AtlasTui.WorkerConversation.action_available?(
+                 model,
+                 action["props"]["operation"]
+               ) do
+            action
+            |> put_in(["props", "available"], false)
+            |> put_in(
+              ["props", "reason"],
+              "No eligible loaded selection or page; a read may be in progress"
+            )
+          else
+            action
+          end
+        end)
+
+      _ ->
+        []
     end
   end
 
   def capture(model, key) do
     case Contract.capture(model.console.projection, token(key), current(model)) do
       {:ok, event} ->
-        Map.merge(event, %{focus: focus(model), shell_revision: shell_revision(model)})
+        case Contract.resolve(model.console.projection, event, current(model)) do
+          {:ok, action} ->
+            if AtlasTui.WorkerConversation.action_available?(model, action["props"]["operation"]),
+              do: Map.merge(event, %{focus: focus(model), shell_revision: shell_revision(model)})
+
+          _ ->
+            nil
+        end
 
       _ ->
         nil
@@ -100,9 +125,10 @@ defmodule AtlasTui.Interactions do
           is_nil(model.console.expected) or
             operation["name"] in ["tab_next", "tab_previous", "quit"]
 
-        if pending_allowed && (local || (model.connected && model.console.phase == :ready)),
-          do: execute(model, operation, action["props"]["label"]),
-          else: {model, []}
+        if pending_allowed && AtlasTui.WorkerConversation.action_available?(model, operation) &&
+             (local || (model.connected && model.console.phase == :ready)),
+           do: execute(model, operation, action["props"]["label"]),
+           else: {model, []}
 
       _ ->
         {model, []}
@@ -147,6 +173,10 @@ defmodule AtlasTui.Interactions do
 
   defp execute(model, %{"name" => "agent_ask"} = operation, label),
     do: Model.agent_action(model, label, operation["intent"])
+
+  defp execute(model, %{"name" => name} = operation, _label)
+       when name in ["worker_history", "worker_receipts", "worker_output_subscribe"],
+       do: AtlasTui.WorkerConversation.action(model, operation)
 
   defp execute(model, %{"name" => name}, _label), do: Model.operation(model, name)
 

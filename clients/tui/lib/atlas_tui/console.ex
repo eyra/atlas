@@ -4,7 +4,7 @@ defmodule AtlasTui.Console do
   content: compatibility pages cannot replace local drafts, and failed boot never
   replaces the last good navigation. Effects use the ordinary Control endpoints.
   """
-  alias AtlasTui.{Blocks, Model, Protocol}
+  alias AtlasTui.{Blocks, Model, Protocol, WorkerConversation}
 
   defstruct shell: nil,
             stale: true,
@@ -37,6 +37,8 @@ defmodule AtlasTui.Console do
   end
 
   def disconnected(model) do
+    model = WorkerConversation.capture(model)
+
     %{
       model
       | connected: false,
@@ -148,9 +150,20 @@ defmodule AtlasTui.Console do
 
   def receive(model, %{"op" => "page"} = message) do
     console = model.console
+    redirected = WorkerConversation.redirected?(model, message)
 
     {updated, effects} =
       cond do
+        redirected ->
+          {%{
+             model
+             | console: %{console | expected: nil, in_flight: nil, restoring: false},
+               notice: %{
+                 tone: "error",
+                 text: "Worker target changed; choose the exact turn explicitly."
+               }
+           }, []}
+
         console.expected && message["path"] != console.expected &&
             !(console.phase == :ready && message["reason"] == "open" && path?(message["path"])) ->
           {model, []}
@@ -219,14 +232,20 @@ defmodule AtlasTui.Console do
           {sync_active(updated), []}
       end
 
-    {AtlasTui.Legend.reconcile(updated), effects}
+    {updated, worker_effects} =
+      if not redirected and updated.path == message["path"] and updated.console.phase == :ready,
+        do: WorkerConversation.install(updated, model),
+        else: {updated, []}
+
+    {AtlasTui.Legend.reconcile(updated), effects ++ worker_effects}
   end
 
   def receive(model, %{"op" => "bye"} = message) do
     {Model.message(disconnected(model), message), []}
   end
 
-  def receive(model, message), do: {Model.message(model, message), []}
+  def receive(model, message),
+    do: WorkerConversation.receive(Model.message(model, message), message)
 
   def refresh(%{connected: false} = model), do: {model, []}
   def refresh(%{console: %{boot_pending: true}} = model), do: {model, []}
@@ -266,6 +285,8 @@ defmodule AtlasTui.Console do
   end
 
   def navigate(model, target) do
+    model = WorkerConversation.capture(model)
+
     if is_binary(target) and match?({:ok, _, _}, Blocks.match(target)) do
       model = remember_selection(model)
       console = %{model.console | expected: target, legend: nil}
