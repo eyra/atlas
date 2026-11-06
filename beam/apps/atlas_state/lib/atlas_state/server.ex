@@ -65,7 +65,7 @@ defmodule AtlasState.Server do
   @impl true
   def handle_info({:atlas_bus, %Envelope{class: class} = envelope, content}, state)
       when class in ["fact", "read"] do
-    {_, state} = ensure_description(state, envelope.kind)
+    {_, state} = ensure_description(state, envelope)
 
     binding = Ledger.request_identity(envelope, content)
 
@@ -182,7 +182,12 @@ defmodule AtlasState.Server do
     end
   end
 
-  defp ensure_description(state, kind) do
+  # Metadata reads fetch their own fresh snapshot in read/3. They are not entity
+  # kinds to pre-validate: doing so would fetch the same backend schema twice.
+  defp ensure_description(state, %Envelope{class: "read", kind: @description}),
+    do: {:ok, state}
+
+  defp ensure_description(state, %Envelope{kind: kind}) do
     case kind_spec(state, kind) do
       {:ok, _, state} -> {:ok, state}
       {_, _, state} -> {:error, state}
