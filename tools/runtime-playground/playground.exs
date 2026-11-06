@@ -290,7 +290,9 @@ defmodule RuntimePlayground.Server do
     do: {state, "operation is not implemented by this private prototype"}
 
   defp fact(kind, key) do
-    %{"fact" => fact} = Talk.read(kind, %{"key" => key})
+    # Status uses properties and outgoing links; expanding the worker's incoming
+    # turn history here repeats hundreds of unrelated reads on every snapshot.
+    %{"fact" => fact} = Talk.read(kind, %{"key" => key, "plain" => true})
     fact
   end
 
@@ -304,7 +306,7 @@ defmodule RuntimePlayground.Server do
   defp status(state) do
     assignment = fact("assignment", "AS-SC-Atlas-1")
     worker = fact("agent", "breaker")
-    %{"facts" => turns} = Talk.read("turn", %{})
+    %{"facts" => turns} = Talk.read("turn", %{"linked" => %{}, "plain" => true})
 
     turns =
       turns
