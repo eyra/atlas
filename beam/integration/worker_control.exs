@@ -27,7 +27,7 @@ defmodule WorkerControlTest do
     ordinary = %{
       "reader" => {"readers", "H-", ~w(name)},
       "operator" => {"operators", "W-", ~w(name)},
-      "run" => {"runs", "R-", ~w(host fence state activity lease outcome)},
+      "run" => {"runs", "R-", ~w(host fence state activity lease outcome why ended_at)},
       "ticket" => {"tickets", "T-", ~w(title step handover)}
     }
 
@@ -255,6 +255,221 @@ defmodule WorkerControlTest do
     reply = next(socket, &(&1["id"] == id))
     assert {:ok, variant, ^reply} = Wire.decode_reply(operation, reply)
     {variant, reply}
+  end
+
+  test "native adapter output traverses Control with independent replay and explicit gaps", c do
+    alias AtlasRuntime.{Turn, Output, OutputEndpoint}
+    command = Path.join(c.tmp_dir, "native-output-fixture")
+
+    File.write!(command, """
+    #!/usr/bin/env python3
+    import json, pathlib, time
+    root = pathlib.Path(__file__).parent
+    def emit(item):
+        print(json.dumps({"type": "item.completed", "item": item}), flush=True)
+    def wait(name):
+        deadline = time.monotonic() + 20
+        while not (root / name).exists():
+            if time.monotonic() > deadline:
+                raise RuntimeError("fixture gate timed out: " + name)
+            time.sleep(0.01)
+    emit({"type": "reasoning", "text": "PRIVATE_REASONING"})
+    emit({"type": "command_execution", "command": "PRIVATE_COMMAND", "aggregated_output": "PRIVATE_RESULT"})
+    emit({"type": "agent_message", "text": "first 界"})
+    for batch in range(11):
+        wait("batch-" + str(batch))
+        for n in range(batch * 100, (batch + 1) * 100):
+            emit({"type": "agent_message", "text": "event-" + str(n)})
+    wait("epoch")
+    emit({"type": "agent_message", "text": "after epoch 界"})
+    wait("finish")
+    emit({"type": "agent_message", "text": "final 界"})
+    print(json.dumps({"type": "turn.completed"}), flush=True)
+    """)
+
+    File.chmod!(command, 0o700)
+    start_supervised!({OutputEndpoint, machine: "box"})
+
+    names = %{
+      state: "state",
+      running: "running",
+      ended: "ended",
+      machine: "host",
+      attempt: "fence",
+      lease: "lease",
+      activity: "activity",
+      why: "why",
+      ended_at: "ended_at",
+      on: "task",
+      by: "performer",
+      outcome: "outcome"
+    }
+
+    turn =
+      start_supervised!(
+        Supervisor.child_spec(
+          {Turn,
+           %{
+             key: "R-native",
+             item: "T-1",
+             kind: "ticket",
+             agent: "W-1",
+             machine: "box",
+             turn_kind: "run",
+             names: names,
+             cause: "private native output proof",
+             port: AtlasRuntime.Agent.Codex,
+             port_opts: [
+               turns_dir: Path.join(c.tmp_dir, "native-turns"),
+               agent: %{
+                 "command" => command,
+                 "workspace" => c.tmp_dir,
+                 "goal" => "deterministic proof"
+               }
+             ],
+             silence: 60_000,
+             max: 120_000,
+             lease: 60_000,
+             leave_grace: 0,
+             guidance_every: :manual,
+             ownership: %{"owner_relation" => "owner"},
+             description: description()
+           }},
+          restart: :temporary
+        )
+      )
+
+    adapter = Turn.agent(turn)
+    assert is_pid(adapter)
+    target = :sys.get_state(turn).output_execution
+    assert target["turn"] == "R-native"
+    assert target["attempt"] != ""
+    a = connect(c.port)
+    b = connect(c.port, "H-2")
+    on_exit(fn -> Enum.each([a, b], &:gen_tcp.close/1) end)
+    assert {:result, first} = request(a, :worker_output_subscribe, %{"execution" => target})
+    assert {:result, second} = request(b, :worker_output_subscribe, %{"execution" => target})
+
+    {fast, events} =
+      output_until(a, first, &Enum.any?(&1["events"], fn e -> e["text"] == "first 界" end))
+
+    {slow, duplicate} =
+      output_until(b, second, &Enum.any?(&1["events"], fn e -> e["text"] == "first 界" end))
+
+    assert events == duplicate
+    refute JSON.encode!(events) =~ "PRIVATE_"
+    assert Enum.any?(events, &(&1["kind"] == "tool"))
+
+    fast =
+      Enum.reduce(0..10, fast, fn batch, cursor ->
+        File.write!(Path.join(c.tmp_dir, "batch-#{batch}"), "")
+        last = "event-#{(batch + 1) * 100 - 1}"
+
+        {next, events} =
+          output_until(a, cursor, &Enum.any?(&1["events"], fn e -> e["text"] == last end))
+
+        assert Enum.map(events, & &1["text"]) ==
+                 Enum.map((batch * 100)..((batch + 1) * 100 - 1), &"event-#{&1}")
+
+        refute Map.has_key?(next, "reset")
+        next
+      end)
+
+    assert Process.alive?(adapter)
+
+    assert {:result, lagged} =
+             request(b, :worker_output_next, Map.take(slow, ~w(subscription cursor)))
+
+    assert lagged["reset"]["reason"] == "retention_gap"
+    assert lagged["view"]["execution"] == target
+    assert lagged["reset"]["to_sequence"] >= lagged["reset"]["from_sequence"]
+    :gen_tcp.close(a)
+    reconnect = connect(c.port)
+    on_exit(fn -> :gen_tcp.close(reconnect) end)
+
+    assert {:result, resumed} =
+             request(reconnect, :worker_output_subscribe, %{
+               "execution" => target,
+               "cursor" => fast["cursor"]
+             })
+
+    assert {:result, empty} =
+             request(reconnect, :worker_output_next, Map.take(resumed, ~w(subscription cursor)))
+
+    assert empty["events"] == []
+    assert empty["stream"]["execution"] == target
+    # Only this private VM's ephemeral store restarts; the real producer stays alive.
+    :ok = Supervisor.terminate_child(AtlasRuntime.Root, Output)
+    {:ok, _} = Supervisor.restart_child(AtlasRuntime.Root, Output)
+    File.write!(Path.join(c.tmp_dir, "epoch"), "")
+
+    {reset, after_epoch} =
+      output_until(
+        reconnect,
+        empty,
+        &Enum.any?(&1["events"], fn e -> e["text"] == "after epoch 界" end)
+      )
+
+    assert reset["reset"] == %{"reason" => "epoch_changed"}
+    assert reset["view"]["execution"] == target
+    assert Enum.map(after_epoch, & &1["text"]) == ["after epoch 界"]
+    refute reset["stream"]["epoch"] == empty["stream"]["epoch"]
+    turn_ref = Process.monitor(turn)
+    adapter_ref = Process.monitor(adapter)
+    File.write!(Path.join(c.tmp_dir, "finish"), "")
+    {ended, final} = output_until(reconnect, reset, & &1["stream"]["ended"])
+    assert Enum.any?(final, &(&1["text"] == "final 界"))
+    assert_receive {:DOWN, ^turn_ref, :process, ^turn, :normal}, 5_000
+    assert_receive {:DOWN, ^adapter_ref, :process, ^adapter, :normal}, 5_000
+
+    assert {:result, _} =
+             request(b, :worker_output_unsubscribe, Map.take(second, ["subscription"]))
+
+    assert {:result, retained} = request(b, :worker_output_subscribe, %{"execution" => target})
+
+    assert {:result, replay} =
+             request(b, :worker_output_next, Map.take(retained, ~w(subscription cursor)))
+
+    assert replay["stream"]["ended"]
+
+    assert Enum.map(replay["events"], & &1["text"]) == [
+             "after epoch 界",
+             "final 界",
+             "codex: turn completed"
+           ]
+
+    assert ended["stream"]["execution"] == target
+    refute JSON.encode!(replay) =~ "PRIVATE_"
+
+    IO.puts(
+      "SMOKE real Codex subprocess/Turn -> Runtime -> addressed Bus -> Control: Unicode/filtering, two viewers, slow-viewer gap, cursor reconnect, epoch reset and retained closure replay passed"
+    )
+  end
+
+  defp output_until(socket, cursor, ready, remaining \\ 300, events \\ [])
+
+  defp output_until(_socket, _cursor, _ready, 0, _events),
+    do: flunk("native output did not settle")
+
+  defp output_until(socket, cursor, ready, remaining, events) do
+    case request(socket, :worker_output_next, Map.take(cursor, ~w(subscription cursor))) do
+      {:result, next} ->
+        events = events ++ next["events"]
+
+        if ready.(next) do
+          {next, events}
+        else
+          Process.sleep(10)
+          output_until(socket, next, ready, remaining - 1, events)
+        end
+
+      {:error, %{"error" => %{"code" => "output_unavailable"}}} ->
+        Process.sleep(10)
+        output_until(socket, cursor, ready, remaining - 1, events)
+
+      other ->
+        flunk("unexpected output response: #{inspect(other)}")
+    end
   end
 
   test "real output delivery isolates viewers and preserves retention gaps and authority", c do
