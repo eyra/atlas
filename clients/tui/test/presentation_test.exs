@@ -188,6 +188,32 @@ defmodule AtlasTui.PresentationTest do
     refute text =~ "Loading…"
   end
 
+  test "detail labels and values remain complete and separated across widths" do
+    for width <- [24, 38, 80, 140],
+        label <- ["Short", "Context window tokens", "Exactly16Letters", "実行状況 é の長いフィールド名"] do
+      value = "VALUE" <> String.duplicate("界é", 12) <> "_END"
+      origin = %{since: nil, by: "tester", cause: "原因界é_END"}
+
+      item = %AtlasTui.Blocks.Item{
+        title: "Details",
+        fields: [%{label: label, value: value, origin: origin}]
+      }
+
+      rows = View.render(%{model() | blocks: [item], markup: []}, width, 80, 5)
+      text = View.plain(rows) |> String.replace(~r/\s/u, "")
+      assert text =~ String.replace(label, ~r/\s/u, "")
+      assert text =~ value
+      assert text =~ "bytester·原因界é_END"
+
+      for row <- rows,
+          {left, right} <- Enum.zip(row, Enum.drop(row, 1)),
+          elem(left, 0) == :dim and elem(right, 0) == :plain,
+          String.contains?(elem(right, 1), "VALUE") do
+        assert String.ends_with?(elem(left, 1), " ")
+      end
+    end
+  end
+
   defp luminance({r, g, b}) do
     [r, g, b]
     |> Enum.map(fn value ->
