@@ -262,12 +262,10 @@ defmodule AtlasTui.App do
 
     theme = AtlasTui.Palette.theme(state.settings["tui_theme"])
 
-    state.model
-    |> View.render(width, height, state.reconcile)
-    |> View.to_ansi(theme)
-    |> IO.write()
+    {rows, model} = View.frame(state.model, width, height, state.reconcile)
+    rows |> View.to_ansi(theme) |> IO.write()
 
-    state
+    %{state | model: model}
   end
 
   defp size do

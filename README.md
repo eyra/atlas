@@ -87,6 +87,9 @@ Item details preserve full labels, values and provenance. Labels that fill or ex
 the 16-cell label column appear above their indented values; panes narrower than
 40 cells stack every field. Detail text wraps by terminal cells without splitting
 graphemes, so wide characters cannot push values out of the pane.
+PageUp/PageDown use the focused pane's visible capacity, with overlap between pages.
+Paging stops at both ends without accumulating extra scroll distance; resizing
+refreshes the bounds and each pane retains its independent manual position.
 
 The default Console palette is dark. Set `"tui_theme": "light"` in the environment
 settings for a light surface, or `"dark"` for dark. Both use a small local mapping
