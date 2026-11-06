@@ -137,11 +137,10 @@ defmodule AtlasRuntime.Agent.Codex do
   end
 
   defp consume(%{"type" => "runtime.event", "event" => event}, state) do
-    type = event["type"] || "output"
-    item = event["item"] || %{}
+    type = event["type"]
+    item = if is_map(event["item"]), do: event["item"], else: %{}
     text = item["text"]
-    activity = if is_binary(text), do: String.slice(text, 0, 240), else: type
-    send(state.owner, {:agent, self(), {:activity, "codex: " <> activity}})
+    AtlasRuntime.Agent.emit(state.owner, summary(type), output(type, item))
     state = if type == "turn.completed", do: %{state | completed: true}, else: state
     state = if type in ["turn.failed", "error"], do: %{state | failed: true}, else: state
 
@@ -151,6 +150,35 @@ defmodule AtlasRuntime.Agent.Codex do
   end
 
   defp consume(_, state), do: state
+
+  # Native records remain in stream.jsonl. Only completed public assistant messages
+  # and closed tool metadata cross the live-output boundary; reasoning is never text.
+  defp output("item.completed", %{"type" => "agent_message", "text" => text})
+       when is_binary(text),
+       do: [%{"kind" => "text", "text" => text}]
+
+  defp output(type, %{"type" => tool} = item)
+       when type in ["item.started", "item.updated", "item.completed"] and
+              tool in ["command_execution", "mcp_tool_call", "web_search", "file_change"] do
+    status =
+      cond do
+        item["status"] == "failed" -> "failed"
+        type == "item.completed" -> "completed"
+        true -> "started"
+      end
+
+    [%{"kind" => "tool", "tool_name" => tool, "status" => status}]
+  end
+
+  defp output(_, _), do: []
+
+  defp summary("turn.started"), do: "codex: turn started"
+  defp summary("turn.completed"), do: "codex: turn completed"
+  defp summary(type) when type in ["turn.failed", "error"], do: "codex: turn failed"
+  defp summary("item.started"), do: "codex: item started"
+  defp summary("item.updated"), do: "codex: item updated"
+  defp summary("item.completed"), do: "codex: item completed"
+  defp summary(_), do: "codex: activity"
 
   @impl true
   def terminate(_, %{port: port}) when is_port(port) do

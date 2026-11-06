@@ -5,6 +5,10 @@ defmodule AtlasRuntime.Agent do
   and returns the process that stands for it. That process tells the turn, its caller:
 
   - `{:agent, pid, {:activity, what}}`: the agent did something (output, a tool, a fact);
+  - `{:agent, pid, {:output, event}}`: a closed, string-keyed public projection:
+    `kind: text` or `activity` with `text`, or `kind: tool` with `tool_name` and `status`.
+    It never includes reasoning, native records, tool input/results or environment.
+    Output is optional, is not guidance evidence, and does not itself renew a lease;
   - `{:agent, pid, {:ended, why}}`: the agent ended its turn itself.
 
   An agent that crashes is a process that exits abnormally; the turn monitors it. `stop/1`
@@ -187,6 +191,28 @@ defmodule AtlasRuntime.Agent do
   end
 
   def activity(_, _), do: {:error, :invalid_activity}
+
+  @doc """
+  Report real adapter activity beside its safe public output. Summaries must be generic;
+  events must already be projected, never native records. Owners without output support
+  may ignore the additional messages. Native artifact and continuation formats are unchanged.
+  """
+  def emit(owner, summary, events \\ []) do
+    send(owner, {:agent, self(), {:activity, summary}})
+
+    events = if events == [], do: [%{"kind" => "activity", "text" => summary}], else: events
+    Enum.each(events, &send(owner, {:agent, self(), {:output, &1}}))
+    :ok
+  end
+
+  @doc false
+  def tool_name(name) when is_binary(name) do
+    if byte_size(name) <= 128 and Regex.match?(~r/\A[A-Za-z][A-Za-z0-9_.:-]*\z/, name),
+      do: name,
+      else: "tool"
+  end
+
+  def tool_name(_), do: "tool"
 
   defp bounded?(value, limit) do
     byte_size(JSON.encode!(value)) <= limit

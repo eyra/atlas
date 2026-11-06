@@ -23,6 +23,7 @@ defmodule AtlasRuntime.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
-  # Runtime reaches the other layers only over the Bus.
-  defp deps, do: [{:atlas_bus, in_umbrella: true}]
+  # Runtime reaches other layers only over Bus; the shared contract supplies wire codecs.
+  defp deps,
+    do: [{:atlas_bus, in_umbrella: true}, {:atlas_bff_contract, path: "../../../bff/contract"}]
 end

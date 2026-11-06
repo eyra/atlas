@@ -13,9 +13,10 @@ defmodule AtlasRuntime.Turn do
     the grace (`leave_grace`), so its result is kept, as when it handed the item on itself
     (IS-Atlas-93); after it, the turn is stopped.
 
-  It keeps nothing State does not hold, but the agent itself: when its process dies, the
-  engine finds the turn running without a process and ends it (C1). Whether the turn moved
-  its item (W3) is the item's process's question, in Flow, not Runtime's.
+  Durable lifecycle remains in State; Runtime.Output separately retains a bounded public
+  output ring after this producer exits. Viewer reads never refresh the activity lease.
+  When this process dies, the engine ends its durable running turn (C1), while Output's
+  owner monitor closes the ring. Flow remains authority for the item's ownership (W3).
 
   The turn's kind and fields are the description's (`runtime.turn` in `rela/atlas.json`):
   this module names none.
@@ -24,7 +25,7 @@ defmodule AtlasRuntime.Turn do
 
   require Logger
 
-  alias AtlasRuntime.{Agent, Guidance, Talk}
+  alias AtlasRuntime.{Agent, Guidance, Output, Talk}
 
   def start_link(turn), do: GenServer.start_link(__MODULE__, turn, name: via(turn.key))
 
@@ -62,6 +63,7 @@ defmodule AtlasRuntime.Turn do
         what: nil,
         leaving: nil,
         guidance: nil,
+        output_execution: nil,
         attempt: AtlasBus.Envelope.new_id()
       })
 
@@ -82,8 +84,16 @@ defmodule AtlasRuntime.Turn do
          true <- now() < now + min(state.silence, state.max),
          true <-
            not Guidance.configured?(state) or match?({:eligible, _}, Guidance.eligible(state)),
+         :ok <- prepare_output(guidance),
          {:ok, agent} <- state.port.start(Guidance.context(state), state.port_opts) do
-      state = %{state | agent_pid: agent, ref: Process.monitor(agent), guidance: guidance}
+      state = %{
+        state
+        | agent_pid: agent,
+          ref: Process.monitor(agent),
+          guidance: guidance,
+          output_execution: output_execution(guidance)
+      }
+
       schedule(state)
 
       if guidance != nil and state[:guidance_every] != :manual do
@@ -102,6 +112,11 @@ defmodule AtlasRuntime.Turn do
   @impl true
   def handle_info({:agent, pid, {:activity, what}}, %{agent_pid: pid} = state),
     do: {:noreply, %{state | active: now(), what: what}}
+
+  def handle_info({:agent, pid, {:output, event}}, %{agent_pid: pid} = state) do
+    append_output(state.output_execution, event)
+    {:noreply, state}
+  end
 
   def handle_info({:agent, pid, {:ended, why}}, %{agent_pid: pid} = state) do
     Process.demonitor(state.ref, [:flush])
@@ -206,6 +221,9 @@ defmodule AtlasRuntime.Turn do
       Agent.stop(state.port, state.agent_pid)
     end
 
+    if state.output_execution,
+      do: output_call(fn -> Output.finish(state.output_execution) end)
+
     n = state.names
 
     values = %{n.state => n.ended, n.why => why, n.lease => "", n.ended_at => at(now())}
@@ -244,6 +262,49 @@ defmodule AtlasRuntime.Turn do
       {:refused, reasons} -> {:error, Enum.join(List.wrap(reasons), "; ")}
       {:error, why} -> {:error, inspect(why)}
     end
+  end
+
+  defp output_execution(nil), do: nil
+
+  defp output_execution(%{execution: execution}) do
+    %{
+      "worker" => Map.take(execution, ~w(environment machine worker)),
+      "turn" => execution["turn"],
+      "attempt" => execution["attempt"]
+    }
+  end
+
+  defp prepare_output(nil), do: :ok
+
+  defp prepare_output(guidance) do
+    case output_call(fn -> Output.open(output_execution(guidance), self()) end) do
+      # Ephemeral output loss must not end an otherwise eligible worker. Keep its
+      # confirmed identity so the next producer event can reopen a fresh epoch.
+      {:error, "output_unavailable"} -> :ok
+      result -> result
+    end
+  end
+
+  defp append_output(nil, _event), do: :ok
+
+  defp append_output(execution, event) do
+    case output_call(fn -> Output.append(execution, event) end) do
+      {:error, "output_unavailable"} ->
+        # Only a new event from this exact registered producer may recover a lost ring.
+        # Reopening keeps the attempt, but the store assigns a new epoch.
+        with :ok <- output_call(fn -> Output.open(execution, self()) end) do
+          output_call(fn -> Output.append(execution, event) end)
+        end
+
+      result ->
+        result
+    end
+  end
+
+  defp output_call(call) do
+    call.()
+  catch
+    :exit, _ -> {:error, "output_unavailable"}
   end
 
   defp schedule(state), do: Process.send_after(self(), :tick, min(state.lease, state.silence))

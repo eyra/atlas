@@ -1,5 +1,5 @@
 defmodule AtlasBFFContract.Workers do
-  @moduledoc "Worker reads and durable guidance; shared execution identities, no lifecycle controls."
+  @moduledoc "Worker reads, durable guidance and bounded ephemeral output; no lifecycle controls."
   use AtlasBFF.Schema
   version "0.1.0"
   models_from(AtlasBFFContract.Runtime)
@@ -20,6 +20,12 @@ defmodule AtlasBFFContract.Workers do
     field :reason, :string
   end
 
+  defmodel :worker_output_availability do
+    field :available, :boolean, required: true
+    field :replay, :boolean, required: true
+    field :reason, :string
+  end
+
   defmodel :worker_view do
     field :execution, :runtime_execution, required: true
     field :descriptor, :worker_descriptor, required: true
@@ -33,6 +39,8 @@ defmodule AtlasBFFContract.Workers do
     field :outcome, :string
     field :confirmed_at, :string, required: true
     field :guidance, :worker_guidance_availability, required: true
+    # Absent on older servers; clients must not infer output support from guidance.
+    field :output, :worker_output_availability
   end
 
   defmodel :worker_guidance_input do
@@ -98,8 +106,27 @@ defmodule AtlasBFFContract.Workers do
      %{}},
     {:worker_receipts, %{"execution" => :runtime_execution, "interaction" => :string},
      %{"cursor" => :string},
-     %{"receipts" => {:list, :worker_receipt}, "cursor" => :string, "more" => :boolean}, %{}}
+     %{"receipts" => {:list, :worker_receipt}, "cursor" => :string, "more" => :boolean}, %{}},
+    {:worker_output_subscribe, %{"execution" => :runtime_execution}, %{"cursor" => :string},
+     %{
+       "subscription" => :string,
+       "view" => :worker_view,
+       "stream" => :runtime_output_stream,
+       "cursor" => :string
+     }, %{"reset" => :runtime_output_reset}},
+    {:worker_output_next, %{"subscription" => :string, "cursor" => :string}, %{},
+     %{
+       "subscription" => :string,
+       "stream" => :runtime_output_stream,
+       "events" => {:list, :runtime_output_event},
+       "cursor" => :string,
+       "more" => :boolean
+     }, %{"reset" => :runtime_output_reset, "view" => :worker_view}},
+    {:worker_output_unsubscribe, %{"subscription" => :string}, %{}, %{"subscription" => :string},
+     %{}}
   ]
+
+  @output_operations ~w(worker_output_subscribe worker_output_next worker_output_unsubscribe)a
 
   protocol(
     for {name, required, optional, result, result_optional} <- @operations do
@@ -132,7 +159,12 @@ defmodule AtlasBFFContract.Workers do
               "channel" => "control",
               "version" => "0.1.0"
             },
-            required: %{"id" => :string, "error" => :runtime_error}
+            required: %{"id" => :string, "error" => :runtime_error},
+            optional:
+              if(name in @output_operations,
+                do: %{"view" => :worker_view, "reset" => :runtime_output_reset},
+                else: %{}
+              )
           }
         ]
       }

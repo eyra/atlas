@@ -1015,6 +1015,86 @@
     {
       "fields": [
         {
+          "name": "execution",
+          "required": true,
+          "type": "runtime_execution"
+        },
+        {
+          "name": "epoch",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "first_sequence",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "watermark",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "ended",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_output_stream"
+    },
+    {
+      "fields": [
+        {
+          "name": "sequence",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "kind",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "text",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "tool_name",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "status",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_output_event"
+    },
+    {
+      "fields": [
+        {
+          "name": "reason",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "from_sequence",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "to_sequence",
+          "required": false,
+          "type": "integer"
+        }
+      ],
+      "name": "runtime_output_reset"
+    },
+    {
+      "fields": [
+        {
           "name": "status",
           "required": true,
           "type": "boolean"
@@ -1325,6 +1405,26 @@
     {
       "fields": [
         {
+          "name": "available",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "replay",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "worker_output_availability"
+    },
+    {
+      "fields": [
+        {
           "name": "execution",
           "required": true,
           "type": "runtime_execution"
@@ -1383,6 +1483,11 @@
           "name": "guidance",
           "required": true,
           "type": "worker_guidance_availability"
+        },
+        {
+          "name": "output",
+          "required": false,
+          "type": "worker_output_availability"
         }
       ],
       "name": "worker_view"
@@ -3220,6 +3325,111 @@
       ]
     },
     {
+      "channel": "runtime_output",
+      "direction": "request",
+      "name": "runtime_output_snapshot",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+            "reset": "runtime_output_reset"
+          },
+          "required": {
+            "cursor": "string",
+            "id": "string",
+            "stream": "runtime_output_stream"
+          },
+          "select": {
+            "channel": "runtime_output",
+            "op": "runtime_output_snapshot_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "runtime_output",
+            "op": "runtime_output_snapshot_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "cursor": "string"
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "runtime_output",
+          "op": "runtime_output_snapshot",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_output",
+      "direction": "request",
+      "name": "runtime_output_read",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+            "reset": "runtime_output_reset"
+          },
+          "required": {
+            "cursor": "string",
+            "events": "list of runtime_output_event",
+            "id": "string",
+            "more": "boolean",
+            "stream": "runtime_output_stream"
+          },
+          "select": {
+            "channel": "runtime_output",
+            "op": "runtime_output_read_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "runtime_output",
+            "op": "runtime_output_read_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "cursor": "string",
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "runtime_output",
+          "op": "runtime_output_read",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
       "channel": "control",
       "direction": "request",
       "name": "worker_overview",
@@ -3244,6 +3454,9 @@
         {
           "effect": "error",
           "name": "error",
+          "optional": {
+
+          },
           "required": {
             "error": "runtime_error",
             "id": "string"
@@ -3293,6 +3506,9 @@
         {
           "effect": "error",
           "name": "error",
+          "optional": {
+
+          },
           "required": {
             "error": "runtime_error",
             "id": "string"
@@ -3343,6 +3559,9 @@
         {
           "effect": "error",
           "name": "error",
+          "optional": {
+
+          },
           "required": {
             "error": "runtime_error",
             "id": "string"
@@ -3394,6 +3613,9 @@
         {
           "effect": "error",
           "name": "error",
+          "optional": {
+
+          },
           "required": {
             "error": "runtime_error",
             "id": "string"
@@ -3447,6 +3669,9 @@
         {
           "effect": "error",
           "name": "error",
+          "optional": {
+
+          },
           "required": {
             "error": "runtime_error",
             "id": "string"
@@ -3499,6 +3724,9 @@
         {
           "effect": "error",
           "name": "error",
+          "optional": {
+
+          },
           "required": {
             "error": "runtime_error",
             "id": "string"
@@ -3522,6 +3750,177 @@
         "select": {
           "channel": "control",
           "op": "worker_receipts",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_output_subscribe",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+            "reset": "runtime_output_reset"
+          },
+          "required": {
+            "cursor": "string",
+            "id": "string",
+            "stream": "runtime_output_stream",
+            "subscription": "string",
+            "view": "worker_view"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_output_subscribe_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "reset": "runtime_output_reset",
+            "view": "worker_view"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_output_subscribe_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "cursor": "string"
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_output_subscribe",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_output_next",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+            "reset": "runtime_output_reset",
+            "view": "worker_view"
+          },
+          "required": {
+            "cursor": "string",
+            "events": "list of runtime_output_event",
+            "id": "string",
+            "more": "boolean",
+            "stream": "runtime_output_stream",
+            "subscription": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_output_next_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "reset": "runtime_output_reset",
+            "view": "worker_view"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_output_next_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "cursor": "string",
+          "id": "string",
+          "subscription": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_output_next",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_output_unsubscribe",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "id": "string",
+            "subscription": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_output_unsubscribe_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "reset": "runtime_output_reset",
+            "view": "worker_view"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_output_unsubscribe_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "id": "string",
+          "subscription": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_output_unsubscribe",
           "version": "0.1.0"
         }
       }

@@ -56,14 +56,37 @@ defmodule AtlasRuntime.ClaudeTest do
     {:ok, pid} = Claude.start(@turn, opts(dir, command))
 
     assert [
-             {:activity, "system"},
-             {:activity, "Bash: atlas get AS-1"},
-             {:activity, "result: Handed it back. (cost $0.0100)"},
+             {:activity, "claude: activity"},
+             {:output, %{"kind" => "activity", "text" => "claude: activity"}},
+             {:activity, "claude: assistant activity"},
+             {:output, %{"kind" => "tool", "tool_name" => "Bash", "status" => "started"}},
+             {:activity, "claude: completed"},
+             {:output, %{"kind" => "text", "text" => "Handed it back.\nMore."}},
              {:ended, "Handed it back. (cost $0.0100)"}
            ] = messages(pid)
 
     stream = File.read!(Path.join([dir, "turns", "TU-1", "stream.jsonl"]))
     assert stream =~ ~s("total_cost_usd":0.01)
+  end
+
+  test "reasoning, tool inputs/results and raw diagnostic lines stay out of live output",
+       %{tmp_dir: dir} do
+    command =
+      fake(dir, ~S"""
+      printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"PRIVATE_REASONING"},{"type":"text","text":"Public progress"},{"type":"tool_use","name":"Bash","input":{"command":"PRIVATE_COMMAND","environment":"PRIVATE_ENV"}}]}}'
+      printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","content":"PRIVATE_RESULT"}]}}'
+      printf '%s\n' 'PRIVATE_DIAGNOSTIC'
+      printf '%s\n' '{"type":"result","subtype":"error_during_execution","result":"PRIVATE_ERROR"}'
+      """)
+
+    {:ok, pid} = Claude.start(@turn, opts(dir, command))
+    messages = messages(pid)
+    assert {:output, %{"kind" => "text", "text" => "Public progress"}} in messages
+
+    assert {:output, %{"kind" => "tool", "tool_name" => "Bash", "status" => "started"}} in messages
+
+    refute inspect(messages) =~ "PRIVATE_"
+    assert File.read!(Path.join([dir, "turns", @turn.key, "stream.jsonl"])) =~ "PRIVATE_COMMAND"
   end
 
   test "any other exit is a crash; stop kills the process", %{tmp_dir: dir} do
