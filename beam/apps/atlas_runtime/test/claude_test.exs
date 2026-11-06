@@ -73,7 +73,9 @@ defmodule AtlasRuntime.ClaudeTest do
 
     # The adapter intentionally removes system tools from PATH. exec also keeps the
     # long-lived fake on the exact port PID that stop must terminate.
-    {:ok, pid} = Claude.start(%{@turn | key: "TU-2"}, opts(dir, fake(dir, "exec /bin/sleep 30\n")))
+    {:ok, pid} =
+      Claude.start(%{@turn | key: "TU-2"}, opts(dir, fake(dir, "exec /bin/sleep 30\n")))
+
     %{os_pid: os_pid} = :sys.get_state(pid)
     :ok = Claude.stop(pid)
     Process.sleep(300)
