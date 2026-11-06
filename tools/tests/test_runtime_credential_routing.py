@@ -32,4 +32,14 @@ with open(os.environ['PRIVATE_ENV_CAPTURE'],'a') as f:
                 self.assertEqual(call['read_present'],expected,call['command'])
                 self.assertFalse(call['private_var_present'],call['command'])
 
+
+    def test_direct_runtime_helper_launcher_also_removes_read_credential(self):
+        import importlib.util
+        from unittest.mock import patch
+        spec=importlib.util.spec_from_file_location('private_runtime_helper',ROOT/'tools/runtime.py')
+        helper=importlib.util.module_from_spec(spec);spec.loader.exec_module(helper)
+        with patch.dict(os.environ,ATLAS_RUNTIME_READ_TOKEN='private-read-synthetic'),patch.object(helper.shutil,'which',return_value='/private/elixir'),patch.object(helper.subprocess,'call',return_value=0) as child:
+            self.assertEqual(helper.status_cli(ROOT,'test',[],operation='start'),0)
+            self.assertFalse('ATLAS_RUNTIME_READ_TOKEN' in child.call_args.kwargs['env'])
+
 if __name__=='__main__':unittest.main()
