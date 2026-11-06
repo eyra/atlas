@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -51,7 +52,7 @@ def invoke(args, env=None, label='command'):
     return result.stdout.decode()
 
 
-def fly(args):
+def raw_fly(args):
     allowed = args[:1] == ['status'] or args[:2] in [['machine', 'restart'], ['ssh', 'console']] or args[:3] in [['ssh', 'sftp', 'get'], ['ssh', 'sftp', 'put']]
     if not allowed:
         raise Refused('unsupported Fly operation; no deploy/resource/secret changes')
@@ -69,6 +70,119 @@ def fly(args):
         raise Refused('unknown app or unavailable existing credential') from None
     env = dict(os.environ, FLY_API_TOKEN=token)
     return invoke([binary, *args], env, label='Fly ' + ' '.join(args))
+
+
+# This journal is private to the serialized CI job and its helper subprocesses.
+# It records intent BEFORE a remote mutation; the remote owner marker resolves
+# interrupted acquisition/removal without inferring ownership from hold existence.
+CONTEXT = None
+
+
+def context_path():
+    value = os.environ.get('ATLAS_BACKUP_CONTEXT')
+    return Path(value) if value else CONTEXT
+
+
+def save_context(path, value):
+    temporary = path.with_suffix('.next')
+    write_json(temporary, value)
+    temporary.replace(path)
+
+
+def bound_remote(app, machine, command):
+    return raw_fly(['ssh', 'console', '-q', '-a', app, '--machine', machine,
+                    '-C', command]).replace('\r', '')
+
+
+def pending_absent(pair=None):
+    for app, name in APPS.items():
+        command = f'test ! -e /data/incoming/{name}.tar.gz'
+        if pair:
+            bound_remote(app, pair[app]['machine'], command)
+        else:
+            remote(app, command)
+
+
+def fence(context):
+    # Recheck the entire pair at each I/O barrier, including exceptional release.
+    # SSH/SFTP below also target the recorded ID, never Fly's dynamic selection.
+    for app, expected in context['pair'].items():
+        machines = json.loads(raw_fly(['status', '-a', app, '--json'])).get('Machines', [])
+        if len(machines) != 1 or machines[0]['id'] != expected['machine'] or machines[0]['image_ref'] != expected['image']:
+            raise Refused('recorded production pair changed; mutation refused')
+    pending_absent(context['pair'])
+
+
+def owner_command(context, app, action, command=''):
+    # Executed on the exact recorded machine. Pending apply input and owner proof
+    # are checked again beside the mutation. Never remove a pending move archive.
+    payload = {'operation': context['operation'], 'name': APPS[app],
+               'action': action, 'command': command, 'phase': context['phases'][app]}
+    code = """import json,sys,subprocess
+from pathlib import Path
+p=json.loads(sys.argv[1]); hold=Path('/data/hold'); owner=Path('/data/atlas-backup-'+p['operation']+'.owner')
+assert not Path('/data/incoming/'+p['name']+'.tar.gz').exists(), 'pending apply input'
+if p['action']=='acquire':
+ assert not hold.exists() and not owner.exists(), 'foreign hold or owner'
+ with owner.open('x') as f: f.write(p['operation'])
+ with hold.open('x') as f: f.write(p['operation'])
+else:
+ assert owner.read_text()==p['operation'], 'owner mismatch'
+ if hold.exists(): assert hold.read_text()==p['operation'], 'foreign hold'
+ if p['action'] not in ['release']:
+  if p['phase']=='acquired': assert hold.exists(), 'owned hold disappeared'
+  if p['phase'] in ['releasing','released']: assert not hold.exists(), 'hold reappeared'
+ if p['action']=='release': hold.unlink(missing_ok=True)
+ elif p['action']=='run': subprocess.run(p['command'],shell=True,check=True)
+"""
+    return 'python3 -c ' + shlex.quote(code) + ' ' + shlex.quote(json.dumps(payload))
+
+
+def fly(args):
+    path = context_path()
+    if not path or args[:1] == ['status']:
+        return raw_fly(args)
+    context = json.loads(path.read_text())
+    fence(context)
+    app = args[args.index('-a') + 1]
+    phase = context['phases'][app]
+    machine = context['pair'][app]['machine']
+    if args[:2] == ['machine', 'restart']:
+        if args[2] != machine or phase not in ['acquired', 'releasing']:
+            raise Refused('restart lacks exact recorded ownership')
+        bound_remote(app, machine, owner_command(context, app, 'check'))
+        answer = raw_fly(args)
+        if phase == 'releasing':
+            context['phases'][app] = 'released'
+            save_context(path, context)
+        return answer
+    if args[:2] == ['ssh', 'console']:
+        command = args[args.index('-C') + 1]
+        if command == 'touch /data/hold':
+            if phase != 'initial': raise Refused('unexpected hold acquisition')
+            context['phases'][app] = 'acquiring'
+            save_context(path, context)
+            answer = bound_remote(app, machine, owner_command(context, app, 'acquire'))
+            context['phases'][app] = 'acquired'
+            save_context(path, context)
+            return answer
+        if command == 'rm -f /data/hold':
+            if phase not in ['acquiring', 'acquired', 'releasing']:
+                raise Refused('release lacks recorded ownership')
+            context['phases'][app] = 'releasing'
+            save_context(path, context)
+            return bound_remote(app, machine, owner_command(context, app, 'release'))
+        # Before acquisition read-only helper probes are allowed, never mutations.
+        if phase == 'initial':
+            if not command.startswith('test '): raise Refused('unowned helper operation')
+            return bound_remote(app, machine, command)
+        return bound_remote(app, machine, owner_command(context, app, 'run', command))
+    if args[:2] == ['ssh', 'sftp']:
+        if phase not in ['acquired', 'released']:
+            raise Refused('transfer lacks recorded ownership')
+        bound_remote(app, machine, owner_command(context, app, 'check'))
+        return raw_fly([*args, '--machine', machine])
+    raise Refused('unsupported bound operation')
 
 
 def remote(app, command):
@@ -117,6 +231,8 @@ def manifest(folder):
 
 def transport(args):
     """Token routing plus held archive/manifest proof for the unchanged helper."""
+    if not context_path() or not context_path().is_file():
+        raise Refused('helper transport requires the recorded operation journal')
     output = Path(os.environ['ATLAS_BACKUP_OUTPUT'])
     if args[:3] == ['ssh', 'sftp', 'get']:
         if len(args) != 7 or args[3] != '-a' or args[4] not in APPS:
@@ -153,14 +269,17 @@ def release_owned(pair):
     Exact existing pair/slot is held by this job. Mirror supported helper's order.
     Failure is reported rather than claiming services resumed.
     """
+    path = context_path()
+    if not path:
+        raise Refused('release lacks operation journal')
+    context = json.loads(path.read_text())
+    if context['pair'] != pair: raise Refused('release pair mismatch')
     for app in ['eyra-atlas-rela', 'eyra-atlas']:
-        machines = json.loads(fly(['status', '-a', app, '--json']))['Machines']
-        if len(machines) != 1:
-            raise Refused('cannot identify held machine')
-        if machines[0]['id'] != pair[app]['machine'] or machines[0]['image_ref'] != pair[app]['image']:
-            raise Refused('machine identity changed; do not release an unknown hold')
+        context = json.loads(path.read_text())
+        if context['phases'][app] in ['initial', 'released']:
+            continue
         remote(app, 'rm -f /data/hold')
-        fly(['machine', 'restart', machines[0]['id'], '-a', app, '--skip-health-checks'])
+        fly(['machine', 'restart', pair[app]['machine'], '-a', app, '--skip-health-checks'])
         for _ in range(60):
             try:
                 status(app)
@@ -187,6 +306,7 @@ def admission():
 
 
 def preflight():
+    pending_absent()
     holds_absent()
     pair = {app: status(app) for app in APPS}
     core = json.loads(remote('eyra-atlas', 'cat /app/fly/prod/core.json'))
@@ -260,16 +380,20 @@ def retain(output, operation, pair):
 
 
 def main(output):
+    global CONTEXT
+    CONTEXT = None
     sha = admission()
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
     (output / 'private').mkdir(mode=0o700)
     pair = preflight()
     operation = 'pre-ecc-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + sha[:12]
+    CONTEXT = output / 'private' / 'context.json'
+    save_context(CONTEXT, {'operation': operation, 'pair': pair, 'phases': {app: 'initial' for app in APPS}})
     bindir = output / 'private' / 'bin'
     bindir.mkdir()
     (bindir / 'fly').symlink_to(Path(__file__).resolve())
     env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ['PATH'],
-               ATLAS_BACKUP_OUTPUT=str(output), ATLAS_FLY_APP='eyra-atlas',
+               ATLAS_BACKUP_CONTEXT=str(CONTEXT), ATLAS_BACKUP_OUTPUT=str(output), ATLAS_FLY_APP='eyra-atlas',
                ATLAS_FLY_RELA_APP='eyra-atlas-rela', ATLAS_ENV='prod')
     def interrupted(_signum, _frame):
         raise Refused('job interrupted; release verification required')
@@ -284,13 +408,9 @@ def main(output):
                 raise Refused('supported fetch helper failed; private diagnostics retained')
         finally:
             if began:
-                # No extra restarts on success: normal helper already released the pair.
-                try:
-                    holds_absent()
-                    for app in APPS:
-                        status(app)
-                except (Refused, ValueError, KeyError):
-                    release_owned(pair)
+                # Reconcile journal ownership even if health currently looks normal.
+                # Initial/released sides are never restarted by failure cleanup.
+                release_owned(pair)
     before_dets = manifest(output / 'data' / 'beam')
     validate_dets(output / 'data' / 'beam')
     if before_dets != manifest(output / 'data' / 'beam'):

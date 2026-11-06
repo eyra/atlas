@@ -16,7 +16,8 @@ No pre-release merge of this workflow is needed for a push-tag workflow executio
 
 It shares fly-deploy-prod concurrency with no in-flight cancellation. Preflight
 requires the healthy recorded old pair, absent holds, matching packaged settings
-and manifest/schema, dormant Runtime/model/listener configuration, and sufficient
+and manifest/schema, no pending /data/incoming/{beam,rela}.tar.gz on either app,
+dormant Runtime/model/listener configuration, and sufficient
 existing disk capacity. It refuses rather than resizing or changing credentials.
 
 ## Coverage, consistency and confidentiality
@@ -26,6 +27,13 @@ copies complete /data/beam and /data/rela while both are held, and releases rela
 then core with health checks. State/Bus persisted replies, positions and link
 provenance live in the complete beam tree; no additional configured Bus disk store
 exists. The rela tree covers facts/relations/attachments and schema/description closure.
+
+The transport rechecks the entire recorded machine/image pair and both pending
+inputs at every I/O barrier. SSH/SFTP explicitly target the recorded ID; restarts
+must name that same ID. A private intent journal and remote operation marker bind
+hold acquisition, copying, retention and normal/exceptional release. Hold contents
+must match the operation; acquired holds must remain present and released holds
+must stay absent. Pending archives are never removed or applied automatically.
 
 The scoped Fly transport checks both holds at each transfer; remote file manifests
 before/after must match. Compressed remote/local SHA256 and extracted per-file
@@ -47,10 +55,23 @@ remain on private Fly storage. Existing backups are preserved.
 
 ## Failure semantics
 
-A pre-existing hold is refused and never released. After starting from a known
-unheld pair, failure attempts the existing rela-then-core release order, checking
-recorded image/machine identity before modifying each side. Changed identity is
-refused. SIGTERM attempts cleanup; automatic in-flight cancellation is disabled.
+A pre-existing hold or pending archive is refused before any hold/restart. Pending
+input discovered later stops mutations, including automatic release: restart would
+apply it before the pinned launcher's hold check. Preserve it for separately
+authorized inspection. Never restart merely to clear a pending move.
+
+Failure reconciles journal ownership and only releases acquired sides, in the
+existing rela-then-core order. Untouched sides are never restarted. Each barrier
+checks both machine/image identities, both pending paths and remote owner/hold
+content. Changed identity or foreign ownership stops cleanup without clearing an
+unknown hold. Remote owner markers and failed journals remain for diagnosis.
+SIGTERM uses the same guards; automatic in-flight cancellation is disabled.
+
+These are check-before-mutation fences under the existing production serialization
+slot, not an atomic transaction across SSH, Fly API and independent writers. All
+deployment/move/backup writers must honor that slot. An out-of-band writer changing
+inputs after a check is outside the protocol. Explicit machine selection prevents
+dynamic selection of a replacement by the helper's transport.
 
 Network loss, a hard kill or failed health recovery may still leave holds/partial
 retention. A failed job proves neither release nor completeness. Inspect both

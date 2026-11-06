@@ -34,16 +34,53 @@ pattern = os.environ.get('FAKE_BACKUP_FAIL')
 if pattern and pattern in ' '.join(args):
     fail()
 
+scenario = os.environ.get('FAKE_BACKUP_REPLACE_AT')
+holds = [(root/a/'data/hold').exists() for a in backup.APPS]
+replace = (scenario == 'hold' and any(holds)) or (scenario == 'copy' and all(holds)) or (scenario == 'release' and (root/'ready-release').exists())
+if os.environ.get('FAKE_BACKUP_REPLACE_IMAGE') and replace:
+    changed_image = True
+else:
+    changed_image = False
+trigger = os.environ.get('FAKE_BACKUP_PENDING_AT')
+if (trigger == 'hold' and any(holds)) or (trigger == 'copy' and all(holds)) or (trigger == 'release' and (root/'ready-release').exists()):
+    pending = local('/data/incoming/'+name+'.tar.gz');pending.parent.mkdir(exist_ok=True)
+    if not pending.exists():
+        with tarfile.open(pending, 'w:gz') as archive:
+            archive.add(local('/data/'+name), arcname='.')
+if os.environ.get('FAKE_BACKUP_FOREIGN_HOLD') and (root/'ready-release').exists():
+    local('/data/hold').write_text('foreign-operation')
+machine_id = app + ('-replacement' if replace and not os.environ.get('FAKE_BACKUP_REPLACE_IMAGE') else '-machine')
 if args[0] == 'status':
     hold = local('/data/hold').exists()
-    print(json.dumps({'Machines': [{'id': app + '-machine', 'state': 'started',
+    print(json.dumps({'Machines': [{'id': machine_id, 'state': 'started',
         'checks': [{'status': 'critical' if hold else 'passing'}],
-        'image_ref': {'tag': 'master-' + backup.MASTER, 'digest': 'wrong' if os.environ.get('FAKE_BACKUP_WRONG_IMAGE') else backup.IMAGES[app]}}]}))
+        'image_ref': {'tag': 'master-' + backup.MASTER, 'digest': 'wrong' if os.environ.get('FAKE_BACKUP_WRONG_IMAGE') or changed_image else backup.IMAGES[app]}}]}))
 elif args[:2] == ['machine', 'restart']:
-    assert args[2] == app + '-machine'
+    assert args[2] in [app + '-machine', app + '-replacement']
+    pending = local('/data/incoming/' + name + '.tar.gz')
+    if pending.exists():
+        local('/data/' + name).rename(local('/data/displaced-' + name))
+        local('/data/' + name).mkdir()
+        with tarfile.open(pending) as archive:
+            archive.extractall(local('/data/' + name), filter='data')
+        pending.unlink()
+        local('/data/hold').unlink(missing_ok=True)
 elif args[:2] == ['ssh', 'console']:
+    if '--machine' in args:
+        assert args[args.index('--machine')+1] == machine_id
     command = args[args.index('-C') + 1]
     words = shlex.split(command)
+    if command.startswith('python3 -c') and len(words) == 4:
+        payload = json.loads(words[3])
+        # Execute the actual remote guard, with only absolute paths mapped to
+        # this private fixture and the final command dispatched below, not a shell.
+        import subprocess
+        code = words[2].replace("'/data/", "'"+str(base)+"/data/")
+        code = code.replace("subprocess.run(p['command'],shell=True,check=True)", 'None')
+        result = subprocess.run([sys.executable, '-c', code, words[3]], capture_output=True)
+        if result.returncode: fail()
+        if payload['action'] != 'run': sys.exit(0)
+        command = payload['command'];words = shlex.split(command)
     if command.startswith('python3 -c'):
         pass
     elif command.startswith('env ATLAS_RELA_DATA='):
@@ -56,6 +93,7 @@ elif args[:2] == ['ssh', 'console']:
         local(words[1]).touch()
     elif words[0] == 'rm':
         local(words[-1]).unlink(missing_ok=True)
+        if words[-1] == '/tmp/beam.tar.gz': (root/'ready-release').touch()
     elif words[0] == 'tar':
         archive = local(words[2]); archive.parent.mkdir(parents=True, exist_ok=True)
         with tarfile.open(archive, 'w:gz') as file:
@@ -81,9 +119,14 @@ elif args[:2] == ['ssh', 'console']:
     else:
         raise AssertionError(command)
 elif args[:2] == ['ssh', 'sftp']:
+    if '--machine' in args:
+        at = args.index('--machine')
+        assert args[at+1] == machine_id
+        args = args[:at]+args[at+2:]
     _, _, op, _, _, source, target = args
     if op == 'get':
         shutil.copyfile(local(source), target)
+        (root/'copied').touch()
         if os.environ.get('FAKE_BACKUP_CORRUPT'):
             with open(target, 'ab') as file:
                 file.write(b'changed transport')

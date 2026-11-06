@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import tarfile
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,8 @@ HERE = Path(__file__).resolve().parent
 
 class BackupTest(unittest.TestCase):
     def setUp(self):
+        backup.CONTEXT = None
+        self.addCleanup(setattr, backup, 'CONTEXT', None)
         self.tmp = tempfile.TemporaryDirectory(prefix='atlas-backup-proof-')
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -78,6 +81,70 @@ class BackupTest(unittest.TestCase):
         for app in backup.APPS:
             self.assertFalse((self.root/app/'data/hold').exists())
 
+    def calls(self):
+        p = self.root/'calls.jsonl'
+        return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+    def pending_archive(self, app):
+        name = backup.APPS[app]
+        incoming = self.root/app/'data/incoming'; incoming.mkdir()
+        payload = self.root/'older'; payload.mkdir(); (payload/'restored-marker').write_text('older history')
+        pending = incoming/(name+'.tar.gz')
+        with tarfile.open(pending, 'w:gz') as archive: archive.add(payload/'restored-marker', arcname='restored-marker')
+        original = pending.read_bytes()
+        with self.assertRaises(backup.Refused): self.execute()
+        self.assertTrue(pending.exists(), 'pending archive was applied')
+        self.assertEqual(original, pending.read_bytes())
+        self.unchanged()
+        self.assertFalse(any(c[:2] == ['machine','restart'] for c in self.calls()))
+
+    def replacement(self, boundary):
+        with self.assertRaises(backup.Refused): self.execute(FAKE_BACKUP_REPLACE_AT=boundary)
+        calls = self.calls()
+        self.assertFalse(any(c[:2] == ['machine','restart'] and c[2].endswith('-replacement') for c in calls), 'replacement restarted')
+        self.assertFalse((self.root/'output/proof.json').exists())
+        self.unchanged()
+
+    def test_pending_core_archive(self): self.pending_archive('eyra-atlas')
+    def test_pending_rela_archive(self): self.pending_archive('eyra-atlas-rela')
+    def test_replacement_at_hold(self): self.replacement('hold')
+    def test_replacement_at_copy(self): self.replacement('copy')
+    def test_replacement_at_release(self): self.replacement('release')
+
+    def test_partial_hold_failure_does_not_restart_unheld_rela(self):
+        with self.assertRaises(backup.Refused):
+            self.execute(FAKE_BACKUP_FAIL='machine restart eyra-atlas-machine')
+        self.assertFalse(any(c[:2] == ['machine','restart'] and c[2].startswith('eyra-atlas-rela') for c in self.calls()))
+        self.assertFalse((self.root/'eyra-atlas-rela/data/hold').exists())
+        self.unchanged()
+
+    def test_image_replacement_at_hold(self):
+        with self.assertRaises(backup.Refused):
+            self.execute(FAKE_BACKUP_REPLACE_AT='hold', FAKE_BACKUP_REPLACE_IMAGE='1')
+        self.assertFalse(any(c[:2] == ['machine','restart'] for c in self.calls()))
+        self.unchanged()
+
+    def pending_barrier(self, boundary):
+        with self.assertRaises(backup.Refused): self.execute(FAKE_BACKUP_PENDING_AT=boundary)
+        self.assertFalse((self.root/'output/proof.json').exists())
+        for app,name in backup.APPS.items():
+            pending = self.root/app/'data/incoming'/(name+'.tar.gz')
+            # Both pending inputs are discovered by the whole-pair barrier.
+            self.assertTrue(pending.exists())
+            with tarfile.open(pending) as archive: self.assertTrue(archive.getmembers())
+        self.unchanged()
+
+    def test_pending_at_hold_barrier(self): self.pending_barrier('hold')
+    def test_pending_at_copy_barrier(self): self.pending_barrier('copy')
+    def test_pending_at_release_barrier(self): self.pending_barrier('release')
+
+    def test_foreign_hold_is_not_released(self):
+        with self.assertRaises(backup.Refused): self.execute(FAKE_BACKUP_FOREIGN_HOLD='1')
+        for app in backup.APPS:
+            self.assertEqual((self.root/app/'data/hold').read_text(), 'foreign-operation')
+        self.assertFalse((self.root/'output/proof.json').exists())
+        self.unchanged()
+
     def test_complete_backup_retains_matching_pair_and_never_publishes_records(self):
         output = self.execute()
         proof = json.loads((output/'proof.json').read_text())
@@ -134,11 +201,17 @@ class BackupTest(unittest.TestCase):
         self.assertFalse((self.root/'output/proof.json').exists())
         self.released()
 
-    def test_changed_machine_is_not_released_as_this_operations_hold(self):
+    def test_release_without_operation_journal_is_refused(self):
         pair = {'eyra-atlas-rela': {'machine': 'old', 'image': {'tag': 'old'}}}
         with patch.object(backup, 'fly', return_value=json.dumps({'Machines': [{'id': 'replacement', 'image_ref': {'tag': 'new'}}]})), patch.object(backup, 'remote') as call:
             with self.assertRaises(backup.Refused): backup.release_owned(pair)
             call.assert_not_called()
+
+    def test_helper_without_operation_journal_cannot_mutate(self):
+        with patch.dict(os.environ, self.env, clear=True):
+            with self.assertRaises(backup.Refused):
+                backup.transport(['machine', 'restart', 'eyra-atlas-machine', '-a', 'eyra-atlas'])
+        self.assertFalse((self.root/'calls.jsonl').exists())
 
     def test_changed_release_head_is_refused_before_fly_io(self):
         def changed(args, *a, **kw):
