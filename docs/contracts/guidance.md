@@ -209,6 +209,15 @@ targets and legends. Clients may advance only a successfully correlated history
 cursor and bind receipts only to a selected record for that same execution; they
 may narrow availability but never enable undeclared operations.
 
+`guidance-history` is a native List of the first bounded history page. Each row's
+id is the durable interaction key, its label is the literal body, and its
+destination is the existing exact worker-detail route. A nonempty list enables
+the ordinary declared row navigation; empty history enables neither row movement
+nor receipt inspection. `guidance-details` retains literal bodies and recorded
+identity/projection evidence as generic Item content, before the separate output
+block. Console may extend the same list with successfully correlated later pages;
+it must still bind receipts only to a selected loaded record for the exact execution.
+
 Focused Control output tests cover ownership, revoked access, reset facts, missing
 rings, invalid cursors, correlation and admission cleanup. The private
 `beam/integration/worker_control.exs` path also exercises real TCP Control, Bus,
