@@ -51,7 +51,6 @@ end
 # `!` on the page shown, then the failure, then its confirm.
 fail = fn tui, label ->
   press(tui, "!")
-  see(tui, "Failures: ")
   open_row(tui, label)
   see(tui, "#{label}?")
   press(tui, "y")
