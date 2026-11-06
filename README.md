@@ -76,12 +76,17 @@ list. There are no separator rows. The summary keeps supplied owner/status/progr
 text but omits Control's trailing ` · since …` provenance and cause; full explanations
 remain in item details. No workflow state is inferred. Long values truncate with an
 ellipsis; narrow widths prioritize identity/title and omit metadata when it cannot
-fit. This also applies inside References panes; item-detail fields and editor text
-retain their existing layout. Truncation preserves
+fit. This also applies inside References panes; editor text retains its existing
+layout. Truncation preserves
 graphemes and budgets terminal cells for wide characters. Supplied highlight
 tones appear as labeled badges (`[OK]`, `[Pending]`, `[Error]`, `[Info]`); unknown
 tones retain their label without claiming a known status. The renderer never
 infers workflow status from a row's title or detail.
+
+Item details preserve full labels, values and provenance. Labels that fill or exceed
+the 16-cell label column appear above their indented values; panes narrower than
+40 cells stack every field. Detail text wraps by terminal cells without splitting
+graphemes, so wide characters cannot push values out of the pane.
 
 The default Console palette is dark. Set `"tui_theme": "light"` in the environment
 settings for a light surface, or `"dark"` for dark. Both use a small local mapping

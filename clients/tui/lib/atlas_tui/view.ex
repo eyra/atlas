@@ -452,20 +452,30 @@ defmodule AtlasTui.View do
   defp block(%Item{} = item, _at, _model, width, _room) do
     fields =
       Enum.flat_map(item.fields, fn pair ->
-        [first | rest] = Text.wrap(pair.value || "—", width - @label_width - 4)
+        label = single_line(pair.label)
+        stacked = width < 40 or display_width(label) >= @label_width
+        padding = if stacked, do: min(5, max(width - 2, 0)), else: @label_width + 3
+        indent = String.duplicate(" ", padding)
+        value_width = max(width - padding, 1)
+        [first | rest] = detail_wrap(pair.value || "—", value_width)
 
-        indent = String.duplicate(" ", @label_width + 3)
+        heading =
+          if stacked do
+            prefix = String.duplicate(" ", min(3, max(width - 2, 0)))
 
-        # The fact that set it: since when, by whom, why (a link's origin).
+            Enum.map(detail_wrap(label <> ":", max(width - byte_size(prefix), 1)), fn line ->
+              [{:dim, prefix <> line}]
+            end) ++ [[{:plain, indent}, text_row(first)]]
+          else
+            [[{:dim, "   " <> cell_pad(label, @label_width)}, text_row(first)]]
+          end
+
         origin =
-          for line <- Text.wrap(origin_text(pair.origin), width - @label_width - 4),
+          for line <- detail_wrap(origin_text(pair.origin), value_width),
               line != "",
               do: [{:plain, indent}, {:dim, line}]
 
-        [
-          [{:dim, "   " <> pad(pair.label, @label_width)}, text_row(first)]
-          | Enum.map(rest, &[{:plain, indent}, text_row(&1)]) ++ origin
-        ]
+        heading ++ Enum.map(rest, &[{:plain, indent}, text_row(&1)]) ++ origin
       end)
 
     title(item.title, width) ++ [[]] ++ fields
@@ -856,6 +866,24 @@ defmodule AtlasTui.View do
   end
 
   defp pad(text, n), do: String.pad_trailing(String.slice(text, 0, n), n)
+
+  # Keep paragraph/list wrapping, then fit by terminal cells without dropping text.
+  defp detail_wrap(text, width) do
+    text |> Text.wrap(width) |> Enum.flat_map(&detail_cell_rows(&1, width))
+  end
+
+  defp detail_cell_rows("", _width), do: [""]
+
+  defp detail_cell_rows(text, width) do
+    first = cell_take(text, width)
+
+    {first, rest} =
+      if first == "",
+        do: String.next_grapheme(text),
+        else: {first, binary_part(text, byte_size(first), byte_size(text) - byte_size(first))}
+
+    if rest == "", do: [first], else: [first | detail_cell_rows(rest, width)]
+  end
 
   defp single_line(nil), do: ""
   defp single_line(text), do: text |> String.replace(~r/\s+/u, " ") |> String.trim()
