@@ -61,8 +61,9 @@ defmodule ReadAmplification.Probe do
     {:ok, counter} = Agent.start_link(fn -> %{n: 0, mode: :open} end)
     fake = AtlasState.FakeRela.start()
     config = %{counter: counter, fake: fake, owner: self()}
-    dir = Path.join(System.tmp_dir!(), "atlas-pressure-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
+    nonce = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
+    dir = Path.join(System.tmp_dir!(), "atlas-pressure-#{nonce}")
+    File.mkdir!(dir)
 
     state =
       start_supervised!(
