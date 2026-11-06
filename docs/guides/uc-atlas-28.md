@@ -1,6 +1,6 @@
 # Try UC-Atlas-28: My work on the front page
 
-This guide grows with the use case. IS-Atlas-55: the TUI opens on what is assigned to you: your Assignments (IS-Atlas-78), each shown as the open fact it belongs to. Each row shows what is expected and since when and why. The header counts them on every page, and the scenes are one key away. IS-Atlas-54 (the "What to do" part of a fact's page) comes later.
+This guide grows with the use case. IS-Atlas-55: **Assigned to you** shows your Assignments (IS-Atlas-78), each shown as the open fact it belongs to. Each row shows what is expected and since when and why. Console boot supplies the configured tabs and initial view; the header counts assignments on every page.
 
 ## Start
 
@@ -8,13 +8,13 @@ This guide grows with the use case. IS-Atlas-55: the TUI opens on what is assign
 atlas tui --env test
 ```
 
-The TUI's user is `tui_user` in `env/<env>.json` (`melle`), and a person of that name must exist (`atlas put person --name Melle --env test`). Then the TUI opens on **Assigned to you**.
+The TUI's user is `tui_user` in `env/<env>.json` (`melle`), and a person of that name must exist (`atlas put person --name Melle --env test`). Select the configured **Assigned to you** tab if it is not the initial view.
 
 ## Try
 
 | Step | Keys / command | What you should see |
 |---|---|---|
-| Empty | `atlas` (or `atlas tui --env test`) | **Assigned to you**, and what fills it: `Nothing is assigned to you now. Flow assigns you what is your move (to test it, say), and anyone can with assigned_to. s opens the scenes.` The header: `Atlas · test · 0 assigned to you`. In prod today almost everything belongs to the coordinator, so this is what Melle sees until Flow writes owners (IS-Atlas-75). In test, anything assigned to `melle` before is there already. |
+| Empty | `atlas tui --env test`, select **Assigned to you** | With no assignments, the list explains that nothing is assigned to you. The header says `Atlas Console · test · 0 assigned to you`. Existing open assignments to `melle` appear here when present. |
 | One for you | in a second terminal: `atlas set UC-Atlas-NN assigned_to=melle --cause "all its issues are completed" --env test` | Within a second, in every open TUI: `UC-Atlas-NN  Its title`, and under it what is expected and why: `Build it · since 3 Nov 19:14 · all its issues are completed`. The header says `1 assigned to you`. |
 | Newest first | assign a second one | It comes first. |
 | Moved away | `atlas set UC-Atlas-NN assigned_to=coordinator --cause … --env test` | Gone, in every TUI; the count goes down. |
@@ -59,7 +59,7 @@ What you can see: open a fact that is yours, from Assigned to you or anywhere. A
 - **Why**: why it came to you, the cause of the fact that made you its owner (`Flow test_and_accept: all under it is completed → melle`), with since and by;
 - **How**: the instructions of the state it is in;
 - for a use case to test, **Melle can test**: that section of its description;
-- **Answers**: the keys you can answer with (`a Accept`), which the footer has too.
+- **Answers**: the actions you can answer with (`a Accept`), also shown in the `?` key legend.
 
 Nobody else sees the part. `atlas get` shows it to a client that is the owner: an agent says which one it is with `ATLAS_AS`, as in `ATLAS_AS=coordinator atlas get IS-Atlas-NN --env test`.
 

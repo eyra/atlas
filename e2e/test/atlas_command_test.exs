@@ -51,10 +51,12 @@ defmodule AtlasE2E.AtlasCommandTest do
     assert {_, 2} = atlas(["env", "--env="])
   end
 
-  test "surface selection belongs to the TUI, not generic entity properties" do
-    for args <- [["--surface", "unknown"], ["--surface=unknown"]] do
-      assert {out, 2} = atlas(["tui" | args])
-      assert out =~ "unknown TUI surface"
+  test "the TUI rejects surface selectors without reserving generic entity properties" do
+    for value <- ["console", "legacy", "unknown"],
+        args <- [["--surface", value], ["--surface=#{value}"]],
+        command <- [[], ["tui"]] do
+      assert {out, 2} = atlas(command ++ args)
+      assert out =~ "unknown option --surface"
     end
 
     # Stop at the environment guard, before connecting or creating anything.

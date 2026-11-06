@@ -36,15 +36,17 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
   step "`:` opens the request line; enter shows the plan; nothing is written yet", fn ->
     scene = Process.get(:scene)
     press(t1, ":")
-    see(t1, "↵ ask the agent   esc close")
     type(t1, "propose use cases from this scene's description")
+    see(t1, "propose use cases from this scene's description")
     press(t1, "Enter")
     see(t1, "Proposed: 3 steps", 10_000)
     see(t1, "You asked       propose use cases from this scene's description")
     see(t1, "By              the e2e stand-in")
     see(t1, "› [✓] 1. Create use case in #{scene}")
     see(t1, "[✓] 3. Create use case in #{scene}")
-    see(t1, "space keep/drop   e edit   ↵ run the kept steps")
+    see_action(t1, "Space", "Keep or drop step")
+    see_action(t1, "e", "Edit step")
+    see_action(t1, "Enter", "Run kept steps")
     see(t2, "No use cases yet.")
   end
 
@@ -83,7 +85,8 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
     press(t1, "Enter")
     see(t1, "Proposed: 3 steps", 10_000)
     press(t1, "Escape")
-    see(t1, "u Update scene   d Delete scene")
+    see_action(t1, "u", "Update scene")
+    see_action(t1, "d", "Delete scene")
     {got, _} = atlas_json(i, ["get", scene])
     length(hd(got["lists"])["rows"]) == 2 || raise inspect(got["lists"])
   end
@@ -94,14 +97,20 @@ scenario "UC-Atlas-17: Ask in the TUI and see the plan", fn %{t1: t1, t2: t2, in
     press(t1, "Enter")
     see(t1, "No steps proposed", 10_000)
     see(t1, "Nothing to do for this request.")
+    press(t1, "Escape")
     press(t1, ":")
     type(t1, "colour it red")
     press(t1, "Enter")
     see(t1, "[!] 1. Update SC-Atlas-", 10_000)
     see(t1, "does not ask for colour")
+    {before_run, _} = atlas_json(i, ["get", Process.get(:scene)])
     press(t1, "Enter")
-    see(t1, "Step 1 cannot run; drop it with space.")
     press(t1, "Escape")
-    see(t1, "u Update scene   d Delete scene")
+    see_action(t1, "u", "Update scene")
+    see_action(t1, "d", "Delete scene")
+    {after_run, _} = atlas_json(i, ["get", Process.get(:scene)])
+
+    (after_run["values"] == before_run["values"] && after_run["lists"] == before_run["lists"]) ||
+      raise "Blocked plan changed the scene"
   end
 end

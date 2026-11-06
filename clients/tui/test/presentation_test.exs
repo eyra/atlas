@@ -3,11 +3,13 @@ defmodule AtlasTui.PresentationTest do
   alias AtlasTui.{Console, Model, Palette, View}
 
   defp model do
+    model = Model.new("test")
+
     model = %{
-      Model.new("test")
+      model
       | connected: true,
         console: %{
-          Console.new()
+          model.console
           | phase: :ready,
             stale: false,
             shell: %{
@@ -150,6 +152,41 @@ defmodule AtlasTui.PresentationTest do
       assert String.replace(heading, ~r/\s/u, "") =~ "Widgets·2"
       for row <- rows, do: assert(Enum.sum(Enum.map(row, &String.length(elem(&1, 1)))) <= width)
     end
+  end
+
+  test "pending targets keep the shell but hide previous content and action affordances" do
+    model = model()
+
+    for legend <- [nil, %{scroll: 0}],
+        width <- [60, 150] do
+      pending = %{
+        model
+        | console: %{model.console | expected: "/k/part", restoring: false, legend: legend}
+      }
+
+      text = pending |> View.render(width, 30, 5) |> View.plain()
+      assert text =~ "Atlas Console"
+      assert text =~ "Loading…"
+      refute text =~ "W-01"
+      refute text =~ "Second title"
+      refute text =~ "Keys"
+    end
+  end
+
+  test "reconnection restoration retains the actual request draft rather than a loading body" do
+    model = model()
+    {model, []} = Model.agent_action(model, "Ask", nil)
+    {model, []} = Model.literal(model, {:char, "Draft request"})
+
+    restoring = %{
+      model
+      | console: %{model.console | expected: model.path, restoring: true}
+    }
+
+    text = restoring |> View.render(90, 30, 5) |> View.plain()
+    assert text =~ "Draft request"
+    assert text =~ "W-01"
+    refute text =~ "Loading…"
   end
 
   defp luminance({r, g, b}) do

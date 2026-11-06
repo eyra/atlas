@@ -8,26 +8,11 @@ import AtlasE2E.Scenario
 scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance: i} ->
   row = fn key, title -> ~r/#{key}\s+#{Regex.escape(title)}/ end
   # The header's count, this many more than when the scenario started.
-  count = fn more -> ~r/Atlas · test · #{Process.get(:uc28_n) + more} assigned to you/ end
+  count = fn more -> ~r/Atlas Console · test · #{Process.get(:uc28_n) + more} assigned to you/ end
 
-  # Back to the start page. A TUI learns that its user is a person when it reconciles
-  # (every 5 seconds); until then the scenes are its start page and there is no way back.
-  start_page = fn t ->
-    Enum.reduce_while(1..12, nil, fn _, _ ->
-      screen = AtlasE2E.Tui.screen(t)
-
-      if screen =~ ~r/Atlas · test.*\sAssigned to you$/m do
-        {:halt, screen}
-      else
-        if screen =~ "esc back", do: press(t, "Escape")
-        Process.sleep(1_000)
-        {:cont, nil}
-      end
-    end)
-    |> case do
-      nil -> see(t, ~r/Atlas · test.*\sAssigned to you$/m)
-      screen -> screen
-    end
+  start = fn t ->
+    start_page(t)
+    see_list(t, "Assigned to you")
   end
 
   step "The TUI's user is a person: the start page is what is assigned to them", fn ->
@@ -38,13 +23,13 @@ scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance
     # Flow assigns melle what earlier scenarios left to test (IS-Atlas-75), so the counts
     # below are from where this scenario starts.
     for t <- [t1, t2] do
-      start_page.(t)
-      see(t, "s Scenes")
+      start.(t)
+      see_action(t, "s", "Scenes")
     end
 
-    n = capture(t1, ~r/Atlas · test · (\d+) assigned to you/) |> String.to_integer()
+    n = capture(t1, ~r/Atlas Console · test · (\d+) assigned to you/) |> String.to_integer()
     Process.put(:uc28_n, n)
-    see(t2, ~r/Atlas · test · #{n} assigned to you/)
+    see(t2, ~r/Atlas Console · test · #{n} assigned to you/)
 
     # Empty, the page says what fills it.
     if n == 0 do
@@ -103,9 +88,10 @@ scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance
   step "s opens the scenes, with the count; esc comes back; enter opens a fact", fn ->
     %{scene: scene} = Process.get(:uc28)
     press(t1, "s")
-    see(t1, ~r/Atlas · test · #{Process.get(:uc28_n) + 1} assigned to you.*\sScenes$/m)
+    see_list(t1, "Scenes")
+    see(t1, count.(1))
     press(t1, "Escape")
-    see(t1, ~r/Atlas · test.*\sAssigned to you$/m)
+    see_list(t1, "Assigned to you")
     open_row(t1, "A scene for you")
     see(t1, "Scene #{scene}: A scene for you")
   end
@@ -119,7 +105,7 @@ scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance
       atlas_json(i, ["put", "use_case", "--in", scene, "--title", "A use case to accept"])
 
     atlas_json(i, ["set", done["key"], "assigned_to=melle", "--cause", "ready to accept"])
-    start_page.(t1)
+    start.(t1)
     see(t1, count.(2))
     open_row(t1, "A use case to accept")
     see(t1, "Use case #{done["key"]}: A use case to accept")
@@ -128,7 +114,7 @@ scenario "UC-Atlas-28: My work on the front page", fn %{t1: t1, t2: t2, instance
     at = press(t1, "y")
     stored(t1, ~r/Accepted by ─+(.|\n)*melle  Person/, at)
 
-    start_page.(t1)
+    start.(t1)
     see(t1, count.(1))
     refute_see(t1, "A use case to accept")
 

@@ -70,7 +70,7 @@ scenario "UC-Atlas-28: What to do, for the owner of a fact", fn %{t1: t1, instan
     resize(t1, 100, 40)
     # From My work, the start page (home() goes on to the scenes; esc comes back).
     press(t1, "Escape")
-    see(t1, ~r/Atlas · test.*\sAssigned to you$/m)
+    see_list(t1, "Assigned to you")
     open_row(t1, "A use case to test")
     see(t1, "Use case #{use_case}: A use case to test")
     see(t1, "What to do: Test it")
@@ -78,7 +78,7 @@ scenario "UC-Atlas-28: What to do, for the owner of a fact", fn %{t1: t1, instan
     see(t1, ~r/How\s+Try the test below, then accept it, or reject it with a note\./)
     see(t1, ~r/Melle can test\s+open it from My work, and read this line\./)
     see(t1, ~r/Answers\s+a Accept/)
-    see(t1, "a Accept")
+    see_action(t1, "a", "Accept")
     resize(t1, 100, 30)
   end
 

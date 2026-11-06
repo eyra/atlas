@@ -3,7 +3,11 @@
 # "Markup"; IS-Atlas-48, IS-Atlas-66).
 import AtlasE2E.Scenario
 
-scenario "Markup: a scene's page in two parts, content and references", fn %{t1: t1, t2: t2} ->
+scenario "Markup: a scene's page in two parts, content and references", fn %{
+                                                                             t1: t1,
+                                                                             t2: t2,
+                                                                             instance: i
+                                                                           } ->
   step "A scene's page: the scene in the content part, its use cases in the references", fn ->
     home(t1)
     press(t1, "c")
@@ -28,7 +32,7 @@ scenario "Markup: a scene's page in two parts, content and references", fn %{t1:
     page =~ ~r/ Use cases ─+ │\n │\s+│\n │   No use cases yet\. Press c to create one\./u ||
       raise "the section does not head the list:\n#{page}"
 
-    page =~ "tab next part" || raise "the footer does not say tab moves between the parts"
+    see_action(t1, "]", "Next pane")
   end
 
   step "A use case added shows in the references; its page has two parts too", fn ->
@@ -51,19 +55,44 @@ scenario "Markup: a scene's page in two parts, content and references", fn %{t1:
     see(t1, ~r/ Use cases ─+ │\n │\s+│\n │ › UC-Atlas-\d+\s+A use case in the section/u)
   end
 
-  step "Wide: the two parts side by side; tab moves the focus", fn ->
+  step "Wide: the two parts side by side; brackets move the focus", fn ->
     home(t2)
     open_row(t2, "A scene with markup")
     resize(t2, 160, 30)
     page = see(t2, ~r/┌─ Content ─+┐ +┌─ References ─+┐/u)
     page =~ ~r/│ Scene SC-Atlas-\d+: A scene with markup\s+│ +│ Use cases ─+ │/u || raise page
     see(t2, ~r/UC-Atlas-\d+\s+A use case in the section/)
-    see(t2, "↑↓ move")
-    press(t2, "Tab")
-    see(t2, "↑↓ scroll")
-    press(t2, "Tab")
-    see(t2, "↑↓ move")
+    see(t2, ~r/› UC-Atlas-\d+\s+A use case in the section/)
+    see_action(t2, "]", "Next pane")
+    press(t2, "]")
+    see(t2, ~r/UC-Atlas-\d+\s+A use case in the section/)
+    press(t2, "]")
+    see(t2, ~r/› UC-Atlas-\d+\s+A use case in the section/)
+    see(t2, "▸ Scenes")
     resize(t2, 100, 30)
     see(t2, ~r/^ └─+┘\n ┌─ References/mu)
+  end
+
+  step "Manual References scroll hides the offscreen selection; row movement restores it", fn ->
+    scene = capture(t2, ~r/Scene (SC-Atlas-\d+): A scene with markup/)
+
+    for n <- 1..8 do
+      atlas_json(i, [
+        "put",
+        "use_case",
+        "--in",
+        scene,
+        "--title",
+        "A reference for scrolling #{n}"
+      ])
+    end
+
+    see(t2, ~r/› UC-Atlas-\d+\s+A use case in the section/)
+    press(t2, "NPage")
+    gone(t2, ~r/│ › UC-Atlas-\d+/)
+    refute_see(t2, ~r/│ › UC-Atlas-\d+/)
+    see(t2, "▸ Scenes")
+    press(t2, "j")
+    see(t2, ~r/│ › UC-Atlas-\d+\s+A reference for scrolling/)
   end
 end

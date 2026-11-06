@@ -14,7 +14,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
   row = fn title -> ~r/UC-Atlas-\d+\s+#{Regex.escape(title)}/ end
 
   step "A request whose plan runs: one step kept, one dropped", fn ->
-    for t <- [t1, t2], do: see(t, ~r/Atlas · test.*\sScenes$/m)
+    for t <- [t1, t2], do: see_list(t, "Scenes")
 
     {scene, at} =
       atlas_json(
@@ -68,13 +68,13 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     step["values"]["made"] == "" || raise inspect(step["values"])
   end
 
-  step "The start page has `w What the agent did`; the request shows with its steps", fn ->
+  step "The Console legend declares What the agent did; the request shows with its steps", fn ->
     request = Process.get(:request)
     home(t1)
-    see(t1, "w What the agent did")
+    see_action(t1, "w", "What the agent did")
     refute_see(t1, "Agent requests")
     press(t1, "w")
-    see(t1, ~r/Atlas · test.*\sAgent requests$/m)
+    see_list(t1, "Agent requests")
     see(t1, ~r/#{request}\s+propose use cases from this scene's description\s+Done/)
     open_row(t1, "propose use cases from this scene's description")
     see(t1, "Agent request #{request}: propose use cases")
@@ -83,7 +83,8 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     see(t1, "Steps")
     see(t1, Process.get(:step))
     # Only the agent writes the record: no keys to create, update or delete it.
-    refute_see(t1, ~r/\bu Update|\bd Delete|\bc Create/)
+    actions = legend(t1)
+    actions =~ ~r/│\s+[udc]\s+(Update|Delete|Create)/ && raise actions
   end
 
   step "From the use case the agent made, its step: what the agent did here", fn ->
@@ -105,7 +106,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
     press(t1, "Enter")
     see(t1, "Proposed: 2 steps", 10_000)
     press(t1, "Escape")
-    gone(t1, "space keep/drop")
+    gone(t1, "Proposed:")
     {requests, _} = atlas_json(i, ["list", "agent_request"])
     [newest, oldest | _] = Enum.sort_by(requests, & &1["key"], :desc)
     oldest["key"] == Process.get(:request) || raise inspect(requests)
@@ -114,7 +115,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
 
     home(t1)
     press(t1, "w")
-    screen = see(t1, ~r/Atlas · test.*\sAgent requests$/m)
+    screen = see_list(t1, "Agent requests")
     {a, _} = :binary.match(screen, newest["key"])
     {b, _} = :binary.match(screen, oldest["key"])
     a < b || raise "not newest first:\n#{screen}"
@@ -124,7 +125,7 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
   open_step = fn request, step ->
     home(t1)
     press(t1, "w")
-    see(t1, ~r/Atlas · test.*\sAgent requests$/m)
+    see_list(t1, "Agent requests")
     open_row(t1, request)
     see(t1, "Agent request #{request}:")
     open_row(t1, step)
@@ -141,10 +142,10 @@ scenario "UC-Atlas-19: See and overrule what the agent did", fn %{t1: t1, t2: t2
 
     # A dropped step stored nothing: no x.
     open_step.(request, Process.get(:dropped))
-    refute_see(t1, "x Overrule")
+    refute_action(t1, "x", "Overrule")
 
     open_step.(request, Process.get(:step))
-    see(t1, "x Overrule")
+    see_action(t1, "x", "Overrule")
     press(t1, "x")
     see(t1, "Proposed: 1 step", 10_000)
     see(t1, ~r/You asked\s+Overrule #{Process.get(:step)}: 1\. Create use case in #{scene}/)

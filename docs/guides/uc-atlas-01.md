@@ -2,7 +2,7 @@
 
 What you can do: start the TUI with `--env test`; list, create, open, change and delete scenes; a second TUI shows each change without refreshing.
 
-Try it in test: `atlas tui --env test`. Without `--env test`, `atlas` opens prod, which holds real data; the header says which one you are in (`Atlas · prod` in white on red, `Atlas · test` plain). Nothing here touches prod, Fly or the live rela store.
+Try it in test: `atlas tui --env test`. Without `--env test`, `atlas` opens prod, which holds real data; the Console header identifies the environment (`Atlas Console · prod` or `Atlas Console · test`). Nothing here touches prod, Fly or the live rela store.
 
 ## Start
 

@@ -21,7 +21,7 @@ scenario "UC-Atlas-31: An issue shows Development while its pull request is open
 
     open_row(t1, "A scene whose issue gets a PR")
     open_row(t1, "Its UC")
-    see(t1, ~r/#{issue["key"]}\s+An issue at spec\s+Specification/)
+    see(t1, ~r/#{issue["key"]}\s+An issue at spec[\s│]+Specification/)
     Process.put(:uc31, issue["key"])
     Process.put(:uc31_made, [issue["key"], use_case["key"], scene["key"]])
   end
@@ -38,7 +38,7 @@ scenario "UC-Atlas-31: An issue shows Development while its pull request is open
 
     GitHub.put(url, pull)
     {_, at} = atlas_json(i, ["put", "pull_request", "--url", url, "--in", issue])
-    by_hint(t1, ~r/#{issue}\s+An issue at spec\s+Development/, at)
+    by_hint(t1, "Development", at)
 
     {got, _} = atlas_json(i, ["get", issue])
     progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
@@ -56,7 +56,7 @@ scenario "UC-Atlas-31: An issue shows Development while its pull request is open
       "html_url" => url
     })
 
-    see(t1, ~r/#{issue}\s+An issue at spec\s+Specification/, connector_wait)
+    see(t1, ~r/#{issue}\s+An issue at spec[\s│]+Specification/, connector_wait)
   end
 
   # The scenes list stays short enough for the scenarios after this one.

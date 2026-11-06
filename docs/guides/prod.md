@@ -10,7 +10,7 @@ Prod runs on Fly (IS-Atlas-79, below), like test since IS-Atlas-26 (`docs/guides
 atlas
 ```
 
-The same as `atlas tui --env prod`. It opens the tunnel to prod's Control on Fly in the background (`fly proxy 7593:7591 -a eyra-atlas`, flyctl's WireGuard; flyctl must be logged in to organisation eyra), then a TUI. The header says `Atlas · prod` in white on red; test's header says `Atlas · test`, plain.
+The same as `atlas tui --env prod`. It opens the tunnel to prod's Control on Fly in the background (`fly proxy 7593:7591 -a eyra-atlas`, flyctl's WireGuard; flyctl must be logged in to organisation eyra), then Console. The header identifies the environment: `Atlas Console · prod` or `Atlas Console · test`.
 
 More:
 - `atlas status`: the tunnel, and both apps' machines, checks and deployed build (the image label `master-<commit>`).

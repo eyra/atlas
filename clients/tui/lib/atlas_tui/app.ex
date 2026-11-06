@@ -2,7 +2,7 @@ defmodule AtlasTui.App do
   @moduledoc """
   The running TUI: raw terminal input, the connection to Control, and the screen.
 
-  - Every key goes through `AtlasTui.Model`; every message from Control too.
+  - Every key goes through `AtlasTui.Model`; Control messages go through `AtlasTui.Console`.
   - Every `reconcile_seconds` it asks Control to refresh the page from State, so a lost
     hint only delays what the screen shows.
   - A link's key opens its web address in the browser (`AtlasTui.Browser`).
@@ -23,7 +23,7 @@ defmodule AtlasTui.App do
   @reconnect 2_000
   @root Path.expand("../../../..", __DIR__)
 
-  def run(env, settings, surface \\ "console") do
+  def run(env, settings) do
     with {:error, reason} <- :shell.start_interactive({:noshell, :raw}) do
       IO.puts(:stderr, "atlas: the TUI needs a terminal (#{inspect(reason)})")
       System.halt(1)
@@ -38,11 +38,7 @@ defmodule AtlasTui.App do
     :timer.send_interval(reconcile * 1_000, :reconcile)
 
     state = %{
-      model:
-        if(surface == "legacy",
-          do: Model.new(env),
-          else: %{Model.new(env) | console: Console.new()}
-        ),
+      model: Model.new(env),
       settings: settings,
       reconcile: reconcile,
       socket: nil,
@@ -88,10 +84,7 @@ defmodule AtlasTui.App do
       {:tcp, socket, line} when socket == state.socket ->
         case JSON.decode(line) do
           {:ok, message} ->
-            {model, effects} =
-              if state.model.console,
-                do: Console.receive(state.model, message),
-                else: {Model.message(state.model, message), []}
+            {model, effects} = Console.receive(state.model, message)
 
             loop(draw(effects(%{state | model: model}, effects)))
 
@@ -155,22 +148,14 @@ defmodule AtlasTui.App do
         )
 
       :reconcile ->
-        if state.model.console do
-          {model, outgoing} = Console.refresh(state.model)
-          state = effects(%{state | model: model}, outgoing)
+        {model, outgoing} = Console.refresh(state.model)
+        state = effects(%{state | model: model}, outgoing)
 
-          if state.socket && model.connected && model.console.phase == :ready &&
-               !Console.draft?(model),
-             do: send_line(state, %{"op" => "refresh"})
+        if state.socket && model.connected && model.console.phase == :ready &&
+             is_nil(model.console.expected) && !Console.draft?(model),
+           do: send_line(state, %{"op" => "refresh"})
 
-          loop(state)
-        else
-          if state.socket && state.model.connected && !Model.form(state.model) &&
-               !Model.step_form(state.model),
-             do: send_line(state, %{"op" => "refresh"})
-
-          loop(state)
-        end
+        loop(state)
     end
   end
 
@@ -248,21 +233,8 @@ defmodule AtlasTui.App do
       {:ok, socket} ->
         state = %{state | socket: socket, model: Model.disconnected(state.model)}
 
-        if state.model.console do
-          send_line(state, Console.hello(state.model))
-          Process.send_after(self(), {:handshake_timeout, socket}, 5_000)
-        else
-          send_line(
-            state,
-            AtlasTui.Protocol.request(:hello, %{
-              "env" => state.model.env,
-              "client" => "tui",
-              "spec" => AtlasTui.Protocol.version()
-            })
-          )
-
-          if state.model.path, do: send_line(state, %{"op" => "open", "to" => state.model.path})
-        end
+        send_line(state, Console.hello(state.model))
+        Process.send_after(self(), {:handshake_timeout, socket}, 5_000)
 
         state
 
@@ -288,10 +260,7 @@ defmodule AtlasTui.App do
     {width, height} = size()
     state = %{state | model: AtlasTui.Legend.resize(state.model, width, height)}
 
-    theme =
-      if state.model.console,
-        do: AtlasTui.Palette.theme(state.settings["tui_theme"]),
-        else: :legacy
+    theme = AtlasTui.Palette.theme(state.settings["tui_theme"])
 
     state.model
     |> View.render(width, height, state.reconcile)

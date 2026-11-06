@@ -69,17 +69,23 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
   # IS-Atlas-58: every action is Create, Update or Delete, with the same words and keys.
   step "c Create, u Update, d Delete: the same words and keys on every page", fn ->
     home(t1)
-    see(t1, "c Create scene")
+    see_action(t1, "c", "Create scene")
     open_row(t1, "A scene with two use cases")
     # A person at the TUI also gets Accept (UC-Atlas-32), once a scenario made that person;
     # every assignable fact h Hand to… (IS-Atlas-83).
-    see(t1, ~r/u Update scene\s+d Delete scene\s+(a Accept\s+)?h Hand to…\s+c Create use case/)
+    see_action(t1, "u", "Update scene")
+    see_action(t1, "d", "Delete scene")
+    see_action(t1, "h", "Hand to…")
+    see_action(t1, "c", "Create use case")
     press(t1, "c")
     see(t1, ~r/^ Create use case in #{scene}$/m)
     see(t1, "[ Create ]")
     press(t1, "Escape")
     open_row(t1, "Where the issue starts")
-    see(t1, ~r/u Update use case\s+d Delete use case\s+(a Accept\s+)?h Hand to…\s+c Create issue/)
+    see_action(t1, "u", "Update use case")
+    see_action(t1, "d", "Delete use case")
+    see_action(t1, "h", "Hand to…")
+    see_action(t1, "c", "Create issue")
     press(t1, "u")
     see(t1, ~r/^ Update #{from}$/m)
     see(t1, "[ Update ]")
@@ -87,7 +93,7 @@ scenario "UC-Atlas-30: Move an issue to another use case", fn %{t1: t1, t2: t2, 
     see(t1, "Use case #{from}: Where the issue starts")
     press(t1, "d")
     see(t1, "#{from} cannot be deleted")
-    press(t1, "Enter")
+    press(t1, "Escape")
     see(t1, "Use case #{from}: Where the issue starts")
   end
 end

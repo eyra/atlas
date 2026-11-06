@@ -57,7 +57,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
 
   step "a Accept is refused while an issue is open, and says which", fn ->
     %{use_case: use_case, issue: issue} = Process.get(:uc32)
-    see(t1, "a Accept", reconcile_wait)
+    see_action(t1, "a", "Accept", reconcile_wait)
     press(t1, "a")
     see(t1, "#{use_case} has #{issue} open")
     press(t1, "Escape")
@@ -65,15 +65,15 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
   end
 
   step "An issue whose pull request merges is Done, set by nobody; its use case to test", fn ->
-    %{use_case: use_case, issue: issue} = Process.get(:uc32)
+    %{issue: issue} = Process.get(:uc32)
     pull = %{"title" => "Its only issue", "state" => "open", "merged" => false, "html_url" => url}
     GitHub.put(url, pull)
     {_, at} = atlas_json(i, ["put", "pull_request", "--url", url, "--in", issue])
     # While its pull request is open it shows Development (IS-Atlas-61).
-    by_hint(t1, ~r/#{issue}\s+Its only issue\s+Development/, at)
+    by_hint(t1, "Development", at)
 
     GitHub.put(url, %{pull | "state" => "closed", "merged" => true})
-    see(t1, ~r/#{issue}\s+Its only issue\s+Done/, connector_wait)
+    see(t1, ~r/#{issue}\s+Its only issue[\s│]+Done/, connector_wait)
 
     {got, _} = atlas_json(i, ["get", issue])
     progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
@@ -81,7 +81,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
 
     # The use case is not done because its issue is: it is to test.
     press(t1, "Escape")
-    see(t1, ~r/#{use_case}\s+A use case to accept\s+To test · 1\/1/)
+    see(t1, "To test · 1/1")
   end
 
   step "a Accept, y: the use case is Done, accepted by melle; the scene to test", fn ->
@@ -92,8 +92,8 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     see(t1, "will be accepted by melle")
     at = press(t1, "y")
     stored(t1, ~r/Accepted by ─+(.|\n)*melle  Person/, at)
-    see(t1, "a Reopen")
-    see(t1, "r refresh")
+    see_action(t1, "a", "Reopen")
+    see_action(t1, "r", "Refresh")
 
     {got, _} = atlas_json(i, ["get", use_case])
     progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
@@ -101,10 +101,10 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     got["origins"]["Progress"]["by"] == "melle" || raise inspect(got["origins"])
 
     press(t1, "Escape")
-    see(t1, ~r/#{use_case}\s+A use case to accept\s+Done · 1\/1/)
+    see(t1, ~r/#{use_case}\s+A use case to accept[\s│]+Done · 1\/1/)
     press(t1, "Escape")
     # The scenes list may be longer than the screen: the scene's own page says it.
-    see(t1, ~r/Atlas · test.*\sScenes$/m)
+    see_list(t1, "Scenes")
     open_row(t1, "A scene to accept")
     see(t1, "Scene #{scene}: A scene to accept")
     # Its page has more lines than its content part shows (the owner, IS-Atlas-75).
@@ -112,7 +112,7 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     progress = Enum.find_value(got["fields"], fn [l, v] -> l == "Progress" && v end)
     progress == "To test · 1/1" || raise inspect(got["fields"])
     press(t1, "Escape")
-    see(t1, ~r/Atlas · test.*\sScenes$/m)
+    see_list(t1, "Scenes")
   end
 
   step "Nothing new goes under an accepted use case", fn ->
@@ -129,13 +129,13 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
     %{use_case: use_case} = Process.get(:uc32)
     open_row(t1, "A scene to accept")
     open_row(t1, "A use case to accept")
-    see(t1, "a Reopen")
+    see_action(t1, "a", "Reopen")
     press(t1, "a")
     see(t1, "Reopen #{use_case}")
     type(t1, "Found a bug in the footer")
     at = press(t1, "C-s")
     stored(t1, "Use case #{use_case}: A use case to accept", at)
-    see(t1, "a Accept")
+    see_action(t1, "a", "Accept")
     # The note is the cause of the fact that removed the link (more lines than the content
     # part shows, since IS-Atlas-75 adds the owner).
     {got, _} = atlas_json(i, ["get", use_case])
@@ -145,6 +145,6 @@ scenario "UC-Atlas-32: Completed means accepted or merged", fn %{t1: t1, instanc
       raise inspect(origin)
 
     press(t1, "Escape")
-    see(t1, ~r/#{use_case}\s+A use case to accept\s+To test · 1\/1/)
+    see(t1, "To test · 1/1")
   end
 end

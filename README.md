@@ -8,7 +8,7 @@ This repository holds everything during development: the BEAM application, the r
 
 ## Try it
 
-`atlas` opens **prod**, where the plan lives (real data; the header shows `Atlas · prod` in white on red). Prod and test run on Fly; `atlas` reaches them through a tunnel it opens itself. Try use cases in **test**: `atlas tui --env test`. Scripts, tests and agents always pass `--env test` or a private `ATLAS_ENV_FILE`.
+`atlas` opens **prod**, where the plan lives (real data; the header shows `Atlas Console · prod`). Prod and test run on Fly; `atlas` reaches them through a tunnel it opens itself. Try use cases in **test**: `atlas tui --env test`. Scripts, tests and agents always pass `--env test` or a private `ATLAS_ENV_FILE`.
 
 - `docs/guides/prod.md`: the prod environment: start, stop, where its data is; prod on Fly, its secrets, and the move and switch (IS-Atlas-90).
 - `docs/guides/test-on-fly.md`: test runs on Fly (`eyra-atlas-test`, `eyra-atlas-test-rela`), deployed on every merge to develop; the tunnel, the CI secrets, and `atlas move-to-fly` (IS-Atlas-26).
@@ -38,11 +38,17 @@ atlas status --env test   # what runs, and which build (also: logs, stop, restar
 
 ### Console navigation and keys (UC-Atlas-42/43)
 
-Console is the default terminal surface. Boot supplies persistent tabs; the current
+Console is the terminal interface. Boot supplies persistent tabs; the current
 page supplies contextual action blocks and their legend groups. While browsing,
 the supplied `? Keys` action opens a bordered vertical legend with aligned key and
 label columns. Disabled actions remain visible with their supplied reason. The
 legend uses the same scoped actions as execution, not a separate help/key table.
+
+Tab selection changes immediately, showing `Loading…` until its content arrives.
+Further Tab/Shift+Tab presses remain responsive: while one open request is pending,
+the client keeps only the latest desired destination and discards superseded content.
+This does not make server reads faster or cache pages. Draft editors keep their
+existing navigation protection.
 
 Use the legend's declared Up/Down and PageUp/PageDown bindings to scroll; Esc closes
 it and restores the underlying selection, focus and drafts. Resizing clamps the
@@ -57,9 +63,9 @@ pane independently, without changing the selected reference row. Tab/Shift+Tab
 continue switching shell tabs. Single-pane and unpartitioned pages do not offer
 pane cycling; native view actions take precedence when they use either bracket.
 
-For compatibility checks only, `atlas tui --env test --surface legacy` selects the
-previous presentation explicitly. Failed Console negotiation never silently falls
-back. To try local uncommitted client work without the launcher's automatic update,
+Run `atlas tui --env test` (or `--env prod`) to open Console; there is no
+`--surface` selector or legacy interface. Incompatible negotiation fails explicitly.
+To try local uncommitted client work without the launcher's automatic update,
 run `ATLAS_NO_UPDATE=1 bin/atlas tui --env test` from this checkout.
 
 ### Console presentation (UC-Atlas-44)
@@ -75,7 +81,7 @@ The default Console palette is dark. Set `"tui_theme": "light"` in the environme
 settings for a light surface, or `"dark"` for dark. Both use a small local mapping
 of Prism colors with explicit foreground/background pairs and non-color markers;
 no Prism generator or runtime dependency is added. This setting affects only
-Console rendering, not server data or the explicit legacy surface.
+Console rendering, not server data.
 
 ## Driving Atlas from an agent
 
