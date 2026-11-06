@@ -13,6 +13,9 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'tools/runtime-playground/playground.exs'
 ENV = dict(os.environ, MIX_ENV='test', ELIXIR_ERL_OPTIONS='+S 1:1')
+# Supported macOS/Linux pid_t is a signed 32-bit int. Exclude reserved 0/1,
+# preserving the inspector's existing policy, before any native conversion.
+PID_MAX = (1 << 31) - 1
 # Private configuration only. No inherited model, Bus link or live environment file.
 for key in list(ENV):
     if key.startswith('ATLAS_'):
@@ -26,10 +29,50 @@ def beam(*args, no_start=False):
     return ['mix', 'run', '--no-compile', '--no-deps-check', *(['--no-start'] if no_start else []), str(SCRIPT), *map(str, args)]
 
 
+def validate_pid(pid):
+    if type(pid) is not int or not 1 < pid <= PID_MAX:
+        raise ValueError('PID outside supported positive pid_t domain')
+    return pid
+
+
+def parse_pid(record):
+    if not isinstance(record, str):
+        raise ValueError('PID record must be decimal text')
+    digits = record.strip()
+    # Bound before int(): works for arbitrary-size corrupt records on every
+    # supported Python, without narrowing or interpreter digit-limit exceptions.
+    if not 1 <= len(digits) <= 10 or not digits.isascii() or not digits.isdecimal():
+        raise ValueError('PID record must be bounded ASCII decimal text')
+    return validate_pid(int(digits, 10))
+
+
+def process_state(pid):
+    """Exact birth and OS terminal state; no argument parsing or signalling."""
+    validate_pid(pid)
+    if sys.platform == 'linux':
+        proc = Path('/proc')/str(pid)
+        fields = (proc/'stat').read_text().rsplit(')', 1)[1].split()
+        return dict(pid=pid, start=[Path('/proc/sys/kernel/random/boot_id').read_text().strip(), fields[19]], uid=proc.stat().st_uid, terminal=fields[0] in ('Z', 'X'))
+    if sys.platform != 'darwin':
+        raise ValueError('process identity inspection unsupported on this OS')
+    import errno
+    library = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+    library.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    library.proc_pidinfo.restype = ctypes.c_int
+    data = ctypes.create_string_buffer(136)
+    ctypes.set_errno(0)
+    if library.proc_pidinfo(pid, 3, 0, data, 136) != 136:
+        if ctypes.get_errno() == errno.ESRCH:
+            raise ProcessLookupError(errno.ESRCH, 'process no longer exists')
+        raise ValueError('retained process state unavailable')
+    if struct.unpack_from('=I', data.raw, 12)[0] != pid:
+        raise ValueError('OS process PID does not match requested identity')
+    return dict(pid=pid, start=list(struct.unpack_from('=QQ', data.raw, 120)), uid=struct.unpack_from('=I', data.raw, 20)[0], terminal=struct.unpack_from('=I', data.raw, 4)[0] == 5)
+
+
 def process_identity(pid):
     """Read OS argv boundaries and process birth identity; never parse ps prose."""
-    if pid <= 1:
-        raise ValueError('invalid retained PID')
+    validate_pid(pid)
     if sys.platform == 'linux':
         proc = Path('/proc')/str(pid)
         def birth():
@@ -45,11 +88,19 @@ def process_identity(pid):
         raise ValueError('process identity inspection unsupported on this OS')
     libproc = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
     libc = ctypes.CDLL(None, use_errno=True)
+    libproc.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    libproc.proc_pidinfo.restype = ctypes.c_int
+    libproc.proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    libproc.proc_pidpath.restype = ctypes.c_int
+    libc.sysctl.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.c_uint, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
+    libc.sysctl.restype = ctypes.c_int
     def birth():
         # SDK sys/proc_info.h: PROC_PIDTBSDINFO=3, proc_bsdinfo size 136.
         data = ctypes.create_string_buffer(136)
         if libproc.proc_pidinfo(pid, 3, 0, data, 136) != 136:
             raise ValueError('retained process unavailable')
+        if struct.unpack_from('=I', data.raw, 12)[0] != pid:
+            raise ValueError('OS process PID does not match requested identity')
         return list(struct.unpack_from('=QQ', data.raw, 120)), struct.unpack_from('=I', data.raw, 20)[0]
     start, uid = birth()
     # SDK sys/sysctl.h: CTL_KERN=1, KERN_PROCARGS2=49; argc + exec path + argv.
@@ -90,8 +141,9 @@ def check_role(record, role, directory, binary):
 
 def retain_processes(directory, binary):
     records = {}
+    pids = {role: parse_pid((directory/f'{role}.pid').read_text()) for role in ('server', 'rela')}
     for role in ('server', 'rela'):
-        records[role] = process_identity(int((directory/f'{role}.pid').read_text()))
+        records[role] = process_identity(pids[role])
         check_role(records[role], role, directory, binary)
     (directory/'processes.json').write_text(json.dumps(dict(directory=str(directory), binary=str(binary), processes=records)))
 
@@ -107,8 +159,13 @@ def stop_instance(directory):
         # Check both roles before sending any signal, then recheck immediately per PID.
         for role in ('server', 'rela'):
             record = records[role]
+            validate_pid(record['pid'])
             check_role(record, role, directory, binary)
-            if int((directory/f'{role}.pid').read_text()) != record['pid'] or process_identity(record['pid']) != record:
+            if parse_pid((directory/f'{role}.pid').read_text()) != record['pid']:
+                raise ValueError(f'{role} retained PID record mismatch')
+        for role in ('server', 'rela'):
+            record = records[role]
+            if process_identity(record['pid']) != record:
                 raise ValueError(f'{role} retained PID is stale or reused')
         for role in ('server', 'rela'):
             record = records[role]
@@ -125,9 +182,9 @@ def main():
     if len(args) < 3 or args[0] not in ('playground', 'attach'):
         raise ValueError('prototype: atlas playground init|stop|probe DIR [COMMAND ...]; atlas attach WORKER --prototype DIR')
     if args[0] == 'attach':
-        if len(args) != 4 or args[2] != '--prototype':
+        if len(args) not in (4, 8) or args[2] != '--prototype':
             raise ValueError('prototype: atlas attach breaker --prototype DIR')
-        return subprocess.call(beam('attach', Path(args[3]).resolve(), args[1], no_start=True), cwd=ROOT/'beam', env=ENV)
+        return subprocess.call(beam('attach', Path(args[3]).resolve(), args[1], *args[4:], no_start=True), cwd=ROOT/'beam', env=ENV)
     action, directory, *words = args[1:]
     directory = Path(directory).expanduser().resolve()
     if action == 'init':

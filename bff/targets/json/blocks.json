@@ -743,6 +743,186 @@
           "name": "machine",
           "required": true,
           "type": "string"
+        }
+      ],
+      "name": "runtime_machine"
+    },
+    {
+      "fields": [
+        {
+          "name": "machine",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "json",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_machine_status_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_discovery_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "registered",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "basis",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_availability"
+    },
+    {
+      "fields": [
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "configuration",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "directory",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "instance",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_boot"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "instance",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "pid",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "name": "runtime_machine_boot_receipt"
+    },
+    {
+      "fields": [
+        {
+          "name": "local_status",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "local_start",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "local_stop",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "remote_status",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_machine_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "basis",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "capabilities",
+          "required": true,
+          "type": "runtime_machine_capabilities"
+        },
+        {
+          "name": "pid",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "process_present",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "name": "log",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_status"
+    },
+    {
+      "fields": [
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
         },
         {
           "name": "worker",
@@ -976,6 +1156,51 @@
         }
       ],
       "name": "runtime_error"
+    },
+    {
+      "fields": [
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_attachment_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "snapshot",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "control",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "guidance",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "output",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "replay",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_attachment_capabilities"
     },
     {
       "fields": [
@@ -1619,6 +1844,417 @@
     }
   ],
   "protocol": [
+    {
+      "channel": "control",
+      "cli": [
+        "discover"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_discover",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "availability": "runtime_machine_availability",
+            "id": "string",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_discover_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_discover_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "grant": "string"
+        },
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_discover",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "start"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_start",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_start_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_start_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_start",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "stop"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_stop",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_stop_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_stop_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_stop",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_status_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_status_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_status",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "attach"
+      ],
+      "direction": "request",
+      "name": "execution_attach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_attach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "execution_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_status",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "detach"
+      ],
+      "direction": "request",
+      "name": "execution_detach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_detach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "direction": "push",
+      "name": "execution_snapshot",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "status",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "sequence": "integer",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "event",
+            "op": "execution_snapshot",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "runtime_attachment",
+      "direction": "push",
+      "name": "execution_closed",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "closed",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "sequence": "integer",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "event",
+            "op": "execution_closed",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
     {
       "channel": "runtime",
       "cli": [

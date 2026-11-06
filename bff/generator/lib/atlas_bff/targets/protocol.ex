@@ -39,6 +39,9 @@ defmodule AtlasBFF.Targets.Protocol do
       def model(name, props),
         do: AtlasBFF.Targets.Protocol.payload!(@protocol_models, name, props)
 
+      def options(model, argv),
+        do: AtlasBFF.Targets.Protocol.options(@protocol_models, model, argv)
+
       def decode_request(message, channel \\ unquote(opts[:channel])),
         do: AtlasBFF.Wire.decode_request(@protocol_wires, channel, message, @protocol_models)
 
@@ -119,6 +122,30 @@ defmodule AtlasBFF.Targets.Protocol do
   def endpoint!(endpoints, call, name) do
     Enum.find(endpoints, &(&1.call == call and &1.name == name)) ||
       raise ArgumentError, "no endpoint #{inspect(name)} (#{call})"
+  end
+
+  @doc false
+  def options(models, name, argv) do
+    fields = Map.fetch!(models, name)
+
+    if Enum.any?(fields, &(&1.type not in [:string, :integer, :boolean])),
+      do: raise(ArgumentError, "CLI options require primitive fields")
+
+    {options, rest, invalid} =
+      OptionParser.parse(argv, strict: Enum.map(fields, &{&1.name, [&1.type, :keep]}))
+
+    cond do
+      rest != [] or invalid != [] ->
+        {:invalid, "unknown arguments or invalid options"}
+
+      length(Keyword.keys(options)) != length(Enum.uniq(Keyword.keys(options))) ->
+        {:invalid, "duplicate options"}
+
+      true ->
+        {:ok, payload!(models, name, options)}
+    end
+  rescue
+    error in ArgumentError -> {:invalid, Exception.message(error)}
   end
 
   @doc false

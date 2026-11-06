@@ -223,6 +223,12 @@ defmodule AtlasControl.Session do
     end
   end
 
+  defp handle_op("machine_discover", message, state) do
+    reply = AtlasControl.RuntimeDiscovery.read(message, state.hello)
+    send_client(state, reply)
+    {:noreply, state}
+  end
+
   defp handle_op(_op, _message, %{hello: false} = state),
     do: {:noreply, notice(state, "error", "Say hello first.")}
 

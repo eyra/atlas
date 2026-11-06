@@ -263,4 +263,81 @@ defmodule AtlasAgent.TransportTest do
       end
     )
   end
+
+  test "machine discovery replies bind request id and outer/nested exact machine identity" do
+    target = %{"environment" => "test", "machine" => "fixture"}
+
+    request =
+      Protocol.request(:runtime_machine_discover, id: "read-1", target: target, grant: "private")
+
+    valid =
+      Protocol.reply(:runtime_machine_discover, :result,
+        id: "read-1",
+        target: target,
+        availability: %{target: target, registered: true, basis: "bus_endpoint_registry"}
+      )
+
+    error =
+      Protocol.reply(:runtime_machine_discover, :error,
+        id: "read-1",
+        target: target,
+        error: %{code: "unauthorized", message: "refused", retryable: false}
+      )
+
+    for bad <- [
+          Map.put(valid, "id", "other"),
+          put_in(valid, ["target", "machine"], "other"),
+          put_in(valid, ["availability", "target", "environment"], "prod"),
+          put_in(error, ["target", "machine"], "other"),
+          Map.delete(error, "target"),
+          put_in(valid, ["availability", "registered"], "true")
+        ] do
+      peer(
+        fn socket ->
+          assert receive_line(socket) == request
+          send_line(socket, bad)
+          assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+        end,
+        fn port ->
+          assert {:error, _} = Client.exchange(raw(port), :runtime_machine_discover, request, 100)
+        end
+      )
+    end
+
+    peer(
+      fn socket ->
+        assert receive_line(socket) == request
+        send_line(socket, notice())
+        send_line(socket, page("hint"))
+        send_line(socket, valid)
+      end,
+      fn port ->
+        client = raw(port)
+        assert {:ok, ^valid} = Client.exchange(client, :runtime_machine_discover, request, 100)
+        Client.close(client)
+      end
+    )
+  end
+
+  test "discovery distinguishes malformed data and deadline expiry from machine absence" do
+    request =
+      Protocol.request(:runtime_machine_discover,
+        id: "deadline",
+        target: %{environment: "test", machine: "fixture"}
+      )
+
+    for {kind, code} <- [{:malformed, "malformed_reply"}, {:timeout, "timeout"}] do
+      peer(
+        fn socket ->
+          assert receive_line(socket) == request
+          if kind == :malformed, do: :gen_tcp.send(socket, "{\n"), else: Process.sleep(100)
+          assert :gen_tcp.recv(socket, 0, 1_000) == {:error, :closed}
+        end,
+        fn port ->
+          assert {:error, %{"code" => ^code}} =
+                   Client.exchange(raw(port), :runtime_machine_discover, request, 50)
+        end
+      )
+    end
+  end
 end
