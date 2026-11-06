@@ -51,6 +51,22 @@ defmodule AtlasE2E.AtlasCommandTest do
     assert {_, 2} = atlas(["env", "--env="])
   end
 
+  test "surface selection belongs to the TUI, not generic entity properties" do
+    for args <- [["--surface", "unknown"], ["--surface=unknown"]] do
+      assert {out, 2} = atlas(["tui" | args])
+      assert out =~ "unknown TUI surface"
+    end
+
+    # Stop at the environment guard, before connecting or creating anything.
+    assert {out, 1} =
+             atlas(
+               ["put", "widget", "--surface", "dark", "--env", "prod"],
+               [{"ATLAS_ENV_FILE", private_file("test")}]
+             )
+
+    assert out =~ "is for test, not prod"
+  end
+
   test "the end-to-end test refuses prod" do
     assert {out, 1} = atlas(["e2e", "--env", "prod"])
     assert out =~ "never on prod"

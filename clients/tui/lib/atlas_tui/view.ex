@@ -34,12 +34,14 @@ defmodule AtlasTui.View do
   """
   def known,
     do: %{
-      blocks: ~w(list item form confirm plan),
-      markup: ~w(part section highlight)
+      blocks: ~w(list item form confirm plan console_action),
+      markup: ~w(part section highlight legend)
     }
 
   @doc "The screen: exactly `height` lines of plain segments."
   def render(%Model{} = model, width, height, reconcile_seconds) do
+    width = max(width, 1)
+    height = max(height, 1)
     # What waits for the user, on every page: Control's words for it.
     count = if model.count, do: " · " <> model.count, else: ""
 
@@ -56,9 +58,14 @@ defmodule AtlasTui.View do
       [{:dim, String.duplicate("─", width)}]
     ]
 
+    header = if model.console, do: AtlasTui.ConsoleView.header(model, width), else: header
+
     # The footer: help (on more lines when it does not fit on one), a rule, the notice and
     # the status line. A page longer than its room adds scrolling to the help.
-    room_for = fn help -> max(height - length(header) - 3 - length(help), 1) end
+    room_for = fn help ->
+      max(height - length(header) - 3 - length(footer_help(model, help)), 1)
+    end
+
     short = help_lines(help(model, false), width)
     {lines, long} = laid_out(model, width, room_for.(short))
     help = help_lines(help(model, long), width)
@@ -74,11 +81,11 @@ defmodule AtlasTui.View do
       footer_help(model, help) ++
         [
           [{:dim, String.duplicate("─", width)}],
-          notice(model),
+          console_notice(model),
           status(model, reconcile_seconds)
         ]
 
-    Enum.map(header ++ body ++ footer, &fit(&1, width))
+    Enum.map(Enum.take(header ++ body ++ footer, height), &fit(&1, width))
   end
 
   @doc "The screen as plain text, for tests and evidence."
@@ -89,9 +96,27 @@ defmodule AtlasTui.View do
       end)
 
   @doc "The screen as ANSI, ready to write from the top-left corner."
-  def to_ansi(lines) do
+  def to_ansi(lines, theme \\ :legacy)
+
+  def to_ansi(lines, :legacy) do
     rows = Enum.map(lines, fn line -> [Enum.map(line, &segment/1), "\e[0m\e[K"] end)
     ["\e[H", Enum.intersperse(rows, "\r\n"), "\e[J"]
+  end
+
+  def to_ansi(lines, theme) do
+    base = AtlasTui.Palette.ansi(:plain, theme)
+
+    rows =
+      Enum.map(lines, fn line ->
+        [
+          base,
+          Enum.map(line, fn {style, text} -> [AtlasTui.Palette.ansi(style, theme), text] end),
+          base,
+          "\e[K"
+        ]
+      end)
+
+    ["\e[H", Enum.intersperse(rows, "\r\n"), base, "\e[J"]
   end
 
   # Prod stands out (white on red), so Melle never takes one environment for the other.
@@ -102,6 +127,7 @@ defmodule AtlasTui.View do
   defp segment({:prod, text}), do: ["\e[0;1;97;41m", text]
   defp segment({:bold, text}), do: ["\e[0;1m", text]
   defp segment({:dim, text}), do: ["\e[0;2m", text]
+  defp segment({:border, text}), do: ["\e[0;2m", text]
   defp segment({:selected, text}), do: ["\e[0;7m", text]
   defp segment({:cursor, text}), do: ["\e[0;7m", text]
   defp segment({:ok, text}), do: ["\e[0;32m", text]
@@ -110,6 +136,9 @@ defmodule AtlasTui.View do
   defp segment({:info, text}), do: ["\e[0;36m", text]
 
   # Body
+
+  defp body(%Model{console: %{legend: legend}} = model, width, room) when legend != nil,
+    do: AtlasTui.LegendView.render(model, width, room)
 
   defp body(%Model{connected: false, closed: false}, _width, _room) do
     [
@@ -133,6 +162,7 @@ defmodule AtlasTui.View do
   # room exactly, each part scrolled on its own; a part that is cut says so itself.
   defp laid_out(model, width, room) do
     if model.connected and model.blocks != [] and model.plan == nil and
+         !(model.console && model.console.legend) and
          Model.parts(model) != [],
        do: parts(content(model), model, width, room),
        else: plain_layout(model, width, room)
@@ -358,8 +388,8 @@ defmodule AtlasTui.View do
     |> Enum.concat()
   end
 
-  # Markup this TUI draws: a part as a box with its title, a section as a heading. It does
-  # not draw highlights yet; their blocks show as they are.
+  # Parts frame content; Console highlights retain the supplied semantic tone as
+  # a text badge as well as a color, without inferring status from entity text.
   defp markup(%Section{title: title}, children, model, width, room) do
     rule = String.duplicate("─", max(width - String.length(title) - 3, 0))
     [[{:bold, " " <> title}, {:dim, " " <> rule}], []] ++ nodes(children, model, width, room)
@@ -380,11 +410,104 @@ defmodule AtlasTui.View do
     [[{:dim, top}]] ++ lines ++ [[{:dim, " └" <> String.duplicate("─", inner) <> "┘"}]]
   end
 
+  defp markup(%Highlight{tone: tone}, children, %{console: console} = model, width, room)
+       when console != nil do
+    {style, label} =
+      case tone do
+        "ok" -> {:ok, "OK"}
+        "pending" -> {:pending, "Pending"}
+        "error" -> {:error, "Error"}
+        "info" -> {:info, "Info"}
+        other -> {:dim, other || "Status"}
+      end
+
+    badge = for line <- list_wrap("[#{label}]", width), do: [{style, line}]
+    badge ++ nodes(children, model, width, max(room - length(badge), 1))
+  end
+
   defp markup(%Highlight{}, children, model, width, room),
     do: nodes(children, model, width, room)
 
   # Rows in columns: the id (as wide as the list's longest), the label (the rest, cut
   # with "…" only when it must be) and the detail (at most a third of the width).
+  defp block(%ListBlock{} = list, at, %{console: console} = model, width, _room)
+       when console != nil do
+    rows = list.rows || []
+    inner = max(width - 4, 1)
+
+    heading =
+      if list.title do
+        title = list.title <> " · #{length(rows)}"
+
+        if width >= 5 do
+          inner = width - 4
+
+          lines =
+            for line <- list_wrap(title, inner),
+                do: [
+                  {:border, "│ "},
+                  {:bold, line},
+                  {:border, String.duplicate(" ", inner - String.length(line)) <> " │"}
+                ]
+
+          [[{:border, "┌" <> String.duplicate("─", width - 2) <> "┐"}]] ++
+            lines ++ [[{:border, "└" <> String.duplicate("─", width - 2) <> "┘"}]]
+        else
+          for line <- list_wrap(title, width), do: [{:bold, line}]
+        end
+      else
+        []
+      end
+
+    content =
+      rows
+      |> Enum.with_index()
+      |> Enum.map(fn {row, i} ->
+        selected = at + i == model.selected
+        style = if selected, do: :selected, else: :bold
+        marker = if selected, do: " › ", else: "   "
+        id = if row.id in [nil, ""], do: "", else: cut(row.id, max(div(inner, 3), 1)) <> "  "
+        prefix = marker <> id
+        stacked = String.length(prefix) >= width
+        label_prefix = if stacked, do: "", else: prefix
+        label_room = max(width - String.length(label_prefix), 1)
+        labels = list_wrap(row.label || "", label_room)
+
+        title =
+          labels
+          |> Enum.with_index()
+          |> Enum.map(fn {line, n} ->
+            prefix =
+              if n == 0,
+                do: label_prefix,
+                else: String.duplicate(" ", String.length(label_prefix))
+
+            [{style, prefix <> line}]
+          end)
+
+        indent = String.duplicate(" ", min(3, max(width - 1, 0)))
+
+        detail =
+          for line <- list_wrap(row.detail || "", width - String.length(indent)),
+              line != "",
+              do: [{:dim, indent <> line}]
+
+        identity = if stacked, do: Enum.map(list_wrap(prefix, width), &[{style, &1}]), else: []
+        identity ++ title ++ detail
+      end)
+
+    indent = String.duplicate(" ", min(3, max(width - 1, 0)))
+
+    empty =
+      for line <- list_wrap(list.empty || "Nothing here.", width - String.length(indent)),
+          do: [{:dim, indent <> line}]
+
+    separator = [[{:border, " " <> String.duplicate("─", max(width - 2, 0))}]]
+
+    heading ++
+      if(rows == [], do: empty, else: content |> Enum.intersperse(separator) |> Enum.concat())
+  end
+
   defp block(%ListBlock{} = list, at, model, width, _room) do
     rows = list.rows || []
     id_width = rows |> Enum.map(&String.length(&1.id || "")) |> Enum.max(fn -> 0 end)
@@ -522,6 +645,17 @@ defmodule AtlasTui.View do
 
   defp block(%Fallback{type: type}, _at, _model, _width, _room),
     do: [[{:dim, "   (a #{type || "?"} block this TUI cannot show)"}]]
+
+  # List prefixes and part frames can leave fewer than ten columns. Use the
+  # actual budget; Text.wrap's reading/editor defaults remain unchanged.
+  defp list_wrap(text, width) do
+    text
+    |> String.split("\n")
+    |> Enum.flat_map(fn line ->
+      for {start, length} <- Text.rows(line, max(width, 1)),
+          do: line |> String.slice(start, length) |> String.trim_trailing()
+    end)
+  end
 
   @step_marks %{
     "proposed" => {:ok, "[✓]"},
@@ -765,15 +899,34 @@ defmodule AtlasTui.View do
 
   defp window(lines, _model, _room), do: lines
 
+  defp console_notice(%Model{console: %{error: error}}) when is_binary(error),
+    do: [{:error, " Console: " <> error <> " · retrying boot"}]
+
+  defp console_notice(%Model{console: %{action_error: error}}) when is_binary(error),
+    do: [{:error, " Console: " <> error}]
+
+  defp console_notice(model), do: notice(model)
+
   # Footer
 
   # The help, or the request line while `:` is open.
+  defp footer_help(%Model{console: %{legend: legend}}, _help) when legend != nil, do: []
+
+  defp footer_help(%Model{console: console, ask: text}, _help)
+       when console != nil and is_binary(text),
+       do: [[{:bold, " Request "}, {:plain, text}, {:cursor, " "}]]
+
+  defp footer_help(%Model{console: console} = model, _help) when console != nil,
+    do: AtlasTui.LegendView.affordance(model)
+
   defp footer_help(%Model{ask: text}, _help) when is_binary(text),
     do: [
       [{:bold, " : "}, {:plain, text}, {:cursor, " "}, {:dim, "   ↵ ask the agent   esc close"}]
     ]
 
   defp footer_help(_model, help), do: Enum.map(help, &[{:dim, " " <> &1}])
+
+  defp help(%Model{console: console}, _long) when console != nil, do: ""
 
   defp help(model, long) do
     cond do
