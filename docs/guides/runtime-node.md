@@ -140,6 +140,14 @@ Delivery remains the Bus's best effort contract: reads/facts retry and reconcile
 State. Machine leases and Flow failover across machines remain follow-up work; this
 link does not end a sleeping machine's turns on another machine's behalf.
 
+Control keeps one read envelope/ID across its three attempts, so a late answer from
+an earlier attempt still satisfies the current logical read. Ordinary reads retain
+three two-second waits; Open work scales each wait by its collection count.
+Unrelated answers do not reset those waits. A later logical read gets a new ID and
+reads current data. Retries remain necessary because delivery is not guaranteed;
+State may still execute queued duplicate reads. This does not add read deduplication
+or concurrency, and durable fact replay is unchanged.
+
 <sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0015).</sub>
 
 <sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0027).</sub>
