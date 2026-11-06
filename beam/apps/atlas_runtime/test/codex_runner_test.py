@@ -1,4 +1,5 @@
-"""Real-process regressions for runner cleanup; no Codex/model or daemon needed."""
+"""Owned-process cleanup regressions; injected permission errors are labelled."""
+import errno
 import importlib.util
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 
 HELPER = Path(__file__).resolve().parents[1] / 'priv' / 'codex_runner.py'
@@ -66,6 +68,37 @@ class CleanupTest(unittest.TestCase):
             except ProcessLookupError:
                 pass
             process.stdout.close()
+
+    def test_denied_signal_to_live_leader_fails_within_bound(self):
+        # The child outlives the cleanup bound but self-expires if waiting regresses.
+        # Never try to cause a real EPERM by signalling a foreign process.
+        process = subprocess.Popen(['/bin/sleep', '10'], start_new_session=True)
+        try:
+            started = time.monotonic()
+            with patch.object(runner.os, 'killpg',
+                              side_effect=PermissionError(errno.EPERM, 'injected denial')):
+                with self.assertRaises(PermissionError):
+                    runner.signal_group(process, signal.SIGKILL)
+            self.assertLess(time.monotonic() - started, 6)
+            self.assertIsNone(process.poll(), 'Permission failure must not claim the leader exited')
+        finally:
+            process.kill()
+            process.wait(timeout=5)
+
+    def test_persistent_denial_after_reaping_is_not_cleanup_success(self):
+        process = subprocess.Popen(['/bin/sh', '-c', 'exit 0'], start_new_session=True)
+        try:
+            self.wait_zombie(process.pid)
+            # Keep denying even after wait() reaps the owned leader. ESRCH is
+            # harmless, but this second EPERM must remain a visible failure.
+            with patch.object(runner.os, 'killpg',
+                              side_effect=PermissionError(errno.EPERM, 'injected denial')):
+                with self.assertRaises(PermissionError):
+                    runner.signal_group(process, signal.SIGKILL)
+            self.assertEqual(process.returncode, 0, 'Owned leader must still be reaped')
+            self.assert_dead(process.pid)
+        finally:
+            process.wait(timeout=5)
 
     def test_runner_reports_original_native_session_failure(self):
         with tempfile.TemporaryDirectory(prefix='runtime-cleanup-') as folder:
