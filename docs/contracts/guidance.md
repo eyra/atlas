@@ -136,6 +136,13 @@ handover. The descriptor must report version-1 queued-input, durable accept-quer
 and consumption-evidence support. Unsupported capability remains visible but cannot
 send. Missing/unfenced running executions fail visibly rather than appearing ready.
 
+Authorized exact-target views expose the stored turn reason as optional
+`worker_view.reason`, read through the description's `runtime.turn.why` mapping.
+Worker details and unavailable-guidance pages display it as **State reason** beside
+the exact state. This is distinct from `guidance.reason`, which still explains send
+eligibility (for example `stale_execution`); it never grants guidance capability.
+Forbidden or mismatched targets do not disclose the state or its reason.
+
 Guidance contains only `client_key`, literal `body` and `cause`. Slash-prefixed
 text is not a Runtime command. A stored State interaction means queued, never
 delivered. Exact same-key retries return the original immutable interaction even

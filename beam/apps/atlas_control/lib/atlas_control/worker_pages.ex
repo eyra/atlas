@@ -86,6 +86,7 @@ defmodule AtlasControl.WorkerPages do
       {"Item", view["item"]},
       {"Item title", view["item_title"]},
       {"State", view["state"]},
+      {"State reason", view["reason"]},
       {"Harness", descriptor["harness"]},
       {"Harness version", descriptor["harness_version"]},
       {"Configured model", descriptor["configured_model"]},
@@ -316,7 +317,16 @@ defmodule AtlasControl.WorkerPages do
 
       page("Guidance", path(execution), [block])
     else
-      error(view["guidance"]["reason"], path(execution))
+      page("Worker unavailable", path(execution), [
+        Blocks.item(
+          title: "Worker unavailable",
+          fields: [
+            Blocks.pair(label: "Reason", value: view["guidance"]["reason"]),
+            Blocks.pair(label: "State", value: view["state"]),
+            Blocks.pair(label: "State reason", value: view["reason"])
+          ]
+        )
+      ])
     end
   end
 

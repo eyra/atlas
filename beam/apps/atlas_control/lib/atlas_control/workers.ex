@@ -141,6 +141,7 @@ defmodule AtlasControl.Workers do
          "item_title" => item_view["title"],
          "item_to" => item_view["to"],
          "state" => values[n["state"]],
+         "reason" => values[n["why"]],
          "activity" => values[n["activity"]],
          "lease_until" => values[n["lease"]],
          "outcome" => values[n["outcome"]],
