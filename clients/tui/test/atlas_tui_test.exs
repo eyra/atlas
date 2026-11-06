@@ -279,6 +279,55 @@ defmodule AtlasTuiTest do
     assert text =~ "› Wheel"
   end
 
+  test "short detail panes page through every value and provenance line without overscroll debt" do
+    values = Enum.map(1..60, &"VALUE_#{&1}_界é")
+    provenance = Enum.map(1..8, &"ORIGIN_#{&1}_界é")
+
+    page =
+      put_in(parted_page(1), ["blocks", Access.at(0), "props", "fields"], [
+        %{
+          "label" => "Long Unicode detail label 界é",
+          "value" => Enum.join(values, "\n"),
+          "origin" => %{"cause" => Enum.join(provenance, "\n")}
+        }
+      ])
+
+    draw = &View.frame(&1, &2, &3, 5)
+    m = %{model(page) | part: 0}
+    {initial, m} = draw.(m, 38, 24)
+
+    {bottom, screens} =
+      Enum.reduce(1..120, {m, [View.plain(initial)]}, fn _, {m, screens} ->
+        {m, []} = Model.operation(m, "page_next")
+        {rows, m} = draw.(m, 38, 24)
+        {m, [View.plain(rows) | screens]}
+      end)
+
+    for line <- values ++ provenance do
+      assert Enum.any?(screens, &String.contains?(&1, line)), "Skipped #{line}"
+    end
+
+    assert hd(screens) =~ List.last(provenance)
+    {up, []} = Model.operation(bottom, "page_previous")
+    {rows, _} = draw.(up, 38, 24)
+    refute View.plain(rows) == hd(screens)
+
+    for {width, height} <- [{140, 24}, {38, 20}, {38, 32}] do
+      {_, resized} = draw.(bottom, width, height)
+      {resized, []} = Model.operation(resized, "page_next")
+      {at_end, resized} = draw.(resized, width, height)
+      assert View.plain(at_end) =~ List.last(provenance)
+      {references, []} = Model.operation(resized, "part_next")
+      {_, references} = draw.(references, width, height)
+      {references, []} = Model.operation(references, "page_next")
+      {returned, []} = Model.operation(references, "part_previous")
+      assert returned.scrolls[0] == resized.scrolls[0]
+      {returned, []} = Model.operation(returned, "page_previous")
+      {rows, _} = draw.(returned, width, height)
+      refute View.plain(rows) == View.plain(at_end)
+    end
+  end
+
   test "a page in parts: a long content never hides the references" do
     m = parted(60)
     assert Model.parts(m) == [["item"], ["list:parts", "parent:of"]]
@@ -297,9 +346,9 @@ defmodule AtlasTuiTest do
 
     # Explicit pane operations leave the row selection alone while scrolling content.
     {focused, []} = Model.operation(m, "part_next")
+    {_, focused} = View.frame(focused, 90, 30, 5)
     {scrolled, []} = Model.operation(focused, "page_next")
     assert scrolled.selected == 0
-    assert tall(scrolled) =~ "↑ 10 lines above"
     refute tall(scrolled) =~ "Thing T-1: One"
     assert tall(scrolled) =~ "› Wheel"
     {back, []} = Model.operation(scrolled, "part_previous")

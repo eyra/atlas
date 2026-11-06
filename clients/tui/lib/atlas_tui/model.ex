@@ -38,6 +38,8 @@ defmodule AtlasTui.Model do
             # is scrolled by hand (by part number; missing: its top, or its selected row).
             part: nil,
             scrolls: %{},
+            # Bounds and page sizes from the last rendered frame, keyed by part number.
+            viewports: %{},
             focus: 0,
             # Where typing goes in a multi-line input: `{line, column}`, nil for the end.
             cursor: nil,
@@ -662,9 +664,18 @@ defmodule AtlasTui.Model do
 
   defp edit(model, _input, _fun), do: {model, []}
 
-  # How far a part is scrolled; the view keeps it within the part's lines.
-  defp scroll_part(model, part, by),
-    do: put_in(model.scrolls[part], max((model.scrolls[part] || 0) + by, 0))
+  # Move from the displayed position, with overlap and no accumulated overscroll.
+  defp scroll_part(model, part, by) do
+    case model.viewports[part] do
+      nil ->
+        model
+
+      %{start: start, last: last, step: step} ->
+        at = min(model.scrolls[part] || start, last)
+        next = at + if(by > 0, do: step, else: -step)
+        put_in(model.scrolls[part], next |> max(0) |> min(last))
+    end
+  end
 
   defp open_url(model, url) do
     if openable?(url),

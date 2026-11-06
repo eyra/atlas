@@ -40,12 +40,18 @@ defmodule AtlasTui.View do
 
   @doc "The screen: exactly `height` lines of plain segments."
   def render(%Model{} = model, width, height, reconcile_seconds) do
+    {rows, _model} = frame(model, width, height, reconcile_seconds)
+    rows
+  end
+
+  @doc "Render a frame and retain its pane bounds for subsequent paging operations."
+  def frame(%Model{} = model, width, height, reconcile_seconds) do
     width = max(width, 1)
     height = max(height, 1)
     header = AtlasTui.ConsoleView.header(model, width)
     help = footer_help(model)
     room = max(height - length(header) - 3 - length(help), 1)
-    {lines, _long} = laid_out(model, width, room)
+    {lines, _long, viewports} = laid_out(model, width, room)
 
     body = window(lines, model, room)
     body = body ++ Elixir.List.duplicate([], room - length(body))
@@ -58,7 +64,8 @@ defmodule AtlasTui.View do
           status(model, reconcile_seconds)
         ]
 
-    Enum.map(Enum.take(header ++ body ++ footer, height), &fit(&1, width))
+    rows = Enum.map(Enum.take(header ++ body ++ footer, height), &fit(&1, width))
+    {rows, %{model | viewports: viewports}}
   end
 
   @doc "The screen as plain text, for tests and evidence."
@@ -124,7 +131,7 @@ defmodule AtlasTui.View do
 
   defp plain_layout(model, width, room) do
     lines = body(model, width, room)
-    {lines, length(lines) > room}
+    {lines, length(lines) > room, %{}}
   end
 
   # The view model as a tree, top down: blocks (with where their rows start in the page's
@@ -180,27 +187,29 @@ defmodule AtlasTui.View do
 
       columns =
         for {{i, node}, w} <- Enum.zip(drawn, widths),
-            do: {part(node, model, i == focus, model.scrolls[i], w, room), w}
+            do: {part(node, model, i == focus, model.scrolls[i], w, room), w, i}
 
       lines =
         for row <- 0..(room - 1) do
-          Enum.flat_map(columns, fn {{lines, _cut}, w} ->
+          Enum.flat_map(columns, fn {{lines, _cut, _viewport}, w, _i} ->
             line = Enum.at(lines, row) || []
             pad_line(fit(line, w), w)
           end)
         end
 
-      {lines, Enum.any?(columns, fn {{_, cut}, _} -> cut end)}
+      viewports = Map.new(columns, fn {{_, _, viewport}, _, i} -> {i, viewport} end)
+      {lines, Enum.any?(columns, fn {{_, cut, _}, _, _} -> cut end), viewports}
     else
       needs = for {_i, node} <- drawn, do: length(part_lines(node, model, width)) + 2
       heights = share(needs, room, todo_part(parts) || related_part(parts) || lists_part(model))
 
       drawn =
         for {{i, node}, h} <- Enum.zip(drawn, heights),
-            do: part(node, model, i == focus, model.scrolls[i], width, h)
+            do: {part(node, model, i == focus, model.scrolls[i], width, h), i}
 
-      lines = Enum.flat_map(drawn, &elem(&1, 0))
-      {Enum.take(lines, room), Enum.any?(drawn, &elem(&1, 1))}
+      lines = Enum.flat_map(drawn, fn {{lines, _, _}, _} -> lines end)
+      viewports = Map.new(drawn, fn {{_, _, viewport}, i} -> {i, viewport} end)
+      {Enum.take(lines, room), Enum.any?(drawn, fn {{_, cut, _}, _} -> cut end), viewports}
     end
   end
 
@@ -322,7 +331,7 @@ defmodule AtlasTui.View do
       ([[{style, top}]] ++ framed ++ [[{style, " └" <> String.duplicate("─", inner) <> "┘"}]])
       |> Enum.take(height)
 
-    {lines, cut}
+    {lines, cut, %{start: start, last: last, step: max(shown - 1, 1)}}
   end
 
   defp count(n, noun), do: "#{n} #{noun}#{if n == 1, do: "", else: "s"}"
