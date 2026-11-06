@@ -2,7 +2,7 @@ defmodule AtlasTui.WorkerConversationTest do
   use ExUnit.Case, async: true
   alias AtlasTui.{Blocks, Console, Model, Protocol, View}
   alias AtlasTui.ConsoleProjectionFixture, as: Fixture
-  alias AtlasBFFContract.Workers.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
 
   @params %{machine: "box", worker: "W-1", turn: "R-1", attempt: "attempt-1"}
   @execution %{

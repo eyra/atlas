@@ -9,7 +9,7 @@ scenario "UC-Atlas-43: Console actions are scoped typed blocks and share ordinar
                do: Code.prepend_path(Path.join(i.root, "beam/_build/dev/lib/#{app}/ebin"))
 
            defmodule ConsoleActionProtocol do
-             use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Blocks, channel: :control
+             use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Contract, channel: :control
            end
 
            send_message = fn s, message -> :gen_tcp.send(s, [JSON.encode!(message), "\n"]) end

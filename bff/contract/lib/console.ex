@@ -69,7 +69,7 @@ defmodule AtlasBFFContract.Console do
   defp execution?(_), do: false
 
   defp destination?("open", op) do
-    schema = AtlasBFFContract.Blocks.__schema__()
+    schema = AtlasBFFContract.Contract.__schema__()
 
     if String.starts_with?(op["to"], "/") do
       case AtlasBFF.Paths.match(schema.pages, op["to"]) do

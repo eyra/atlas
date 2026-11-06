@@ -3,7 +3,7 @@ defmodule AtlasControl.OutputTest do
 
   alias AtlasBus.Envelope
   alias AtlasControl.Output
-  alias AtlasBFFContract.Runtime.OutputProtocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.OutputProtocol, as: Wire
 
   setup do
     if is_nil(Process.whereis(Output)), do: start_supervised!(Output)

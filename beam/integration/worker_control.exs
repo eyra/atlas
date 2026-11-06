@@ -6,7 +6,7 @@ defmodule WorkerControlTest do
   use ExUnit.Case, async: false
   alias AtlasBus.Envelope
   alias AtlasState.{GuidanceStore, Rela}
-  alias AtlasBFFContract.Workers.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
   @moduletag :tmp_dir
 
   defp description do

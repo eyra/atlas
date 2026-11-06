@@ -5,7 +5,7 @@ ExUnit.start(seed: 0)
 defmodule RuntimeAttachmentTest do
   use ExUnit.Case, async: true
   alias AtlasAgent.RuntimeSession, as: Session
-  alias AtlasBFFContract.Runtime.AttachmentProtocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.AttachmentProtocol, as: Wire
   @target %{"environment" => "private", "machine" => "runtime-playground", "worker" => "breaker"}
   @execution %{"worker" => @target, "turn" => "t1", "attempt" => "a1"}
   @turn %{"execution" => @execution, "item" => "i1", "state" => "running"}

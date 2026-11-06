@@ -4,7 +4,7 @@ Code.require_file(Path.join(__DIR__, "attachment.exs"))
 
 defmodule RuntimePlayground.Server do
   use GenServer
-  alias AtlasBFFContract.Runtime.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.Protocol, as: Wire
   alias AtlasRuntime.Talk
 
   @target %{"environment" => "private", "machine" => "runtime-playground", "worker" => "breaker"}
@@ -161,7 +161,7 @@ defmodule RuntimePlayground.Server do
   end
 
   def handle_call({:request, bytes, viewer}, _from, state) do
-    case AtlasBFFContract.Runtime.AttachmentProtocol.decode_request_json(bytes) do
+    case AtlasBFFContract.Wire.Runtime.AttachmentProtocol.decode_request_json(bytes) do
       {:ok, name, request} -> attachment_request(name, request, viewer, state)
       _ -> legacy_request(bytes, viewer, state)
     end
@@ -371,7 +371,7 @@ defmodule RuntimePlayground.Server do
             end
 
           event =
-            AtlasBFFContract.Runtime.AttachmentProtocol.encode_event(
+            AtlasBFFContract.Wire.Runtime.AttachmentProtocol.encode_event(
               name,
               Map.put(fields, :sequence, sequence)
             )
@@ -418,7 +418,7 @@ defmodule RuntimePlayground.Client do
 
     session =
       if mode == "attach" and match?(["--" <> _ | _], words) do
-        case AtlasBFFContract.Runtime.AttachmentProtocol.options(
+        case AtlasBFFContract.Wire.Runtime.AttachmentProtocol.options(
                :runtime_attachment_options,
                words
              ) do

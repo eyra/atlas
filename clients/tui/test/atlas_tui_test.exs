@@ -804,7 +804,7 @@ defmodule AtlasTuiTest do
   end
 
   test "the Console renderer covers the complete presentation catalogue" do
-    schema = AtlasBFFContract.Blocks.__schema__()
+    schema = AtlasBFFContract.Contract.__schema__()
     known = View.known()
 
     for %{name: name} <- schema.blocks,

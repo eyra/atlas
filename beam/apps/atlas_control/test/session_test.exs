@@ -56,7 +56,7 @@ defmodule AtlasControl.SessionTest do
     do: page["blocks"] |> hd() |> get_in(["props", "rows"]) |> Enum.map(& &1["label"])
 
   defmodule Protocol do
-    use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Blocks, channel: :control
+    use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Contract, channel: :control
   end
 
   test "actual session envelopes match the declared reply classifiers", %{port: port} do

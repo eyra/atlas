@@ -15,7 +15,7 @@ defmodule AtlasTui.WorkerGuidance do
   never authorizes a submit retry. Request IDs follow the shared client protocol
   convention and are invalidated on reconnect. Nothing is persisted here.
   """
-  alias AtlasBFFContract.Workers.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
 
   def new(execution, values) when is_map(values) do
     %{

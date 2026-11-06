@@ -265,7 +265,7 @@ defmodule AtlasControl.Session do
 
   defp handle_op(op, message, state)
        when op in ~w(worker_output_subscribe worker_output_next worker_output_unsubscribe) do
-    alias AtlasBFFContract.Workers.Protocol, as: Wire
+    alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
 
     case Wire.decode_request(message) do
       {:ok, name, request} ->
@@ -339,7 +339,7 @@ defmodule AtlasControl.Session do
 
   defp handle_op(op, message, state)
        when op in ~w(worker_overview worker_inspect worker_submit worker_query worker_history worker_receipts) do
-    alias AtlasBFFContract.Workers.Protocol, as: Wire
+    alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
 
     reply =
       case Wire.decode_request(message) do
@@ -1004,7 +1004,7 @@ defmodule AtlasControl.Session do
   end
 
   defp worker_error(operation, id, reason) do
-    AtlasBFFContract.Workers.Protocol.reply(operation, :error, %{
+    AtlasBFFContract.Wire.Control.Workers.Protocol.reply(operation, :error, %{
       "id" => id,
       "error" => %{
         "code" => reason,

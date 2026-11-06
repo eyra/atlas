@@ -2,7 +2,7 @@ defmodule AtlasRuntime.OutputEndpoint do
   @moduledoc "Read-only Bus endpoint for retained exact-attempt output; viewers never open a ring."
   use GenServer
 
-  alias AtlasBFFContract.Runtime.OutputProtocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.OutputProtocol, as: Wire
   alias AtlasBus.Envelope
   alias AtlasRuntime.Output
 

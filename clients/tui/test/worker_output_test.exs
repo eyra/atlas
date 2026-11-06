@@ -1,7 +1,7 @@
 defmodule AtlasTui.WorkerOutputTest do
   use ExUnit.Case, async: true
 
-  alias AtlasBFFContract.Workers.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: Wire
   alias AtlasTui.{Blocks, WorkerOutput}
 
   @execution %{

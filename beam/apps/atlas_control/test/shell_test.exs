@@ -3,7 +3,7 @@ defmodule AtlasControl.ShellTest do
   alias AtlasControl.{FakeStore, Shell}
 
   defmodule Protocol do
-    use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Blocks, channel: :control
+    use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Contract, channel: :control
   end
 
   defp description do

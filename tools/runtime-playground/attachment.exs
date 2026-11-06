@@ -1,6 +1,6 @@
 defmodule RuntimePlayground.Attachment do
   @moduledoc "Private adapter policy only. No registry grant is worker authority."
-  alias AtlasBFFContract.Runtime.AttachmentProtocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.AttachmentProtocol, as: Wire
   @capabilities %{snapshot: true, control: false, guidance: false, output: false, replay: false}
 
   def select(snapshot, execution, target) do

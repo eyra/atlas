@@ -55,7 +55,7 @@ defmodule AtlasControl.Pages do
 
   # Routes
 
-  # The pages are the contract's (`defpage` in AtlasBFFContract.Blocks): Control serves
+  # The pages are the contract's (`defpage` in AtlasBFFContract.Pages): Control serves
   # those and nothing else; a path outside them is no page (`:unknown`).
   def route(path) do
     case Blocks.match(path) do

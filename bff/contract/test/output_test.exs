@@ -1,8 +1,8 @@
 defmodule AtlasBFFContract.OutputTest do
   use ExUnit.Case, async: true
 
-  alias AtlasBFFContract.Runtime.OutputProtocol, as: RuntimeWire
-  alias AtlasBFFContract.Workers.Protocol, as: WorkerWire
+  alias AtlasBFFContract.Wire.Runtime.OutputProtocol, as: RuntimeWire
+  alias AtlasBFFContract.Wire.Control.Workers.Protocol, as: WorkerWire
 
   @execution %{
     "worker" => %{"environment" => "private", "machine" => "local", "worker" => "worker"},
