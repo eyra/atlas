@@ -1938,6 +1938,21 @@
           "name": "intent",
           "required": false,
           "type": "string"
+        },
+        {
+          "name": "execution",
+          "required": false,
+          "type": "runtime_execution"
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "interaction_source",
+          "required": false,
+          "type": "string"
         }
       ],
       "name": "console_operation"

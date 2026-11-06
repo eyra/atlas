@@ -100,4 +100,27 @@ subscriptions and send/request deadlines as well as each viewer's pending bytes;
 a slow viewer must reconcile explicitly without blocking Runtime or other viewers.
 Private snapshot attachment and the standalone Runtime CLI remain unchanged.
 
+### Declared Console worker actions
+
+`console_operation` optionally carries the existing typed `runtime_execution`,
+an opaque string `cursor`, and `interaction_source`. The shared Console validator
+accepts only these operation-specific forms:
+
+- `worker_history`: exact execution and optional cursor.
+- `worker_output_subscribe`: exact execution and optional output cursor.
+- `worker_receipts`: exact execution and `interaction_source: "selected_history"`.
+  Its action scope must reference the fixed `guidance-history` block. The declaration
+  does not carry an arbitrary interaction key or cursor; Console binds a selected,
+  correlated durable record and disables the action without such a selection.
+
+These actions require nonempty environment, machine, worker, turn and attempt;
+legacy unfenced executions do not gain a fabricated action target. Unknown fields,
+source values and operation-specific combinations are rejected. Output next and
+unsubscribe remain connection lifecycle operations, not user actions. Existing
+local/navigation operations keep their original closed shapes.
+
+Declarations do not grant permission or prove capability. Server controls action
+availability and per-request authorization; Console preserves the declared target
+and availability ceiling. No direct Console-to-Runtime path is introduced.
+
 <sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>
