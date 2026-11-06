@@ -22,13 +22,14 @@ def status(item):
 
 class ClientTest(unittest.TestCase):
     @contextmanager
-    def peer(self, mode='attach'):
+    def peer(self, mode='attach', exact=False):
         with tempfile.TemporaryDirectory(prefix='atlas-client-', dir='/tmp') as temporary:
             directory = Path(temporary)
             listener = socket.socket(socket.AF_UNIX)
             listener.bind(str(directory/'runtime.sock')); listener.listen(); listener.settimeout(5)
             runner = directory/'runner.exs'
-            runner.write_text('''source = File.read!(hd(System.argv()))
+            runner.write_text('''Code.require_file(Path.expand("../../clients/agent/lib/atlas_agent/runtime_session.ex", Path.dirname(hd(System.argv()))))
+source = File.read!(hd(System.argv()))
 [_, client] = String.split(source, "defmodule RuntimePlayground.Client do", parts: 2)
 [client, _] = String.split(client, "\\ncase System.argv() do", parts: 2)
 Code.compile_string("defmodule RuntimePlayground.Client do" <> client)
@@ -38,6 +39,9 @@ RuntimePlayground.Client.run(Enum.at(System.argv(), 1), Enum.at(System.argv(), 2
             for path in (ROOT/'beam/_build/test/lib').glob('*/ebin'):
                 command += ['-pa', str(path)]
             command += [str(runner), str(ROOT/'tools/runtime-playground/playground.exs'), mode, temporary]
+            if exact:
+                command = [str(ROOT/'bin/atlas'), 'attach', 'breaker', '--prototype', temporary,
+                           '--attempt', 'a1', '--turn', 't1']
             child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      env=dict(os.environ, ELIXIR_ERL_OPTIONS='+S 1:1'))
             connection = None
@@ -77,6 +81,28 @@ RuntimePlayground.Client.run(Enum.at(System.argv(), 1), Enum.at(System.argv(), 2
 
     def result(self, request, item):
         return dict(op='result', channel='control', version='0.1.0', id=request['id'], target=TARGET, status=status(item))
+
+    def test_exact_cli_rejects_lifecycle_and_foreign_events_then_closes_only_subscription(self):
+        execution = dict(worker=TARGET, turn='t1', attempt='a1')
+        turn = dict(execution=execution, item='fixture', state='running')
+        capabilities = dict(snapshot=True, control=False, guidance=False, output=False, replay=False)
+        with self.peer(exact=True) as (child, receive, send, wait, absent):
+            request = receive()
+            self.assertEqual(request['op'], 'execution_attach')
+            self.assertEqual(request['execution'], execution)
+            send(dict(op='execution_result', channel='control', version='0.1.0', id=request['id'],
+                      target=TARGET, execution=execution, turn=turn, capabilities=capabilities))
+            wait('execution=t1/a1')
+            child.stdin.write(b'stop\n'); child.stdin.flush()
+            wait('Command not sent:')
+            event = dict(op='execution_snapshot', channel='event', version='0.1.0', sequence=1,
+                         target=TARGET, execution=dict(execution, attempt='successor'), turn=turn, capabilities=capabilities)
+            send(event); wait('INVALID event target mismatch')
+            send(dict(op='execution_closed', channel='event', version='0.1.0', sequence=2,
+                      target=TARGET, execution=execution,
+                      error=dict(code='stale_execution', message='ended', retryable=False)))
+            wait('Subscription closed: stale_execution; no successor selected.')
+            self.assertEqual(child.wait(timeout=3), 0)
 
     def test_probe_refuses_foreign_outer_status_execution_and_error_targets(self):
         for location in ('outer', 'status', 'execution', 'error'):

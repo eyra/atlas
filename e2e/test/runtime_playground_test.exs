@@ -26,17 +26,19 @@ defmodule AtlasE2E.RuntimePlaygroundTest do
       Path.wildcard(Path.join(@root, "beam/_build/test/lib/*/ebin"))
       |> Enum.flat_map(&["-pa", &1])
 
-    {output, code} =
-      System.cmd(
-        "elixir",
-        paths ++ [Path.join(@root, "tools/runtime-playground/client_test.exs")],
-        cd: @root,
-        env: [{"ELIXIR_ERL_OPTIONS", "+S 1:1"}],
-        stderr_to_stdout: true
-      )
+    for script <- ~w(client_test.exs attachment_test.exs) do
+      {output, code} =
+        System.cmd(
+          "elixir",
+          paths ++ [Path.join(@root, "tools/runtime-playground/#{script}")],
+          cd: @root,
+          env: [{"ELIXIR_ERL_OPTIONS", "+S 1:1"}],
+          stderr_to_stdout: true
+        )
 
-    assert code == 0, output
-    assert output =~ "3 tests, 0 failures"
+      assert code == 0, output
+      assert output =~ "0 failures"
+    end
   end
 
   @tag timeout: 90_000
