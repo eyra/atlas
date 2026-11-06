@@ -20,6 +20,7 @@
 #   atlas runtime       start this machine's Runtime node (local runtime.json required)
 #   atlas runtime-stop, atlas runtime-status
 #   atlas runtime status|start|stop [--machine <name>] [--json]   local node operations
+#   atlas runtime discover --machine <name> [--json]   granted Control registry read
 #   atlas playground init|stop <private-dir>   private stub prototype (IS125)
 #   atlas attach breaker --prototype <private-dir>   independent terminal viewer
 #   atlas rela-status, atlas rela-stop
@@ -75,6 +76,12 @@
 # What to do (IS-Atlas-54), and what it writes is by it.
 set -euo pipefail
 
+# Keep the read capability out of config/build/lifecycle/proxy children. Only the
+# final explicit discovery transport receives it, without putting it in argv.
+atlas_discovery_read_grant="${ATLAS_RUNTIME_READ_TOKEN-}"
+export -n atlas_discovery_read_grant
+unset ATLAS_RUNTIME_READ_TOKEN
+
 # The repository this script lives in, also when it is called through a link.
 src="${BASH_SOURCE[0]}"
 while [ -L "$src" ]; do
@@ -108,7 +115,7 @@ while [ $# -gt 0 ]; do
     --env=) no_env ;;
     *)
       case "$cmd" in
-        e2e|turn|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help|runtime|runtime-status|runtime-stop) args+=("$1"); shift ;;
+        e2e|turn|put|set|get|list|delete|tools|plan|steer|load-plan|migrate-completion|migrate-owner|migrate-done-owner|migrate-assignment|move-to-fly|fetch-from-fly|help|runtime|runtime-status|runtime-stop|runtime-discover) args+=("$1"); shift ;;
         tui)
           case "$1" in
             --surface)
@@ -171,13 +178,24 @@ fly_in_use() {
   else [ "$(jq -r '.fly.in_use' "$settings")" != false ]; fi
 }
 
+# Reuse the ordinary generated agent client without managing a proxy or service.
+run_agent_client() {
+  cd "$root/clients/agent"
+  mix compile >&2
+  if [ "$cmd" = runtime-discover ] && [ -n "$atlas_discovery_read_grant" ]; then
+    export ATLAS_RUNTIME_READ_TOKEN="$atlas_discovery_read_grant"
+  fi
+  ATLAS_CALLER_CWD="$caller" exec mix atlas.agent "$cmd" --env "$env" ${args[@]+"${args[@]}"}
+}
+
 case "$cmd" in
   runtime)
     case "${args[0]:-}" in
       status|start|stop)
         exec python3 "$root/tools/runtime.py" "runtime-${args[0]}" "$root" "$settings" "$env" "${args[@]:1}" ;;
-    esac
-    [ ${#args[@]} -eq 0 ] || { echo "atlas runtime: unsupported operation" >&2; exit 2; } ;;
+      discover) cmd=runtime-discover; args=("${args[@]:1}") ;;
+      *) [ ${#args[@]} -eq 0 ] || { echo "atlas runtime: unsupported operation" >&2; exit 2; } ;;
+    esac ;;
   runtime-status)
     exec python3 "$root/tools/runtime.py" runtime-status "$root" "$settings" "$env" ${args[@]+"${args[@]}"} ;;
 esac
@@ -185,6 +203,7 @@ esac
 case "$cmd" in
   runtime|runtime-stop|runtime-status)
     exec python3 "$root/tools/runtime.py" "$cmd" "$root" "$settings" "$env" ${args[@]+"${args[@]}"} ;;
+  runtime-discover) run_agent_client ;;
 esac
 
 port="$(setting control.port)"
@@ -475,7 +494,7 @@ case "$cmd" in
     case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "atlas: add ~/.local/bin to your PATH" ;; esac
     ;;
   # The clients run in their own folders; a path the caller gives is read from where they called.
-  turn|put|set|get|list|delete|tools|plan|steer|help)
+  turn|put|set|get|list|delete|tools|plan|steer|help|runtime-discover)
     # `atlas help` (not --json) starts with this script's own commands; `atlas help <kind>`
     # shows that kind only.
     kind_named=""
@@ -484,9 +503,7 @@ case "$cmd" in
       header; echo
     fi
     clean_build
-    cd "$root/clients/agent"
-    mix compile >&2
-    ATLAS_CALLER_CWD="$caller" exec mix atlas.agent "$cmd" --env "$env" ${args[@]+"${args[@]}"}
+    run_agent_client
     ;;
   load-plan)
     clean_build

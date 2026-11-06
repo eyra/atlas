@@ -111,6 +111,7 @@ def status_cli(root, environment, options, operation="status", client_file="unus
     paths = [argument for path in sorted(build.glob('*/ebin')) for argument in ('-pa', str(path))]
     _, settings = runtime_paths(environment)
     env = dict(os.environ, ELIXIR_ERL_OPTIONS='+S 1:1', PYTHONDONTWRITEBYTECODE='1')
+    env.pop('ATLAS_RUNTIME_READ_TOKEN', None)
     return subprocess.call([executable, *paths, str(Path(root)/'tools/runtime_status.exs'), root, environment, str(settings), '--operation', operation, str(Path(client_file).resolve()), *options], env=env)
 
 

@@ -14,7 +14,11 @@ defmodule AtlasE2E.RuntimeLifecycleTest do
       assert code == 0, output
     end
 
-    for script <- ["test_runtime_lifecycle.py", "runtime_lifecycle_private.py"] do
+    for script <- [
+          "test_runtime_lifecycle.py",
+          "test_runtime_credential_routing.py",
+          "runtime_lifecycle_private.py"
+        ] do
       {output, code} =
         System.cmd("python3", [Path.join(@root, "tools/tests/" <> script)],
           cd: @root,

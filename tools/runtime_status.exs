@@ -76,7 +76,8 @@ defmodule AtlasRuntimeStatusCLI do
           environment,
           JSON.encode!(request)
         ],
-        stderr_to_stdout: true
+        stderr_to_stdout: true,
+        env: [{"ATLAS_RUNTIME_READ_TOKEN", nil}]
       )
 
     if code == 0 do
