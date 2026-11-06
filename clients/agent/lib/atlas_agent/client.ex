@@ -135,12 +135,15 @@ defmodule AtlasAgent.Client do
   # Exposed for short deterministic transport tests; production uses the constants above.
   def exchange(client, operation, message, timeout) do
     # Validate before sending, including channel/direction; never replay a write.
-    encoded = AtlasAgent.Protocol.request(operation, Map.delete(message, "op"))
-    if encoded != message, do: raise(ArgumentError, "request does not match operation")
+    case AtlasAgent.Protocol.decode_request(message) do
+      {:ok, ^operation, ^message} -> :ok
+      _ -> raise ArgumentError, "request does not match operation"
+    end
+
     deadline = System.monotonic_time(:millisecond) + timeout
 
     with :ok <- send_line(client, message) do
-      await_until(client, operation, deadline, MapSet.new())
+      await_until(client, operation, message, deadline, MapSet.new())
     else
       error ->
         close(client)
@@ -148,7 +151,7 @@ defmodule AtlasAgent.Client do
     end
   end
 
-  defp await_until(client, operation, deadline, seen) do
+  defp await_until(client, operation, request, deadline, seen) do
     left = deadline - System.monotonic_time(:millisecond)
 
     result =
@@ -161,43 +164,91 @@ defmodule AtlasAgent.Client do
     case result do
       {:ok, line} ->
         case JSON.decode(line) do
-          {:ok, message} -> dispatch(client, operation, deadline, seen, message)
-          {:error, _} -> fail(client, "Control #{client.env} sent malformed JSON")
+          {:ok, message} ->
+            dispatch(client, operation, request, deadline, seen, message)
+
+          {:error, _} ->
+            fail(
+              client,
+              "Control #{client.env} sent malformed JSON",
+              operation,
+              "malformed_reply"
+            )
         end
 
       {:error, :timeout} ->
-        fail(client, "Control #{client.env} did not answer in time")
+        fail(client, "Control #{client.env} did not answer in time", operation, "timeout")
 
       {:error, _} ->
-        fail(client, "Control #{client.env} closed the connection")
+        fail(
+          client,
+          "Control #{client.env} closed the connection",
+          operation,
+          "control_unavailable"
+        )
     end
   end
 
-  defp dispatch(client, operation, deadline, seen, message) do
+  defp dispatch(client, operation, request, deadline, seen, message) do
     case AtlasAgent.Protocol.classify(operation, message) do
       :ignore ->
-        await_until(client, operation, deadline, seen)
+        await_until(client, operation, request, deadline, seen)
 
       {:invalid, why} ->
-        fail(client, "Control #{client.env} sent an invalid reply: #{why}")
+        fail(
+          client,
+          "Control #{client.env} sent an invalid reply: #{why}",
+          operation,
+          "invalid_reply"
+        )
 
       {:reply, reply} ->
-        if Enum.all?(Map.get(reply, :requires, []), &MapSet.member?(seen, &1)) do
+        bound =
+          operation != :runtime_machine_discover or reply.effect in [:progress, :terminal] or
+            (message["id"] == request["id"] and message["target"] == request["target"] and
+               (reply.effect != :complete or
+                  get_in(message, ["availability", "target"]) == request["target"]))
+
+        if bound and Enum.all?(Map.get(reply, :requires, []), &MapSet.member?(seen, &1)) do
           case reply.effect do
-            :complete -> {:ok, message}
-            :progress -> await_until(client, operation, deadline, MapSet.put(seen, reply.name))
-            :terminal -> fail(client, message["text"])
-            :error -> {:error, message["error"]}
+            :complete ->
+              {:ok, message}
+
+            :progress ->
+              await_until(client, operation, request, deadline, MapSet.put(seen, reply.name))
+
+            :terminal ->
+              fail(client, message["text"])
+
+            :error ->
+              {:error, message["error"]}
           end
         else
-          fail(client, "Control #{client.env} sent replies out of order")
+          fail(
+            client,
+            if(bound,
+              do: "Control #{client.env} sent replies out of order",
+              else: "Control #{client.env} sent a reply for another request or machine"
+            ),
+            operation,
+            "reply_identity_mismatch"
+          )
         end
     end
   end
 
-  defp fail(client, why) do
+  defp fail(client, why, operation \\ nil, code \\ "control_unavailable") do
     close(client)
-    {:error, why}
+
+    if operation == :runtime_machine_discover,
+      do:
+        {:error,
+         %{
+           "code" => code,
+           "message" => why,
+           "retryable" => code in ["timeout", "control_unavailable"]
+         }},
+      else: {:error, why}
   end
 
   defp send_line(client, message) do

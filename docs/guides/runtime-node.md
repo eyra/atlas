@@ -47,8 +47,99 @@ the launching environment. They need no keychain or Fly. The e2e runner uses thi
 UC-07's turns run in a separate OS process; restarting the core cuts the link and
 registrations return. Restarting Runtime ends orphaned turns and starts new ones.
 
+Readonly machine status (IS135): `atlas runtime status --env test
+--machine macbook --json` inspects the selected local node. The existing
+`runtime-status` alias derives an omitted machine from Runtime configuration.
+Missing identity fails explicitly. The shared DSL generates options, machine DTO,
+codecs and validators; exact worker identity remains separate.
+
+Status creates no Runtime directories or bytecode cache, starts no service, opens
+no Control/Bus/Fly connection and reads no keychain token. Shared contract codecs
+must already be built; run `mix compile` in bff/contract as explicit setup. Missing
+codecs fail visibly. JSON reports absent, stale, unverified or unsupported with
+exact target, evidence basis and optional PID/log. A live legacy PID is unverified,
+because PID existence cannot establish Runtime role/instance/start ownership or
+health. Wrong environment/machine is explicit; no worker identity is invented.
+
+Verified local lifecycle (IS136) uses `atlas runtime start|stop --env test
+--machine macbook --json` through the same generated machine contract. Bare
+`atlas runtime` remains the start alias; `runtime-stop` remains the stop alias.
+These are explicit same-user local operations. Machine lifecycle never attaches a
+viewer or selects a worker. Remote status remains unsupported; IS127 stays open
+for authorized availability through existing Control. Self-reported client identity
+does not grant remote access.
+
+Start binds the canonical checkout, instance directory, configuration path,
+environment, machine and fresh instance nonce in the Runtime boot arguments and
+retained record. OS UID, process birth, exact role arguments and retained PID must
+agree before a repeated start returns the existing node or stop sends SIGTERM.
+Lifecycle requests serialize with an exclusive instance lock. PID-only legacy,
+stale/reused, out-of-range, wrong-role and mismatched records refuse actions.
+Stop never signals a process group or escalates to SIGKILL. Each exact process is
+rechecked immediately before its individual signal; exit must be confirmed before
+its PID record is removed. This is same-user OS process management, not an atomic
+kernel identity-and-signal primitive or protection against a malicious same-user
+process modifying records concurrently.
+
+A startup receipt confirms that the existing IS91 node started Runtime and Bus
+without State/Flow/Control. Owned process status does not assert Bus connectivity,
+worker health or model readiness. A partial startup, unknown OS identity or
+unconfirmed exit fails visibly and preserves records; there is no blind cleanup
+or PID-only recovery. The lock is never cleared by guessing whether its PID is
+alive. Inspect the retained evidence before manual recovery. Logs, configuration,
+startup receipts and completed process birth records survive stop and restart;
+a new start archives the prior stopped instance record.
+
+Status still performs only reads. The local lifecycle capability flags describe
+supported actions for the observed/configured instance, not credential or remote
+availability. No credentials are probed by status. No listener, guidance pipeline
+or model is added. Successful diagnostic exit means a report was produced, not
+that Runtime is ready. Contract codecs must be built explicitly before any CLI
+operation; start uses the existing Mix node boot, which can compile that checkout.
+
+Authorized discovery (remaining IS127): `atlas runtime discover --env test
+--machine macbook --json` uses the ordinary generated agent client and existing
+Control listener. It never opens/manages a proxy, starts a service or signals a
+process. Supply already-authorized Control connectivity. A missing connection,
+timeout or unsupported older Control remains an error, never machine absence.
+
+A separate explicit read capability is required on every request. For a private
+server, opt in with `control.runtime_read_token_env` naming an environment variable
+whose JSON object maps exact machine names to their read tokens. Leave this field
+absent for default denial. The client reads its one token from
+`ATLAS_RUNTIME_READ_TOKEN`, never an argument or hello/as. Use independent random
+read tokens; never reuse the Bus link writer credential. This change installs none.
+Only private synthetic examples/configurations were used to verify it.
+
+Control revalidates normal hello admission, exact environment/machine and the
+read grant before accessing the Bus registry. It reuses the existing Bus token
+comparison primitive, with a separate configured read realm. No actor string,
+migration claim, person/role lookup or Bus writer token implicitly grants this
+operation. Missing, malformed, wildcard, wrong-scope or revoked grants fail closed;
+revocation is checked each request. Configured variable names must be ASCII
+identifiers (letters/underscore first, then letters/digits/underscore); malformed
+names deny before lookup, preserving the session without logging the bearer. This is a machine-scoped bearer capability,
+not authenticated human sign-in or a new role engine. No live defaults change.
+
+The reply contains only the requested exact machine's `registered` flag and
+`bus_endpoint_registry` basis. An exact `runtime@machine` entry counts; a turn
+endpoint alone does not. This is a point-in-time endpoint observation, not a probe
+of link responsiveness, worker lifecycle, models or leases. There is no global
+machine enumeration. Typed refusals, registry failure and transport/malformed or
+identity-mismatched replies are distinct from a successful unregistered result.
+Result/error correlation and nested target are checked; ordinary hint traffic
+remains independent under one fixed request deadline. The CLI may compile its
+ordinary client as usual, but never builds/starts Runtime. Local status does not
+probe credentials or infer remote access from the existence of this command.
+The read token is stripped before configuration/build/lifecycle helper children,
+including keychain, Fly proxy and Runtime startup, and restored only to the final
+explicit discovery transport. Direct lifecycle helpers independently sanitize all
+their child environments.
+
 Delivery remains the Bus's best effort contract: reads/facts retry and reconcile from
 State. Machine leases and Flow failover across machines remain follow-up work; this
 link does not end a sleeping machine's turns on another machine's behalf.
 
 <sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0015).</sub>
+
+<sub>Written by an AI agent (Codex · GPT-6, herdr-projects atlas · t-0027).</sub>

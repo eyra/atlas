@@ -2,6 +2,7 @@ defmodule AtlasE2E.Tui do
   @moduledoc """
   Legacy scenarios select their presentation explicitly. Console negotiation and
   contextual actions are exercised by the native Console transport scenarios.
+  Console never falls back when negotiation fails.
   One real TUI, started with `atlas tui --env test` in a tmux pane of its own (on a tmux server of
   this run only, so no session of anyone else is touched). Keys go in with
   `tmux send-keys`; the screen comes out with `tmux capture-pane`.

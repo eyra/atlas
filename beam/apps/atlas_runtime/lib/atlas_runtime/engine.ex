@@ -30,7 +30,7 @@ defmodule AtlasRuntime.Engine do
   require Logger
 
   alias AtlasBus.Envelope
-  alias AtlasRuntime.{Agent, Talk, Turn}
+  alias AtlasRuntime.{Agent, Guidance, Talk, Turn}
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
 
@@ -48,7 +48,9 @@ defmodule AtlasRuntime.Engine do
        every: Keyword.get(opts, :every, 60_000),
        kinds: MapSet.new(),
        timer: nil,
-       soon: false
+       soon: false,
+       history_key: nil,
+       history_cursor: 0
      }}
   end
 
@@ -189,8 +191,11 @@ defmodule AtlasRuntime.Engine do
         )
         |> Enum.filter(&(&1.startable? and &1.agent in able))
         |> Enum.uniq_by(& &1.agent)
-        |> Enum.each(&start(&1, names, turns, agents, state.opts))
+        |> Enum.each(
+          &start(&1, names, turns, agents, Keyword.put(state.opts, :description, description))
+        )
 
+        state = history(state, description, names, turns, local, agents, kinds)
         %{state | kinds: MapSet.new([names.kind | Enum.map(kinds, &elem(&1, 0))])}
       else
         _ -> state
@@ -230,6 +235,7 @@ defmodule AtlasRuntime.Engine do
                       agent: agent,
                       item: fact["key"],
                       kind: kind,
+                      ownership: flow,
                       startable?: handover_clear?(fact, flow)
                     }
 
@@ -266,7 +272,7 @@ defmodule AtlasRuntime.Engine do
       |> String.replace("{on}", owned.item)
       |> String.replace("{n}", Integer.to_string(n))
 
-    case Agent.port(agents[owned.agent]) do
+    case port(agents[owned.agent], opts) do
       nil ->
         Logger.warning("runtime: #{owned.agent} has no port this machine knows; no turn")
 
@@ -277,13 +283,11 @@ defmodule AtlasRuntime.Engine do
           kind: owned.kind,
           agent: owned.agent,
           port: port,
-          port_opts: [
-            stub_dir: Keyword.get(opts, :stub_dir),
-            agent: agents[owned.agent],
-            turns_dir: Keyword.get(opts, :turns_dir),
-            env_file: Keyword.get(opts, :env_file),
-            atlas_bin: Keyword.get(opts, :atlas_bin)
-          ],
+          port_opts: port_opts(agents[owned.agent], opts),
+          guidance_every: Keyword.get(opts, :guidance_every, Keyword.fetch!(opts, :lease)),
+          description: Keyword.get(opts, :description, %{}),
+          ownership: owned.ownership,
+          talk_opts: Keyword.get(opts, :talk_opts, []),
           names: names,
           turn_kind: names.kind,
           machine: Keyword.fetch!(opts, :machine),
@@ -300,6 +304,91 @@ defmodule AtlasRuntime.Engine do
         }
 
         DynamicSupervisor.start_child(AtlasRuntime.Supervisor, {Turn, turn})
+    end
+  end
+
+  # Explicit dependency injection for private proof tests, never read from machine settings.
+  defp port(settings, opts),
+    do: Keyword.get(opts, :ports, %{})[settings["port"]] || Agent.port(settings)
+
+  # Startup and historical recovery must preserve the same adapter binding. The
+  # immutable execution is checked separately; current settings cannot redefine it.
+  defp port_opts(settings, opts) do
+    Keyword.merge(
+      [
+        stub_dir: Keyword.get(opts, :stub_dir),
+        agent: settings,
+        turns_dir: Keyword.get(opts, :turns_dir),
+        env_file: Keyword.get(opts, :env_file),
+        atlas_bin: Keyword.get(opts, :atlas_bin)
+      ],
+      Keyword.get(opts, :port_opts, [])
+    )
+  end
+
+  # One historical turn/page per round, no model restart and no successor resolution.
+  # The bounded cursor is an optimization; State and native history remain authoritative.
+  defp history(state, d, n, turns, local, agents, kinds) do
+    machine = Keyword.fetch!(state.opts, :machine)
+
+    candidates =
+      for t <- turns,
+          t["values"][n.machine] == machine,
+          t["values"][n.state] == n.ended,
+          is_binary(n.attempt) and is_binary(t["values"][n.attempt]),
+          not Map.has_key?(local, t["key"]),
+          do: t
+
+    candidates = Enum.sort_by(candidates, & &1["key"])
+
+    chosen =
+      Enum.find(candidates, &(&1["key"] >= (state.history_key || ""))) || List.first(candidates)
+
+    with %{} = t <- chosen,
+         [agent] <- t["links"][n.by],
+         [item] <- t["links"][n.on],
+         %{} = settings <- agents[agent],
+         port when not is_nil(port) <- port(settings, state.opts),
+         {kind, flow} <-
+           Enum.find(kinds, fn {kind, _} ->
+             kind in (get_in(d, ["relations", n.on, "to"]) || [])
+           end),
+         execution_kind when is_binary(execution_kind) <-
+           get_in(d, ["guidance", "execution", "kind"]),
+         %{"fact" => ex} <-
+           Talk.read(execution_kind, %{"turn" => t["key"], "attempt" => t["values"][n.attempt]}) do
+      turn = %{
+        key: t["key"],
+        agent: agent,
+        item: item,
+        attempt: t["values"][n.attempt],
+        machine: machine,
+        kind: kind,
+        ownership: flow,
+        names: n,
+        turn_kind: n.kind,
+        description: d,
+        port: port,
+        port_opts: port_opts(settings, state.opts),
+        talk_opts: Keyword.get(state.opts, :talk_opts, [])
+      }
+
+      cursor =
+        Guidance.historical(
+          turn,
+          ex,
+          if(state.history_key == t["key"], do: state.history_cursor, else: 0)
+        )
+
+      next = if cursor == 0, do: t["key"] <> <<0>>, else: t["key"]
+      %{state | history_key: next, history_cursor: cursor}
+    else
+      _ ->
+        %{
+          state
+          | history_key: if(chosen, do: chosen["key"] <> <<0>>, else: nil),
+            history_cursor: 0
+        }
     end
   end
 
@@ -342,7 +431,7 @@ defmodule AtlasRuntime.Engine do
     end
   end
 
-  @names ~w(kind key on by state running ended machine lease activity why ended_at outcome)
+  @names ~w(kind key on by state running ended machine lease activity why ended_at outcome attempt)
 
   # The ended turns of this machine, newest first: `[{agent, ended at (ms), crashed?}]`.
   defp mine_ended(turns, names, machine) do

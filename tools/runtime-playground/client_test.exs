@@ -1,9 +1,14 @@
 Code.require_file(Path.expand("../../clients/agent/lib/atlas_agent/runtime_session.ex", __DIR__))
+# Only the actual Client module and generated codecs; no Server, worker or application starts.
+source = File.read!(Path.join(__DIR__, "playground.exs"))
+[_, client] = String.split(source, "defmodule RuntimePlayground.Client do", parts: 2)
+[client, _] = String.split(client, "\ncase System.argv() do", parts: 2)
+Code.compile_string("defmodule RuntimePlayground.Client do" <> client)
 ExUnit.start(seed: 0)
 
 defmodule RuntimePlayground.ClientTest do
   use ExUnit.Case, async: true
-  alias AtlasAgent.RuntimeSession, as: Session
+  alias RuntimePlayground.Client.Session
   alias AtlasBFFContract.Runtime.Protocol, as: Wire
   @target %{"environment" => "private", "machine" => "runtime-playground", "worker" => "breaker"}
   @status %{

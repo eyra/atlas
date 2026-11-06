@@ -67,6 +67,13 @@ defmodule AtlasTui.PresentationTest do
     end
   end
 
+  test "theme selection is deterministic and unknown settings retain dark default" do
+    assert Palette.theme("light") == :light
+    assert Palette.theme("dark") == :dark
+    assert Palette.theme(nil) == :dark
+    assert Palette.theme("other") == :dark
+  end
+
   test "actual rendering preserves labels, selection marker and status in either palette" do
     model = model()
 
@@ -87,6 +94,8 @@ defmodule AtlasTui.PresentationTest do
         assert ansi =~ "48;2;"
       end
     end
+
+    assert model.values == %{}
   end
 
   test "empty content remains visible and disconnected/error status keeps literal meaning" do

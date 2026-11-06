@@ -32,6 +32,18 @@ report; a handshake alone does not prove State/rela health.
 2. rela, then the core.
 3. A smoke check that reads only (`fly/smoke.sh test`).
 
+The test deployment job serializes the entire rela/core pair without cancelling
+an in-flight update. Pending jobs queue instead of replacing one another. After
+acquiring its slot, `fly/deploy-test-current.sh` compares the checkout/build label
+with the current authenticated `origin/develop` head. A stale job exits successfully
+without any Fly operations; unresolved or inconsistent identities fail closed.
+If develop advances after admission, the admitted pair finishes normally, and a
+later eligible job deploys the newer head. CI readiness order alone never determines
+which source revision may deploy. Production delivery is unchanged.
+
+A successful stale skip is not delivery evidence: confirm the intended paired
+image labels, manifest checks and positive smoke result in the deployment log.
+
 The deployment verifies the packaged description manifest on both apps before smoke.
 Smoke checks the image label and reads Control's advertised kinds. Ordinary kinds
 must return successful lists. Kinds mapped by the packaged description's guidance

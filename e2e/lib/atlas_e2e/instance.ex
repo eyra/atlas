@@ -179,6 +179,53 @@ defmodule AtlasE2E.Instance do
     end
   end
 
+  @doc """
+  Remove ended turn fixtures from this run's own disposable backend. Control has no
+  authority to delete fenced system facts. This is fixture-owner teardown, not a
+  Runtime impersonation or a production API. Stop the private Runtime before touching
+  its history; restart only after successful teardown. Existing run directories remain.
+  """
+  def cleanup_turn_fixtures(instance, keys) do
+    private_fixture!(instance)
+    :ok = stop_runtime(instance)
+
+    for key <- keys do
+      path = "/turns/" <> URI.encode(key, &URI.char_unreserved?/1)
+      fact = rela_get(instance, path)
+
+      unless fact["properties"]["state"] == "ended" and
+               fact["properties"]["machine"] == "e2e" do
+        raise "refusing fixture teardown of an active or foreign turn: #{key}"
+      end
+
+      url = String.to_charlist(instance.settings["rela"]["url"] <> path)
+
+      case :httpc.request(:delete, {url, []}, [timeout: 5_000], body_format: :binary) do
+        {:ok, {{_, status, _}, _, _}} when status in [200, 204] -> :ok
+        other -> raise "private fixture teardown failed for #{key}: #{inspect(other)}"
+      end
+    end
+
+    start_runtime(instance)
+  end
+
+  defp private_fixture!(instance) do
+    settings = instance.settings || %{}
+    rela = settings["rela"] || %{}
+    uri = URI.parse(rela["url"] || "")
+
+    private =
+      is_binary(instance.dir) and
+        Path.dirname(Path.expand(instance.dir)) == Path.expand(System.tmp_dir!()) and
+        String.starts_with?(Path.basename(instance.dir), "atlas-e2e-")
+
+    unless private and settings["env"] == "test" and
+             rela["data"] == Path.join(instance.dir, "rela") and
+             uri.scheme == "http" and uri.host == "127.0.0.1" and uri.port == rela["port"] do
+      raise ArgumentError, "fixture teardown requires this run's private test backend"
+    end
+  end
+
   defp atlas!(instance, args) do
     case atlas(instance, args) do
       {_, 0} -> :ok
