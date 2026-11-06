@@ -44,7 +44,7 @@ with open(os.environ['PRIVATE_ENV_CAPTURE'],'a') as f:
 
 
     def test_direct_elixir_status_start_stop_and_legacy_child_environments(self):
-        build=next((ROOT/'bff/contract/_build'/mode/'lib' for mode in ('dev','test') if (ROOT/'bff/contract/_build'/mode/'lib/atlas_bff_contract/ebin/Elixir.AtlasBFFContract.Runtime.MachineProtocol.beam').is_file()),None)
+        build=next((ROOT/'bff/contract/_build'/mode/'lib' for mode in ('dev','test') if (ROOT/'bff/contract/_build'/mode/'lib/atlas_bff_contract/ebin/Elixir.AtlasBFFContract.Wire.Runtime.MachineProtocol.beam').is_file()),None)
         self.assertIsNotNone(build,'Explicit fixture setup must build the shared contract')
         paths=[arg for p in sorted(build.glob('*/ebin')) for arg in ('-pa',str(p))]
         with tempfile.TemporaryDirectory() as temporary:

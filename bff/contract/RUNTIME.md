@@ -1,10 +1,12 @@
 # Runtime contract
 
-`AtlasBFFContract.Runtime` owns the shared data models and wire vocabulary. The
-existing Blocks catalogue imports them so Control and terminal adapters can use
-the same definitions. `Runtime.Protocol` generates request/result/event JSON
-codecs, strict validators, dispatch and literal CLI bindings; `Runtime.Types`
-generates the shared structs. The JSON file target exports the same definitions.
+`AtlasBFFContract.Models.Runtime` owns shared Runtime payload models.
+`AtlasBFFContract.Wire.Runtime` owns Runtime wire operations; Control-facing discovery
+and worker operations live under `AtlasBFFContract.Wire.Control`. The root
+`AtlasBFFContract.Contract` composes them without duplicating their definitions.
+`Wire.Runtime.Protocol` generates request/result/event JSON codecs, strict validators,
+dispatch and literal CLI bindings; `Wire.Runtime.Types` generates shared structs.
+The JSON target exports the same definitions.
 
 The first consumers are the private IS125 stub playground and later production
 CLI/Console adapters. Declaring a command does not expose an endpoint or grant a
@@ -33,9 +35,9 @@ compatibility fixtures; CI runs these with the generated-file check.
 
 ## Bounded ephemeral output
 
-`Runtime.OutputProtocol` defines `runtime_output_snapshot` and
+`Wire.Runtime.OutputProtocol` defines `runtime_output_snapshot` and
 `runtime_output_read` on channel `runtime_output`, version `0.1.0`.
-`Workers.Protocol` defines the Control-facing `worker_output_subscribe`,
+`Wire.Control.Workers.Protocol` defines the Control-facing `worker_output_subscribe`,
 `worker_output_next` and `worker_output_unsubscribe` operations. These are
 demand-driven batches, not raw harness logs or terminal attachment.
 

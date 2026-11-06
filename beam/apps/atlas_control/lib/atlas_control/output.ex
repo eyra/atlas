@@ -2,7 +2,7 @@ defmodule AtlasControl.Output do
   @moduledoc "Connection-owned bounded output subscriptions; durable authority stays in Workers."
   use GenServer
   alias AtlasBus.Envelope
-  alias AtlasBFFContract.Runtime.OutputProtocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.OutputProtocol, as: Wire
 
   @max_viewers 128
   @timeout 2_000

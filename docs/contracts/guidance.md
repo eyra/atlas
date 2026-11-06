@@ -99,7 +99,7 @@ that registers attempts and reconciles interactions and receipts.
 
 ## Control worker access and guidance
 
-`AtlasBFFContract.Workers` owns these six durable Control operations:
+`AtlasBFFContract.Wire.Control.Workers` owns these six durable Control operations:
 `worker_overview`, `worker_inspect`, `worker_submit`, `worker_query`,
 `worker_history` and `worker_receipts`. Each request carries `channel: "control"`,
 `version: "0.1.0"` and a correlation `id`; results and errors retain that id.

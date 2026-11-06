@@ -1,6 +1,6 @@
 defmodule AtlasAgent.RuntimeSession do
   @moduledoc "Bounded shared client correlation and exact attachment identity; no worker lifecycle."
-  alias AtlasBFFContract.Runtime.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.Protocol, as: Wire
   @limit 8
   @timeout 10_000
   def limit, do: @limit
@@ -19,7 +19,7 @@ defmodule AtlasAgent.RuntimeSession do
     %{
       new(execution["worker"])
       | execution: execution,
-        wire: AtlasBFFContract.Runtime.AttachmentProtocol
+        wire: AtlasBFFContract.Wire.Runtime.AttachmentProtocol
     }
   end
 

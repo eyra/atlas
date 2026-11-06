@@ -1,7 +1,7 @@
 defmodule AtlasRuntime.OutputEndpointTest do
   use ExUnit.Case, async: true
 
-  alias AtlasBFFContract.Runtime.OutputProtocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.OutputProtocol, as: Wire
   alias AtlasBus.Envelope
   alias AtlasRuntime.{Output, OutputEndpoint}
 

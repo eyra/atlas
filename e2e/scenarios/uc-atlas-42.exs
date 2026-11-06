@@ -7,7 +7,7 @@ scenario "UC-Atlas-42: Boot returns a native configured shell without navigating
   Code.prepend_path(Path.join(i.root, "beam/_build/dev/lib/atlas_bff_contract/ebin"))
 
   defmodule ConsoleBootProtocol do
-    use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Blocks, channel: :control
+    use AtlasBFF.Targets.Protocol, contract: AtlasBFFContract.Contract, channel: :control
   end
 
   send_message = fn socket, message -> :gen_tcp.send(socket, [JSON.encode!(message), "\n"]) end

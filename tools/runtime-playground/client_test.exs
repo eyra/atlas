@@ -9,7 +9,7 @@ ExUnit.start(seed: 0)
 defmodule RuntimePlayground.ClientTest do
   use ExUnit.Case, async: true
   alias RuntimePlayground.Client.Session
-  alias AtlasBFFContract.Runtime.Protocol, as: Wire
+  alias AtlasBFFContract.Wire.Runtime.Protocol, as: Wire
   @target %{"environment" => "private", "machine" => "runtime-playground", "worker" => "breaker"}
   @status %{
     target: @target,

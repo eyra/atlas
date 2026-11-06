@@ -9,7 +9,7 @@ defmodule RuntimePlayground.Client do
 
     session =
       if mode == "attach" and match?(["--" <> _ | _], words) do
-        case AtlasBFFContract.Runtime.AttachmentProtocol.options(
+        case AtlasBFFContract.Wire.Runtime.AttachmentProtocol.options(
                :runtime_attachment_options,
                words
              ) do
@@ -232,7 +232,7 @@ defmodule RuntimePlayground.Client do
   end
 
   def shutdown(dir) do
-    alias AtlasBFFContract.Runtime.MachineProtocol, as: Wire
+    alias AtlasBFFContract.Wire.Runtime.MachineProtocol, as: Wire
     {:ok, socket} = connect(dir, 1)
     target = %{environment: "private", machine: "private-playground"}
     id = Integer.to_string(System.unique_integer([:positive]))
