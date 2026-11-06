@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +64,64 @@ func TestFailedTurnIsInspectableButCommandRefusalFails(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestFollowRetainsPartialUTF8RecordsAcrossEOF(t *testing.T) {
+	var source, output bytes.Buffer
+	reader := eventReader{
+		reader: bufio.NewReader(&source), turnID: "turn-original", encoder: json.NewEncoder(&output),
+	}
+	first := []byte("{\"text\":\"🙂\"}\n")
+	cut := bytes.Index(first, []byte("🙂")) + 1
+	source.Write(first[:cut])
+	if err := reader.drain(false); err != nil {
+		t.Fatal(err)
+	}
+	if output.Len() != 0 {
+		t.Fatal("incomplete event was emitted")
+	}
+	source.Write(first[cut:])
+	source.WriteString(`{"text":"final without newline"}`)
+	if err := reader.drain(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.drain(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.drain(true); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&output)
+	for _, want := range []string{"🙂", "final without newline"} {
+		var row struct {
+			Type   string                `json:"type"`
+			TurnID string                `json:"turn_id"`
+			Event  struct{ Text string } `json:"event"`
+		}
+		if err := decoder.Decode(&row); err != nil {
+			t.Fatal(err)
+		}
+		if row.Type != "event" || row.TurnID != "turn-original" || row.Event.Text != want {
+			t.Fatalf("event changed or was duplicated: %+v", row)
+		}
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		t.Fatalf("expected exactly two events, got %v: %v", extra, err)
+	}
+}
+
+func TestFollowRejectsTruncatedFinalRecord(t *testing.T) {
+	var output bytes.Buffer
+	reader := eventReader{
+		reader: bufio.NewReader(strings.NewReader(`{"text":`)),
+		turnID: "turn-original", encoder: json.NewEncoder(&output),
+	}
+	if err := reader.drain(true); err == nil {
+		t.Fatal("truncated final event must fail, not silently disappear")
+	}
+	if output.Len() != 0 {
+		t.Fatal("invalid event was emitted")
 	}
 }

@@ -4,14 +4,18 @@ defmodule AtlasRuntime.CodexTest do
   @moduletag :tmp_dir
   @turn %{key: "TU-CODEX-1", item: "work", agent: "worker"}
 
-  defp launch(dir, script, owner \\ nil) do
+  defp launch(dir, script, owner \\ nil, settings \\ %{}) do
     command = Path.join(dir, "fake-codex")
     File.write!(command, "#!/bin/sh\n" <> script)
     File.chmod!(command, 0o700)
 
     opts = [
       turns_dir: Path.join(dir, "turns"),
-      agent: %{"command" => command, "workspace" => dir, "goal" => "Explain the sample"}
+      agent:
+        Map.merge(
+          %{"command" => command, "workspace" => dir, "goal" => "Explain the sample"},
+          settings
+        )
     ]
 
     if owner, do: send(owner, {:launch, opts}), else: Codex.start(@turn, opts)
@@ -134,6 +138,42 @@ defmodule AtlasRuntime.CodexTest do
 
     assert {:error, _} = Codex.start(@turn, opts)
     refute File.exists?(Path.join(dir, "turns"))
+  end
+
+  test "resume refuses a different native session instead of completing a replacement", %{
+    tmp_dir: dir
+  } do
+    {:ok, pid} =
+      launch(
+        dir,
+        ~S"""
+        printf '%s\n' '{"type":"thread.started","thread_id":"different-session"}'
+        printf '%s\n' '{"type":"turn.completed"}'
+        """,
+        nil,
+        %{"session_id" => "expected-session"}
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, {:codex_failed, 1, nil}}, 5_000
+    refute_received {:agent, ^pid, {:session, _}}
+    refute_received {:agent, ^pid, {:ended, _}}
+  end
+
+  test "resume cannot report success without native session confirmation", %{tmp_dir: dir} do
+    {:ok, pid} =
+      launch(
+        dir,
+        ~S"""
+        printf '%s\n' '{"type":"turn.completed"}'
+        """,
+        nil,
+        %{"session_id" => "expected-session"}
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, {:codex_failed, 1, nil}}, 5_000
+    refute_received {:agent, ^pid, {:ended, _}}
   end
 
   defp assert_dead(pid) do

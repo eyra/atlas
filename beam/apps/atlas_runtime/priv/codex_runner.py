@@ -15,15 +15,29 @@ def emit(event):
 
 
 def main():
-    executable, workspace, folder, goal, sandbox = sys.argv[1:]
+    executable, workspace, folder, goal, sandbox, session = sys.argv[1:]
     if sandbox not in ('read-only', 'workspace-write'):
         raise ValueError('Sandbox must be read-only or workspace-write')
     folder = Path(folder)
-    command = [executable, 'exec', '--json', '--ignore-user-config', '--ignore-rules',
-               '--skip-git-repo-check', '--ephemeral', '--sandbox', sandbox, '--disable', 'hooks',
+    command = [executable, 'exec', '--sandbox', sandbox, '--disable', 'hooks',
                '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
-               '--color', 'never', '--cd', workspace,
-               '--output-last-message', str(folder / 'answer.txt'), goal]
+               '--color', 'never', '--cd', workspace]
+    if session:
+        command.append('resume')
+    command += ['--json', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+                '--output-last-message', str(folder / 'answer.txt'), '--']
+    command += [session, goal] if session else [goal]
+    session_seen = False
+
+    def forward(event):
+        nonlocal session_seen
+        if event.get('type') == 'thread.started':
+            identifier = event.get('thread_id')
+            if not isinstance(identifier, str) or not identifier or (session and identifier != session):
+                raise ValueError('Codex did not confirm the requested session')
+            session_seen = True
+        emit({'type': 'runtime.event', 'event': event})
+
     process = None
     selector = selectors.DefaultSelector()
     stopped = False
@@ -62,7 +76,7 @@ def main():
                                 line, partial = partial.split(b'\n', 1)
                                 # Keep protocol records separate from helper diagnostics.
                                 event = json.loads(line)
-                                emit({'type': 'runtime.event', 'event': event})
+                                forward(event)
                             if len(partial) > 1048576:
                                 raise ValueError('Codex event exceeds 1 MiB')
                 if deadline is not None and time.monotonic() >= deadline:
@@ -73,7 +87,7 @@ def main():
                     deadline = None
                 if not stdout_open:
                     if partial.strip():
-                        emit({'type': 'runtime.event', 'event': json.loads(partial)})
+                        forward(json.loads(partial))
                         partial = b''
                     # EOF can precede the leader's exit; do not turn a clean exit into SIGKILL.
                     try:
@@ -86,6 +100,8 @@ def main():
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    if session and not session_seen and not stopped:
+                        raise ValueError('Codex resume ended without confirming its session')
                     emit({'type': 'runtime.process_ended', 'exit_code': code, 'stopped': stopped})
                     return
     finally:
