@@ -26,7 +26,7 @@ defmodule AtlasE2E.RuntimePlaygroundTest do
       Path.wildcard(Path.join(@root, "beam/_build/test/lib/*/ebin"))
       |> Enum.flat_map(&["-pa", &1])
 
-    for script <- ~w(client_test.exs attachment_test.exs) do
+    for script <- ~w(client_test.exs attachment_test.exs links_test.exs) do
       {output, code} =
         System.cmd(
           "elixir",
