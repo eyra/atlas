@@ -211,6 +211,49 @@
     },
     {
       "call": "open",
+      "name": "workers",
+      "page": "workers",
+      "params": [],
+      "path": "/workers",
+      "replies": {
+        "page": "view model"
+      },
+      "wire": "open"
+    },
+    {
+      "call": "open",
+      "name": "worker",
+      "page": "worker",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt",
+      "replies": {
+        "page": "view model"
+      },
+      "wire": "open"
+    },
+    {
+      "call": "open",
+      "name": "worker_guidance",
+      "page": "worker_guidance",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt/guidance",
+      "replies": {
+        "page": "view model"
+      },
+      "wire": "open"
+    },
+    {
+      "call": "open",
       "name": "kinds",
       "page": "kinds",
       "params": [],
@@ -408,6 +451,23 @@
         "kind"
       ],
       "path": "/k/:kind/new",
+      "replies": {
+        "refused": "view model",
+        "stored": "view model"
+      },
+      "takes": "values",
+      "wire": "submit"
+    },
+    {
+      "call": "submit",
+      "name": "queue_worker_guidance",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt/guidance",
       "replies": {
         "refused": "view model",
         "stored": "view model"
@@ -732,6 +792,811 @@
     }
   ],
   "models": [
+    {
+      "fields": [
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine"
+    },
+    {
+      "fields": [
+        {
+          "name": "machine",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "json",
+          "required": false,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_machine_status_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_discovery_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "registered",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "basis",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_availability"
+    },
+    {
+      "fields": [
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "configuration",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "directory",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "instance",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_boot"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "instance",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "pid",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "name": "runtime_machine_boot_receipt"
+    },
+    {
+      "fields": [
+        {
+          "name": "local_status",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "local_start",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "local_stop",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "remote_status",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_machine_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_machine"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "basis",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "capabilities",
+          "required": true,
+          "type": "runtime_machine_capabilities"
+        },
+        {
+          "name": "pid",
+          "required": false,
+          "type": "integer"
+        },
+        {
+          "name": "process_present",
+          "required": false,
+          "type": "boolean"
+        },
+        {
+          "name": "log",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_machine_status"
+    },
+    {
+      "fields": [
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "machine",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "worker",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_worker"
+    },
+    {
+      "fields": [
+        {
+          "name": "worker",
+          "required": true,
+          "type": "runtime_worker"
+        },
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_execution"
+    },
+    {
+      "fields": [
+        {
+          "name": "status",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "start",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "stop",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "stub_mode",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_controls"
+    },
+    {
+      "fields": [
+        {
+          "name": "harness",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "harness_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "capability_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "configured_model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "reported_model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "queued_input",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "durable_accept_query",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "consumption_evidence",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "literal_text",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_harness_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "controls",
+          "required": true,
+          "type": "runtime_controls"
+        },
+        {
+          "name": "harness",
+          "required": false,
+          "type": "runtime_harness_capabilities"
+        }
+      ],
+      "name": "runtime_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "execution",
+          "required": true,
+          "type": "runtime_execution"
+        },
+        {
+          "name": "item",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "activity",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "lease_until",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "outcome",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_turn"
+    },
+    {
+      "fields": [
+        {
+          "name": "target",
+          "required": true,
+          "type": "runtime_worker"
+        },
+        {
+          "name": "engine_running",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "capabilities",
+          "required": true,
+          "type": "runtime_capabilities"
+        },
+        {
+          "name": "item",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "owner",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "expected",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "handover",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "cannot_run",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "turns",
+          "required": true,
+          "type": "list of runtime_turn"
+        }
+      ],
+      "name": "runtime_status"
+    },
+    {
+      "fields": [
+        {
+          "name": "code",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "message",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "retryable",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_error"
+    },
+    {
+      "fields": [
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "runtime_attachment_options"
+    },
+    {
+      "fields": [
+        {
+          "name": "snapshot",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "control",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "guidance",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "output",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "replay",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "runtime_attachment_capabilities"
+    },
+    {
+      "fields": [
+        {
+          "name": "harness",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "harness_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "configured_model",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "reported_model",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "capability_version",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "queued_input",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "durable_accept_query",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "consumption_evidence",
+          "required": true,
+          "type": "boolean"
+        }
+      ],
+      "name": "worker_descriptor"
+    },
+    {
+      "fields": [
+        {
+          "name": "available",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "worker_guidance_availability"
+    },
+    {
+      "fields": [
+        {
+          "name": "execution",
+          "required": true,
+          "type": "runtime_execution"
+        },
+        {
+          "name": "descriptor",
+          "required": true,
+          "type": "worker_descriptor"
+        },
+        {
+          "name": "item",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "item_title",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "item_to",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "activity",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "activity_at",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "lease_until",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "outcome",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "confirmed_at",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "guidance",
+          "required": true,
+          "type": "worker_guidance_availability"
+        }
+      ],
+      "name": "worker_view"
+    },
+    {
+      "fields": [
+        {
+          "name": "client_key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "cause",
+          "required": true,
+          "type": "string"
+        }
+      ],
+      "name": "worker_guidance_input"
+    },
+    {
+      "fields": [
+        {
+          "name": "proven",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "uncertain",
+          "required": true,
+          "type": "boolean"
+        },
+        {
+          "name": "closures",
+          "required": true,
+          "type": "list of string"
+        }
+      ],
+      "name": "worker_receipt_projection"
+    },
+    {
+      "fields": [
+        {
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "actor",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "client_key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "body",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "body_digest",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "worker",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "mode",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "execution",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "cause",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_at",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_position",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "projection",
+          "required": true,
+          "type": "worker_receipt_projection"
+        },
+        {
+          "name": "receipt_count",
+          "required": true,
+          "type": "integer"
+        }
+      ],
+      "name": "worker_interaction"
+    },
+    {
+      "fields": [
+        {
+          "name": "key",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "environment",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "interaction",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "worker",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "turn",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "attempt",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "execution",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "stage",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "evidence_id",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "cause",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "writer",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_at",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "recorded_position",
+          "required": true,
+          "type": "integer"
+        },
+        {
+          "name": "admission_id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "consumption_id",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "type": "string"
+        }
+      ],
+      "name": "worker_receipt"
+    },
     {
       "fields": [
         {
@@ -1251,6 +2116,34 @@
       "returns": "view model"
     },
     {
+      "name": "workers",
+      "params": [],
+      "path": "/workers",
+      "returns": "view model"
+    },
+    {
+      "name": "worker",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt",
+      "returns": "view model"
+    },
+    {
+      "name": "worker_guidance",
+      "params": [
+        "machine",
+        "worker",
+        "turn",
+        "attempt"
+      ],
+      "path": "/workers/:machine/:worker/:turn/:attempt/guidance",
+      "returns": "view model"
+    },
+    {
       "name": "kinds",
       "params": [],
       "path": "/_kinds",
@@ -1374,6 +2267,1265 @@
     }
   ],
   "protocol": [
+    {
+      "channel": "control",
+      "cli": [
+        "discover"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_discover",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "availability": "runtime_machine_availability",
+            "id": "string",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_discover_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_discover_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "grant": "string"
+        },
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_discover",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "start"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_start",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_start_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_start_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_start",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "stop"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_stop",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_stop_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_stop_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_stop",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_machine",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "runtime_machine_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_machine_status",
+            "target": "runtime_machine"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_status_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_machine"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "machine_status_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_machine"
+        },
+        "select": {
+          "channel": "control",
+          "op": "machine_status",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "attach"
+      ],
+      "direction": "request",
+      "name": "execution_attach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_attach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "execution_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_status",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "cli": [
+        "detach"
+      ],
+      "direction": "request",
+      "name": "execution_detach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "id": "string",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "execution_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "execution_detach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime_attachment",
+      "direction": "push",
+      "name": "execution_snapshot",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "status",
+          "required": {
+            "capabilities": "runtime_attachment_capabilities",
+            "execution": "runtime_execution",
+            "sequence": "integer",
+            "target": "runtime_worker",
+            "turn": "runtime_turn"
+          },
+          "select": {
+            "channel": "event",
+            "op": "execution_snapshot",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "runtime_attachment",
+      "direction": "push",
+      "name": "execution_closed",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "closed",
+          "required": {
+            "error": "runtime_error",
+            "execution": "runtime_execution",
+            "sequence": "integer",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "event",
+            "op": "execution_closed",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "status"
+      ],
+      "direction": "request",
+      "name": "runtime_status",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "status",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "start"
+      ],
+      "direction": "request",
+      "name": "runtime_start",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "start",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "stop"
+      ],
+      "direction": "request",
+      "name": "runtime_stop",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "stop",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "attach"
+      ],
+      "direction": "request",
+      "name": "runtime_attach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "attach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "detach"
+      ],
+      "direction": "request",
+      "name": "runtime_detach",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "op": "detach",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "active"
+      ],
+      "direction": "request",
+      "name": "runtime_active",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "active",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "idle"
+      ],
+      "direction": "request",
+      "name": "runtime_idle",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "idle",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "silent"
+      ],
+      "direction": "request",
+      "name": "runtime_silent",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "silent",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "crash-once"
+      ],
+      "direction": "request",
+      "name": "runtime_crash_once",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "crash once",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "cli": [
+        "mode",
+        "crash"
+      ],
+      "direction": "request",
+      "name": "runtime_crash",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "required": {
+            "id": "string",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "control",
+            "op": "result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "optional": {
+            "target": "runtime_worker"
+          },
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "required": {
+          "id": "string",
+          "target": "runtime_worker"
+        },
+        "select": {
+          "channel": "control",
+          "mode": "crash",
+          "op": "stub_mode",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "runtime",
+      "direction": "push",
+      "name": "runtime_status_event",
+      "replies": [
+        {
+          "effect": "progress",
+          "name": "status",
+          "required": {
+            "sequence": "integer",
+            "status": "runtime_status",
+            "target": "runtime_worker"
+          },
+          "select": {
+            "channel": "event",
+            "op": "status",
+            "version": "0.1.0"
+          }
+        }
+      ]
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_overview",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "confirmed_at": "string",
+            "id": "string",
+            "workers": "list of worker_view"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_overview_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_overview_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_overview",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_inspect",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "id": "string",
+            "view": "worker_view"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_inspect_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_inspect_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_inspect",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_submit",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "id": "string",
+            "interaction": "worker_interaction"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_submit_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_submit_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "guidance": "worker_guidance_input",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_submit",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_query",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+            "interaction": "worker_interaction"
+          },
+          "required": {
+            "found": "boolean",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_query_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_query_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+
+        },
+        "required": {
+          "client_key": "string",
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_query",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_history",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "cursor": "string",
+            "id": "string",
+            "interactions": "list of worker_interaction",
+            "more": "boolean"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_history_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_history_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "cursor": "string"
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_history",
+          "version": "0.1.0"
+        }
+      }
+    },
+    {
+      "channel": "control",
+      "direction": "request",
+      "name": "worker_receipts",
+      "replies": [
+        {
+          "effect": "complete",
+          "name": "result",
+          "optional": {
+
+          },
+          "required": {
+            "cursor": "string",
+            "id": "string",
+            "more": "boolean",
+            "receipts": "list of worker_receipt"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_receipts_result",
+            "version": "0.1.0"
+          }
+        },
+        {
+          "effect": "error",
+          "name": "error",
+          "required": {
+            "error": "runtime_error",
+            "id": "string"
+          },
+          "select": {
+            "channel": "control",
+            "op": "worker_receipts_error",
+            "version": "0.1.0"
+          }
+        }
+      ],
+      "request": {
+        "optional": {
+          "cursor": "string"
+        },
+        "required": {
+          "execution": "runtime_execution",
+          "id": "string",
+          "interaction": "string"
+        },
+        "select": {
+          "channel": "control",
+          "op": "worker_receipts",
+          "version": "0.1.0"
+        }
+      }
+    },
     {
       "channel": "control",
       "direction": "request",

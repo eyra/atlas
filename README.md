@@ -36,6 +36,47 @@ atlas tui --env test      # the same for test; again for a second one
 atlas status --env test   # what runs, and which build (also: logs, stop, restart, env)
 ```
 
+### Console navigation and keys (UC-Atlas-42/43)
+
+Console is the default terminal surface. Boot supplies persistent tabs; the current
+page supplies contextual action blocks and their legend groups. While browsing,
+the supplied `? Keys` action opens a bordered vertical legend with aligned key and
+label columns. Disabled actions remain visible with their supplied reason. The
+legend uses the same scoped actions as execution, not a separate help/key table.
+
+Use the legend's declared Up/Down and PageUp/PageDown bindings to scroll; Esc closes
+it and restores the underlying selection, focus and drafts. Resizing clamps the
+legend viewport without moving the underlying list. Refreshes update its actions;
+if the last available close action disappears, the overlay dismisses safely.
+Inside text editors, `?` remains literal text unless Control explicitly supplies a
+legend binding for that context. The client never invents an editor shortcut.
+
+On pages fully divided into multiple top-level panes, Control supplies `[` / `]`
+for previous/next pane while browsing. PageUp/PageDown then scroll the focused
+pane independently, without changing the selected reference row. Tab/Shift+Tab
+continue switching shell tabs. Single-pane and unpartitioned pages do not offer
+pane cycling; native view actions take precedence when they use either bracket.
+
+For compatibility checks only, `atlas tui --env test --surface legacy` selects the
+previous presentation explicitly. Failed Console negotiation never silently falls
+back. To try local uncommitted client work without the launcher's automatic update,
+run `ATLAS_NO_UPDATE=1 bin/atlas tui --env test` from this checkout.
+
+### Console presentation (UC-Atlas-44)
+
+Console lists use bordered title/count headings, bold row titles, muted metadata,
+thin separators and an explicit selected-row marker. Long titles and metadata wrap
+within the available width, including inside framed parts. Supplied highlight
+tones appear as labeled badges (`[OK]`, `[Pending]`, `[Error]`, `[Info]`); unknown
+tones retain their label without claiming a known status. The renderer never
+infers workflow status from a row's title or detail.
+
+The default Console palette is dark. Set `"tui_theme": "light"` in the environment
+settings for a light surface, or `"dark"` for dark. Both use a small local mapping
+of Prism colors with explicit foreground/background pairs and non-color markers;
+no Prism generator or runtime dependency is added. This setting affects only
+Console rendering, not server data or the explicit legacy surface.
+
 ## Driving Atlas from an agent
 
 Agents use the same Control as the TUI, from the command line: `atlas help`, `put`, `set`, `delete`, `get`, `list`. Nothing writes rela directly. The same rules, refusals and generated codes apply, and an open TUI shows each change at once. `atlas help` (or `atlas put --help`) lists the kinds, what a create asks, how ids are made, what a kind belongs under and its fields, all from rela's description. Every command takes `--json` and then prints one JSON value: the item, the list, or `{"refused": [...]}`. The exit status is 0 when done, 1 when refused (the reasons also go to stderr) and 2 on an error. Like `atlas`, it works on prod unless given `--env test`.

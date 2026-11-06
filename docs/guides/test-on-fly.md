@@ -19,6 +19,13 @@ atlas stop --env test       # closes this Mac's tunnel; test keeps running on Fl
 
 The tunnel is `fly proxy 7693:7691 -a eyra-atlas-test`, flyctl's WireGuard into test's network, running in the background like the core used to. It needs flyctl logged in to organisation eyra (`fly auth whoami`); nothing else on the Mac (no VPN, no root). Its files are in `~/.local/share/atlas/test-on-fly/`.
 
+Before passing the tunnel to a client, the launcher checks a read-only Control
+handshake, not only the local port. It reopens an unresponsive existing proxy and
+waits up to a minute for a new proxy to reach Control. `status` reports a broken
+upstream as unavailable even if flyctl still listens locally. This restarts no Fly
+machine and replays no client writes. A hello refusal is left to the client to
+report; a handshake alone does not prove State/rela health.
+
 `atlas up --env test` is gone: a merge to develop deploys test (CI job `deploy-test`, which runs `fly/deploy.sh test`):
 
 1. On rela's machine, on a copy of its data: does this build's description describe all of it? When it does not, nothing is deployed and test keeps its build; that data needs a migration first (below).

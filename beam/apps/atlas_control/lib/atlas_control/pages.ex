@@ -59,18 +59,44 @@ defmodule AtlasControl.Pages do
   # those and nothing else; a path outside them is no page (`:unknown`).
   def route(path) do
     case Blocks.match(path) do
-      {:ok, :home, _} -> :home
-      {:ok, :kinds, _} -> :kinds
-      {:ok, :list, p} -> {:list, p.kind}
-      {:ok, :new, p} -> {:new, p.kind}
-      {:ok, :new_under, p} -> {:new, p.kind, {p.relation, p.parent}}
-      {:ok, page, p} when page in [:item, :edit, :delete] -> {page, p.kind, p.key}
-      {:ok, page, p} when page in [:links, :set, :remove] -> {page, p.kind, p.key, p.relation}
-      {:ok, :faults, _} -> {:faults, nil}
-      {:ok, :fact_faults, p} -> {:faults, {p.kind, p.key}}
-      {:ok, :fault, p} -> {:fault, p.fault, nil}
-      {:ok, :fact_fault, p} -> {:fault, p.fault, {p.kind, p.key}}
-      :error -> :unknown
+      {:ok, :home, _} ->
+        :home
+
+      {:ok, page, params} when page in [:workers, :worker, :worker_guidance] ->
+        {:worker_page, page, params}
+
+      {:ok, :kinds, _} ->
+        :kinds
+
+      {:ok, :list, p} ->
+        {:list, p.kind}
+
+      {:ok, :new, p} ->
+        {:new, p.kind}
+
+      {:ok, :new_under, p} ->
+        {:new, p.kind, {p.relation, p.parent}}
+
+      {:ok, page, p} when page in [:item, :edit, :delete] ->
+        {page, p.kind, p.key}
+
+      {:ok, page, p} when page in [:links, :set, :remove] ->
+        {page, p.kind, p.key, p.relation}
+
+      {:ok, :faults, _} ->
+        {:faults, nil}
+
+      {:ok, :fact_faults, p} ->
+        {:faults, {p.kind, p.key}}
+
+      {:ok, :fault, p} ->
+        {:fault, p.fault, nil}
+
+      {:ok, :fact_fault, p} ->
+        {:fault, p.fault, {p.kind, p.key}}
+
+      :error ->
+        :unknown
     end
   end
 
@@ -193,6 +219,7 @@ defmodule AtlasControl.Pages do
   its name and parameters: the page whose form or confirm it comes from.
   """
   def submit_route(:create, p), do: {:new, p.kind}
+  def submit_route(:queue_worker_guidance, params), do: {:worker_page, :worker_guidance, params}
   def submit_route(:create_under, p), do: {:new, p.kind, {p.relation, p.parent}}
   def submit_route(:update, p), do: {:edit, p.kind, p.key}
   def submit_route(:delete, p), do: {:delete, p.kind, p.key}
@@ -242,6 +269,7 @@ defmodule AtlasControl.Pages do
 
   # A route's path, by the contract's page for it.
   def path(:home), do: Blocks.path(:home)
+  def path({:worker_page, page, params}), do: Blocks.path(page, params)
   def path(:kinds), do: Blocks.path(:kinds)
   def path({:list, kind}), do: Blocks.path(:list, kind: kind)
   def path({:new, kind}), do: Blocks.path(:new, kind: kind)
@@ -287,6 +315,7 @@ defmodule AtlasControl.Pages do
   @doc "The kind a route is about."
   def kind_of(:home), do: :all
   def kind_of(:unknown), do: nil
+  def kind_of({:worker_page, _, _}), do: nil
   def kind_of({:unavailable, _path, _failed}), do: nil
   def kind_of(:kinds), do: nil
   def kind_of(route), do: elem(route, 1)
@@ -297,6 +326,14 @@ defmodule AtlasControl.Pages do
   """
   def shows?(:home, _description, _kind), do: true
   def shows?({:assigned, _by}, _description, _kind), do: true
+
+  def shows?({:worker_page, _, _}, description, kind),
+    do:
+      kind == get_in(description, ["runtime", "turn", "kind"]) or
+        kind in Enum.map(
+          ~w(execution interaction receipt),
+          &get_in(description, ["guidance", &1, "kind"])
+        )
 
   def shows?({page, of, _key} = route, description, kind) when page in [:item, :delete] do
     listed = Enum.map(child_relations(description, of), &elem(&1, 1))
@@ -360,6 +397,7 @@ defmodule AtlasControl.Pages do
     end
   end
 
+  def form?({:worker_page, :worker_guidance, _}), do: true
   def form?(route), do: elem_match?(route, [:new, :edit, :links, :remove])
 
   defp elem_match?(route, pages), do: is_tuple(route) and elem(route, 0) in pages
@@ -382,6 +420,8 @@ defmodule AtlasControl.Pages do
   defp list_id(relation, _from, _spec), do: "list:" <> relation
 
   @doc "The reads a route needs: `[{kind, content}]`."
+  def reads({:worker_page, _, _}, _description), do: []
+
   def reads(:home, description) do
     case top_kinds(description) do
       [kind] -> reads({:list, kind}, description)
@@ -2448,7 +2488,7 @@ defmodule AtlasControl.Pages do
 
   # The primary value; while it is empty (a connector has not filled it yet), the value
   # the id is made from; else the key.
-  defp label(spec, fact) do
+  def label(spec, fact) do
     [primary(spec), id_property(spec)]
     |> Enum.map(&to_text(fact["values"][&1]))
     |> Enum.find(fact["key"], &(&1 != ""))

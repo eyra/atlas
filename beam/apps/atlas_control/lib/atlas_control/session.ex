@@ -226,6 +226,45 @@ defmodule AtlasControl.Session do
   defp handle_op(_op, _message, %{hello: false} = state),
     do: {:noreply, notice(state, "error", "Say hello first.")}
 
+  defp handle_op(op, message, state)
+       when op in ~w(worker_overview worker_inspect worker_submit worker_query worker_history worker_receipts) do
+    alias AtlasBFFContract.Workers.Protocol, as: Wire
+
+    reply =
+      case Wire.decode_request(message) do
+        {:ok, name, request} ->
+          case worker_call(state, op, request) do
+            {:ok, result} ->
+              props = result |> Map.put("id", request["id"]) |> compact_worker_reply()
+
+              try do
+                Wire.reply(name, :result, props)
+              rescue
+                ArgumentError -> worker_error(name, request["id"], "invalid_state_reply")
+              end
+
+            {:error, reason} ->
+              worker_error(name, request["id"], reason)
+          end
+
+        _ ->
+          %{
+            "op" => op <> "_error",
+            "channel" => "control",
+            "version" => "0.1.0",
+            "id" => if(is_binary(message["id"]), do: message["id"], else: ""),
+            "error" => %{
+              "code" => "invalid_request",
+              "message" => "Unsupported or malformed worker request",
+              "retryable" => false
+            }
+          }
+      end
+
+    send_client(state, reply)
+    {:noreply, state}
+  end
+
   defp handle_op("boot", message, state) do
     # A boot refresh is a read, even while editing: never redraw or reset a draft.
     # Unlike page refresh, stale cached description is not a successful shell reply.
@@ -412,6 +451,31 @@ defmodule AtlasControl.Session do
   defp actor(_client, _as), do: "agent"
 
   # Writes
+
+  defp submit({:worker_page, :worker_guidance, params} = route, raw, state) do
+    request = %{"execution" => AtlasControl.WorkerPages.target(params), "guidance" => raw}
+
+    case worker_call(state, "worker_submit", request) do
+      {:ok, %{"interaction" => interaction}} ->
+        state
+        |> notice(
+          "ok",
+          "Guidance stored as #{interaction["key"]}; queued is not delivery or completion."
+        )
+        |> then(
+          &show(
+            %{&1 | form: %{}},
+            {:worker_page, :worker, params},
+            "stored",
+            interaction["recorded_position"]
+          )
+        )
+
+      {:error, reason} ->
+        form = Map.merge(state.form, %{values: raw, errors: [reason]})
+        show(%{state | form: form}, route, "refused", nil, [reason])
+    end
+  end
 
   defp submit({:new, kind} = route, raw, state), do: create(route, kind, raw, %{}, state)
 
@@ -786,6 +850,58 @@ defmodule AtlasControl.Session do
     end
   end
 
+  defp worker_call(state, operation, request) do
+    case ask(@description, %{}) do
+      %{"description" => description} ->
+        candidate = %{state | description: description}
+        actor = %{key: state.by, kind: actor_kind(candidate)}
+
+        AtlasControl.Workers.handle(
+          operation,
+          request,
+          description,
+          actor,
+          &ask/2,
+          &worker_fact/2
+        )
+
+      _ ->
+        {:error, "state_unavailable"}
+    end
+  end
+
+  defp worker_fact(kind, content) do
+    envelope = Envelope.new("fact", kind)
+    :ok = AtlasBus.send(envelope, content)
+    id = envelope.id
+
+    receive do
+      {:atlas_bus, %Envelope{id: ^id, class: "stored"}, answer} -> {:stored, answer}
+      {:atlas_bus, %Envelope{id: ^id, class: "refused"}, answer} -> {:refused, answer}
+    after
+      read_timeout() -> {:error, :outcome_unknown}
+    end
+  end
+
+  defp worker_error(operation, id, reason) do
+    AtlasBFFContract.Workers.Protocol.reply(operation, :error, %{
+      "id" => id,
+      "error" => %{
+        "code" => reason,
+        "message" => reason,
+        "retryable" => reason == "state_unavailable"
+      }
+    })
+  end
+
+  defp compact_worker_reply(value) when is_map(value),
+    do: Map.new(for {key, item} <- value, not is_nil(item), do: {key, compact_worker_reply(item)})
+
+  defp compact_worker_reply(value) when is_list(value),
+    do: Enum.map(value, &compact_worker_reply/1)
+
+  defp compact_worker_reply(value), do: value
+
   defp ask(kind, content), do: ask(kind, content, @read_attempts)
 
   defp ask(_kind, _content, 0), do: %{"error" => "State did not answer"}
@@ -808,6 +924,21 @@ defmodule AtlasControl.Session do
   defp show(state, route, reason, position, refused \\ nil, welcome \\ nil) do
     route = start(route, state)
 
+    state =
+      case route do
+        {:worker_page, :worker_guidance, _} ->
+          %{
+            state
+            | form:
+                Map.put_new_lazy(state.form, :worker_client_key, fn ->
+                  :crypto.strong_rand_bytes(18) |> Base.url_encode64(padding: false)
+                end)
+          }
+
+        _ ->
+          state
+      end
+
     answers =
       Enum.map(Pages.reads(route, state.description), fn {kind, content} -> ask(kind, content) end)
 
@@ -817,6 +948,23 @@ defmodule AtlasControl.Session do
 
     page =
       case route do
+        {:worker_page, _, _} = worker_route ->
+          case ask(@description, %{}) do
+            %{"description" => description} ->
+              actor = %{key: state.by, kind: actor_kind(%{state | description: description})}
+
+              AtlasControl.WorkerPages.render(
+                worker_route,
+                description,
+                actor,
+                &ask/2,
+                state.form
+              )
+
+            _ ->
+              AtlasControl.WorkerPages.error("state_unavailable", "/workers")
+          end
+
         {:faults, on} ->
           Faults.page(route, Faults.offers(on))
 

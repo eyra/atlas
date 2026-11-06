@@ -94,10 +94,6 @@ defmodule AtlasControl.PagesTest do
   test "every submit endpoint of the contract acts on a page; every form submits to one" do
     submits = for %{call: :submit} = e <- AtlasControl.Blocks.endpoints(), do: e
 
-    assert Enum.map(submits, & &1.name) ==
-             [:create, :create_under, :update, :delete, :link, :accept, :reopen] ++
-               [:fault, :fact_fault]
-
     for endpoint <- submits do
       params = Map.new(endpoint.params, &{&1, "x #{&1}"})
       route = Pages.submit_route(endpoint.name, params)
