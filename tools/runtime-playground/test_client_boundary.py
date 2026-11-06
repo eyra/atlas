@@ -82,6 +82,21 @@ RuntimePlayground.Client.run(Enum.at(System.argv(), 1), Enum.at(System.argv(), 2
     def result(self, request, item):
         return dict(op='result', channel='control', version='0.1.0', id=request['id'], target=TARGET, status=status(item))
 
+    def test_large_status_reply_and_event_remain_single_json_lines(self):
+        # The retained human demo grew past the OS line buffer (9,216 bytes).
+        # Exercise the real socket client, not only the JSON/session decoder.
+        item = 'x' * 120_000
+        with self.peer() as (child, receive, send, wait, absent):
+            send(self.result(receive(), item))
+            wait('item=' + item)
+            send(dict(op='status', channel='event', version='0.1.0', sequence=1,
+                      target=TARGET, status=status('AFTER-LARGE-' + item)))
+            wait('item=AFTER-LARGE-' + item)
+            child.stdin.write(b'status\n'); child.stdin.flush()
+            send(self.result(receive(), 'STILL-CORRELATED'))
+            wait('item=STILL-CORRELATED')
+            absent('INVALID')
+
     def test_exact_cli_rejects_lifecycle_and_foreign_events_then_closes_only_subscription(self):
         execution = dict(worker=TARGET, turn='t1', attempt='a1')
         turn = dict(execution=execution, item='fixture', state='running')

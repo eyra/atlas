@@ -59,7 +59,7 @@ defmodule RuntimePlayground.Server do
       "status" => "ready_to_pick_up"
     })
 
-    {:ok, flow} = Supervisor.start_child(AtlasFlow.Root, {AtlasFlow.Engine, every: 1000})
+    {:ok, flow} = Supervisor.start_child(AtlasFlow.Root, {AtlasFlow.Engine, every: 10_000})
     AtlasFlow.Engine.round(flow)
     put("assignment", "AS-SC-Atlas-1", %{}, %{"assigned_to" => ["breaker"]}, "change")
     path = dir <> "/runtime.sock"
@@ -70,6 +70,7 @@ defmodule RuntimePlayground.Server do
         ifaddr: {:local, path},
         packet: :line,
         packet_size: 262_144,
+        buffer: 262_144,
         active: false
       ])
 
@@ -92,7 +93,7 @@ defmodule RuntimePlayground.Server do
       "PRIVATE STUB; contract c341938; worker remains stopped until explicit start\n"
     )
 
-    Process.send_after(self(), :tick, 1000)
+    Process.send_after(self(), :tick, 5_000)
     {:ok, state}
   end
 
@@ -289,7 +290,9 @@ defmodule RuntimePlayground.Server do
     do: {state, "operation is not implemented by this private prototype"}
 
   defp fact(kind, key) do
-    %{"fact" => fact} = Talk.read(kind, %{"key" => key})
+    # Status uses properties and outgoing links; expanding the worker's incoming
+    # turn history here repeats hundreds of unrelated reads on every snapshot.
+    %{"fact" => fact} = Talk.read(kind, %{"key" => key, "plain" => true})
     fact
   end
 
@@ -303,7 +306,7 @@ defmodule RuntimePlayground.Server do
   defp status(state) do
     assignment = fact("assignment", "AS-SC-Atlas-1")
     worker = fact("agent", "breaker")
-    %{"facts" => turns} = Talk.read("turn", %{})
+    %{"facts" => turns} = Talk.read("turn", %{"linked" => %{}, "plain" => true})
 
     turns =
       turns
@@ -379,7 +382,7 @@ defmodule RuntimePlayground.Server do
         end)
       )
 
-    Process.send_after(self(), :tick, 1000)
+    Process.send_after(self(), :tick, 5_000)
     {:noreply, %{state | sequence: sequence, attachments: attachments}}
   end
 
@@ -484,7 +487,9 @@ defmodule RuntimePlayground.Client do
     case :gen_tcp.connect(
            {:local, dir <> "/runtime.sock"},
            0,
-           [:binary, packet: :line, packet_size: 262_144, active: false],
+           # packet_size alone does not grow the line driver's buffer: a long
+           # JSON line otherwise arrives as multiple independently decoded chunks.
+           [:binary, packet: :line, packet_size: 262_144, buffer: 262_144, active: false],
            1000
          ) do
       {:ok, socket} ->
