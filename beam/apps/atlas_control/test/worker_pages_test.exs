@@ -93,6 +93,91 @@ defmodule AtlasControl.WorkerPagesTest do
              projected["blocks"],
              &(get_in(&1, ["props", "operation", "name"]) == "part_next")
            )
+
+    assert {:ok, projection} = AtlasBFFContract.Console.compile(projected)
+
+    assert {:ok, bindings} =
+             AtlasBFFContract.Console.Projection.bindings(projection, %{
+               path: WorkerPages.path(target),
+               context: "browse",
+               generation: 0,
+               on: "guidance-history",
+               row: nil
+             })
+
+    refute Map.has_key?(bindings, "Down")
+    refute Map.has_key?(bindings, "Up")
+    refute Map.has_key?(bindings, "e")
+  end
+
+  test "durable history exposes selectable rows without granting unsupported worker capabilities" do
+    interactions =
+      for {key, body} <- [{"first", "/stop is literal\nα"}, {"second", "next guidance"}] do
+        %{
+          "key" => key,
+          "environment" => AtlasBus.environment(),
+          "worker" => "page-worker",
+          "turn" => "page-turn",
+          "attempt" => "1",
+          "execution" => "execution",
+          "actor" => "viewer",
+          "body" => body,
+          "projection" => %{"proven" => "recorded", "uncertain" => true, "closures" => []},
+          "receipt_count" => 0
+        }
+      end
+
+    {page, target} =
+      fixture(%{"facts" => interactions, "after_position" => 2, "more" => false})
+
+    assert {:ok, projected} = project(page, target)
+    assert {:ok, projection} = AtlasBFFContract.Console.compile(projected)
+
+    current = %{
+      path: WorkerPages.path(target),
+      context: "browse",
+      generation: 0,
+      on: "guidance-history",
+      row: "first"
+    }
+
+    assert {:ok, bindings} = AtlasBFFContract.Console.Projection.bindings(projection, current)
+    assert bindings["Down"]["props"]["operation"]["name"] == "list_next"
+    assert bindings["Up"]["props"]["operation"]["name"] == "list_previous"
+
+    assert Enum.find(page.blocks, &(&1["id"] == "guidance-history"))["props"]["rows"] ==
+             Enum.map(interactions, fn interaction ->
+               %{
+                 "id" => interaction["key"],
+                 "label" => interaction["body"],
+                 "detail" => "viewer · recorded (uncertain)",
+                 "to" => WorkerPages.path(target)
+               }
+             end)
+
+    assert {:ok, event} = AtlasBFFContract.Console.Projection.capture(projection, "e", current)
+    assert {:ok, action} = AtlasBFFContract.Console.Projection.resolve(projection, event, current)
+
+    assert action["props"]["operation"] == %{
+             "name" => "worker_receipts",
+             "execution" => target,
+             "interaction_source" => "selected_history"
+           }
+
+    assert {:error, :stale_or_unavailable_action} =
+             AtlasBFFContract.Console.Projection.resolve(projection, event, %{
+               current
+               | row: "second"
+             })
+
+    details = Enum.find(page.blocks, &(&1["id"] == "guidance-details"))
+
+    for interaction <- interactions do
+      assert Enum.any?(details["props"]["fields"], &(&1["value"] == interaction["body"]))
+    end
+
+    assert hd(page.blocks)["props"]["actions"] == []
+    refute Enum.any?(page.console_actions, &(&1.operation["name"] == "worker_output_subscribe"))
   end
 
   test "history continuation fixes the exact execution and correlated durable cursor" do

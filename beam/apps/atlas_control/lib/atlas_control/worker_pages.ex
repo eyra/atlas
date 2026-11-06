@@ -124,31 +124,64 @@ defmodule AtlasControl.WorkerPages do
     {history, history_actions} =
       case call("worker_history", %{"execution" => execution}, description, actor, read) do
         {:ok, data} ->
-          fields =
-            for interaction <- data["interactions"] do
+          {rows, fields} =
+            Enum.map_reduce(data["interactions"], [], fn interaction, fields ->
               projection = interaction["projection"]
 
               status =
                 projection["proven"] <> if(projection["uncertain"], do: " (uncertain)", else: "")
 
-              Blocks.pair(
-                label: "#{interaction["actor"]} · #{status}",
-                value: interaction["body"]
-              )
-            end
+              row =
+                Blocks.row(
+                  id: interaction["key"],
+                  label: interaction["body"],
+                  detail: "#{interaction["actor"]} · #{status}",
+                  to: path(execution)
+                )
+
+              body =
+                Blocks.pair(
+                  label: "#{interaction["key"]} · #{interaction["actor"]} · #{status}",
+                  value: interaction["body"]
+                )
+
+              evidence =
+                Blocks.pair(
+                  label: "#{interaction["key"]} · Recorded evidence",
+                  value: JSON.encode!(Map.delete(interaction, "body"))
+                )
+
+              {row, [evidence, body | fields]}
+            end)
 
           note =
             if data["more"],
               do: "First history page; full bounded history is available through worker_history.",
               else: "Durable guidance"
 
-          {Blocks.item(title: note, fields: fields), history_actions(execution, data)}
+          history = [
+            {"guidance-history",
+             Blocks.list(title: note, rows: rows, empty: "No durable guidance is recorded.")}
+          ]
+
+          details =
+            if fields == [],
+              do: [],
+              else: [
+                {"guidance-details",
+                 Blocks.item(title: "Guidance details", fields: Enum.reverse(fields))}
+              ]
+
+          {history ++ details, history_actions(execution, data)}
 
         {:error, reason} ->
-          {Blocks.item(
-             title: "History unavailable",
-             fields: [Blocks.pair(label: "Reason", value: reason)]
-           ), []}
+          {[
+             {"guidance-history",
+              Blocks.item(
+                title: "History unavailable",
+                fields: [Blocks.pair(label: "Reason", value: reason)]
+              )}
+           ], []}
       end
 
     {output, output_actions} = output(view, execution)
@@ -156,11 +189,7 @@ defmodule AtlasControl.WorkerPages do
     page(
       "Worker #{execution["worker"]["worker"]}",
       "/workers",
-      [
-        {"worker", content},
-        {"guidance-history", history},
-        {"worker-output", output}
-      ],
+      [{"worker", content}] ++ history ++ [{"worker-output", output}],
       [
         Blocks.part("worker", "worker", title: "Worker", role: "main"),
         Blocks.part("guidance-history", "worker-output", title: "Conversation", role: "related")
@@ -175,6 +204,11 @@ defmodule AtlasControl.WorkerPages do
         "name" => "worker_receipts",
         "execution" => execution,
         "interaction_source" => "selected_history"
+      })
+      |> Map.merge(%{
+        available: data["interactions"] != [],
+        reason:
+          if(data["interactions"] == [], do: "No correlated guidance is available to select.")
       })
 
     if data["more"] do
