@@ -88,6 +88,7 @@ defmodule AtlasBFF.Schema do
         only: [
           version: 1,
           protocol: 1,
+          models_from: 1,
           defblock: 2,
           defmodel: 2,
           defmarkup: 2,
@@ -109,7 +110,29 @@ defmodule AtlasBFF.Schema do
 
   @doc "Explicit wire descriptors as plain data; see `AtlasBFF.Wire`."
   defmacro protocol(descriptors) do
-    quote do: @spec_protocol(unquote(descriptors))
+    quote do
+      @spec_protocol (Module.get_attribute(__MODULE__, :spec_protocol) || []) ++
+                       unquote(descriptors)
+    end
+  end
+
+  @doc "Reuse models from another compiled data contract; duplicates remain compile errors."
+  defmacro models_from(contract) do
+    contract = Macro.expand(contract, __CALLER__)
+    line = __CALLER__.line
+
+    quote do
+      Code.ensure_compiled!(unquote(contract))
+
+      for model <- unquote(contract).__schema__().models do
+        @spec_entries %{
+          type: :model,
+          name: model.name,
+          line: unquote(line),
+          fields: Enum.map(model.fields, &Map.put(&1, :line, unquote(line)))
+        }
+      end
+    end
   end
 
   defmacro defblock(name, do: body), do: entry(:block, name, body, __CALLER__.line)
