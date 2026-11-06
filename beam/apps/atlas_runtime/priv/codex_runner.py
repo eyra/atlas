@@ -14,6 +14,24 @@ def emit(event):
     print(json.dumps(event), flush=True)
 
 
+def signal_group(process, sig):
+    try:
+        try:
+            os.killpg(process.pid, sig)
+        except PermissionError as error:
+            # macOS can deny a group signal while its last member is exiting,
+            # even before poll() can reap it. Bound the wait for our own leader,
+            # then still signal any surviving descendants in the same group.
+            # A live leader or a second denial remains a real permission error.
+            try:
+                process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                raise error
+            os.killpg(process.pid, sig)
+    except ProcessLookupError:
+        pass
+
+
 def main():
     executable, workspace, folder, goal, sandbox, session = sys.argv[1:]
     if sandbox not in ('read-only', 'workspace-write'):
@@ -59,10 +77,7 @@ def main():
                         selector.unregister(sys.stdin)
                         stopped = True
                         deadline = time.monotonic() + 3
-                        try:
-                            os.killpg(process.pid, signal.SIGINT)
-                        except ProcessLookupError:
-                            pass
+                        signal_group(process, signal.SIGINT)
                     else:
                         data = os.read(process.stdout.fileno(), 65536)
                         if not data:
@@ -80,10 +95,7 @@ def main():
                             if len(partial) > 1048576:
                                 raise ValueError('Codex event exceeds 1 MiB')
                 if deadline is not None and time.monotonic() >= deadline:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    signal_group(process, signal.SIGKILL)
                     deadline = None
                 if not stdout_open:
                     if partial.strip():
@@ -93,13 +105,10 @@ def main():
                     try:
                         code = process.wait(timeout=3)
                     except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        signal_group(process, signal.SIGKILL)
                         code = process.wait()
                     # A finished leader can leave descendants with redirected output.
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    signal_group(process, signal.SIGKILL)
                     if session and not session_seen and not stopped:
                         raise ValueError('Codex resume ended without confirming its session')
                     emit({'type': 'runtime.process_ended', 'exit_code': code, 'stopped': stopped})
@@ -107,10 +116,7 @@ def main():
     finally:
         selector.close()
         if process is not None and process.returncode is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            signal_group(process, signal.SIGKILL)
             process.wait()
 
 

@@ -110,4 +110,6 @@ Independent saved-resume verification passed: real Codex workspace-write after r
 
 2026-11-06: closed the native write-denial evidence gap with the model-free verification above: 2 checks passed against official Codex 0.166.0, with real shell stderr/exit and exact on-disk bytes for both modes. The existing Codex adapter suite also passed all 9 tests.
 
+2026-11-06: fixed a macOS cleanup exit race. Signalling an owned group whose last member is exiting/unreaped can return EPERM before a nonblocking poll can reap the leader. The runner now waits up to its existing three-second cleanup bound for that owned leader and retries the same group signal once, preserving descendant cleanup. A live leader beyond the bound or a second permission denial still fails; permission errors are not ignored. This preserves the original protocol/session failure rather than replacing it with cleanup EPERM. Focused checks from `beam/apps/atlas_runtime`: `python3 -B test/codex_runner_test.py -v` (3 real-process regressions) and `mix test test/codex_test.exs` (9 adapter tests), all passed. Direct runner smoke confirmed clean normal completion and explicit cancellation, with recorded native/sleep PIDs absent and empty helper stderr.
+
 <sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>
