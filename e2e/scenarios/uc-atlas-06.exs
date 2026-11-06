@@ -55,7 +55,7 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
       atlas_json(i, ["set", "AS-#{key}", "deadline=2020-01-02 12:00", "--cause", "due then"])
 
     got["values"]["deadline"] == "2020-01-02T12:00:00Z" || raise inspect(got["values"])
-    by_hint(t1, "Late · deadline 2020-01-02 12:00", at)
+    by_hint(t1, ~r/AS-#{key}\s+#{key}\s+Late · deadline/, at)
 
     {text, 0, _} = atlas(i, ["get", key])
     text =~ "Deadline: 2020-01-02 12:00 UTC · late" || raise text
@@ -63,8 +63,9 @@ scenario "UC-Atlas-06: Hand a scene to an agent", fn %{t1: t1, t2: t2, instance:
 
   step "A deadline still to come is not late; one that is no time is refused", fn ->
     key = Process.get(:uc06)
-    {_, at} = atlas_json(i, ["set", "AS-#{key}", "deadline=2099-01-02T12:00:00Z"])
-    by_hint(t1, "Deadline 2099-01-02 12:00", at)
+    {got, at} = atlas_json(i, ["set", "AS-#{key}", "deadline=2099-01-02T12:00:00Z"])
+    got["values"]["deadline"] == "2099-01-02T12:00:00Z" || raise inspect(got["values"])
+    by_hint(t1, ~r/AS-#{key}\s+#{key}\s+Deadline 2099/, at)
     refute_see(t1, "Late ·")
 
     {%{"refused" => [why | _]}, _} =
