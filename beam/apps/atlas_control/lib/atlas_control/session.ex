@@ -908,11 +908,11 @@ defmodule AtlasControl.Session do
 
   defp compact_worker_reply(value), do: value
 
-  defp ask(kind, content), do: ask(kind, content, @read_attempts)
+  defp ask(kind, content), do: ask(kind, content, @read_attempts, read_timeout())
 
-  defp ask(_kind, _content, 0), do: %{"error" => "State did not answer"}
+  defp ask(_kind, _content, 0, _timeout), do: %{"error" => "State did not answer"}
 
-  defp ask(kind, content, attempts) do
+  defp ask(kind, content, attempts, timeout) do
     envelope = Envelope.new("read", kind)
     :ok = AtlasBus.send(envelope, content)
     id = envelope.id
@@ -920,12 +920,40 @@ defmodule AtlasControl.Session do
     receive do
       {:atlas_bus, %Envelope{id: ^id, class: "answer"}, answer} -> answer
     after
-      read_timeout() -> ask(kind, content, attempts - 1)
+      timeout -> ask(kind, content, attempts - 1, timeout)
     end
   end
 
   # How long a read waits for State's answer before it asks again (a setting for tests).
   defp read_timeout, do: Application.get_env(:atlas_control, :read_timeout_ms, 2_000)
+
+  defp page_answers(route, description) do
+    reads = Pages.reads(route, description)
+
+    open_work? =
+      case route do
+        {:list, kind} -> Pages.open_work?(description, kind)
+        _ -> false
+      end
+
+    if open_work? and reads != [] and Enum.all?(reads, fn {_, content} -> content == %{} end) do
+      kinds = Enum.map(reads, &elem(&1, 0))
+
+      # Keep the aggregate wait budget of the separate collection reads.
+      case ask("_page", %{"kinds" => kinds}, @read_attempts, read_timeout() * length(reads)) do
+        %{"answers" => answers} when is_list(answers) and length(answers) == length(reads) ->
+          answers
+
+        %{"error" => _} = error ->
+          List.duplicate(error, length(reads))
+
+        _ ->
+          List.duplicate(%{"error" => "State returned invalid page reads"}, length(reads))
+      end
+    else
+      Enum.map(reads, fn {kind, content} -> ask(kind, content) end)
+    end
+  end
 
   defp show(state, route, reason, position, refused \\ nil, welcome \\ nil) do
     route = start(route, state)
@@ -945,8 +973,7 @@ defmodule AtlasControl.Session do
           state
       end
 
-    answers =
-      Enum.map(Pages.reads(route, state.description), fn {kind, content} -> ask(kind, content) end)
+    answers = page_answers(route, state.description)
 
     state = count(state, route, answers)
 
