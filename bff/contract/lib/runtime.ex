@@ -22,6 +22,66 @@ defmodule AtlasBFFContract.Runtime do
     field :json, :boolean
   end
 
+  defmodel :runtime_machine_boot do
+    field :environment, :string, required: true
+    field :machine, :string, required: true
+    field :configuration, :string, required: true
+    field :directory, :string, required: true
+    field :instance, :string, required: true
+  end
+
+  defmodel :runtime_machine_boot_receipt do
+    field :target, :runtime_machine, required: true
+    field :instance, :string, required: true
+    field :pid, :integer, required: true
+  end
+
+  protocol(
+    for action <- [:start, :stop] do
+      %{
+        name: String.to_atom("runtime_machine_#{action}"),
+        channel: :runtime_machine,
+        direction: :request,
+        cli: [Atom.to_string(action)],
+        request: %{
+          select: %{
+            "op" => "machine_#{action}",
+            "channel" => "control",
+            "version" => @wire_version
+          },
+          required: %{"id" => :string, "target" => :runtime_machine}
+        },
+        replies: [
+          %{
+            name: :result,
+            select: %{
+              "op" => "machine_#{action}_result",
+              "channel" => "control",
+              "version" => @wire_version
+            },
+            required: %{
+              "id" => :string,
+              "target" => :runtime_machine,
+              "status" => :runtime_machine_status
+            },
+            effect: :complete
+          },
+          %{
+            name: :error,
+            select: %{
+              "op" => "machine_#{action}_error",
+              "channel" => "control",
+              "version" => @wire_version
+            },
+            required: %{"id" => :string, "error" => :runtime_error},
+            optional: %{"target" => :runtime_machine},
+            effect: :error
+          }
+        ]
+      }
+    end
+  )
+
   defmodel :runtime_machine_capabilities do
     field :local_status, :boolean, required: true
     field :local_start, :boolean, required: true

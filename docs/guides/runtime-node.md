@@ -47,7 +47,7 @@ the launching environment. They need no keychain or Fly. The e2e runner uses thi
 UC-07's turns run in a separate OS process; restarting the core cuts the link and
 registrations return. Restarting Runtime ends orphaned turns and starts new ones.
 
-Readonly machine status (IS127 first increment): `atlas runtime status --env test
+Readonly machine status (IS135): `atlas runtime status --env test
 --machine macbook --json` inspects the selected local node. The existing
 `runtime-status` alias derives an omitted machine from Runtime configuration.
 Missing identity fails explicitly. The shared DSL generates options, machine DTO,
@@ -61,11 +61,41 @@ exact target, evidence basis and optional PID/log. A live legacy PID is unverifi
 because PID existence cannot establish Runtime role/instance/start ownership or
 health. Wrong environment/machine is explicit; no worker identity is invented.
 
-Only generated local status is supported here. Its lifecycle and remote capability
-flags remain false. IS127 stays open for verified lifecycle and authorized Control
-availability. New stop must require reviewed exact process ownership; status never
-uses the old PID/group signal path. No new listener, guidance or model is added.
-Successful diagnostic exit means a report was produced, not that Runtime is ready.
+Verified local lifecycle (IS136) uses `atlas runtime start|stop --env test
+--machine macbook --json` through the same generated machine contract. Bare
+`atlas runtime` remains the start alias; `runtime-stop` remains the stop alias.
+These are explicit same-user local operations. Machine lifecycle never attaches a
+viewer or selects a worker. Remote status remains unsupported; IS127 stays open
+for authorized availability through existing Control. Self-reported client identity
+does not grant remote access.
+
+Start binds the canonical checkout, instance directory, configuration path,
+environment, machine and fresh instance nonce in the Runtime boot arguments and
+retained record. OS UID, process birth, exact role arguments and retained PID must
+agree before a repeated start returns the existing node or stop sends SIGTERM.
+Lifecycle requests serialize with an exclusive instance lock. PID-only legacy,
+stale/reused, out-of-range, wrong-role and mismatched records refuse actions.
+Stop never signals a process group or escalates to SIGKILL. Each exact process is
+rechecked immediately before its individual signal; exit must be confirmed before
+its PID record is removed. This is same-user OS process management, not an atomic
+kernel identity-and-signal primitive or protection against a malicious same-user
+process modifying records concurrently.
+
+A startup receipt confirms that the existing IS91 node started Runtime and Bus
+without State/Flow/Control. Owned process status does not assert Bus connectivity,
+worker health or model readiness. A partial startup, unknown OS identity or
+unconfirmed exit fails visibly and preserves records; there is no blind cleanup
+or PID-only recovery. The lock is never cleared by guessing whether its PID is
+alive. Inspect the retained evidence before manual recovery. Logs, configuration,
+startup receipts and completed process birth records survive stop and restart;
+a new start archives the prior stopped instance record.
+
+Status still performs only reads. The local lifecycle capability flags describe
+supported actions for the observed/configured instance, not credential or remote
+availability. No credentials are probed by status. No listener, guidance pipeline
+or model is added. Successful diagnostic exit means a report was produced, not
+that Runtime is ready. Contract codecs must be built explicitly before any CLI
+operation; start uses the existing Mix node boot, which can compile that checkout.
 
 Delivery remains the Bus's best effort contract: reads/facts retry and reconcile from
 State. Machine leases and Flow failover across machines remain follow-up work; this

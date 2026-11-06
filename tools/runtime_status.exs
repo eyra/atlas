@@ -2,12 +2,24 @@ defmodule AtlasRuntimeStatusCLI do
   @moduledoc false
   alias AtlasBFFContract.Runtime.MachineProtocol, as: Wire
 
-  def run([root, environment, settings | argv]) do
+  def run([root, environment, settings, "--operation", command, client | argv]) do
+    execute(root, environment, settings, client, command, argv)
+  end
+
+  def run([root, environment, settings | argv]),
+    do: execute(root, environment, settings, "unused", "status", argv)
+
+  defp execute(root, environment, settings, client, command, argv) do
     id = Integer.to_string(System.unique_integer([:positive]))
+
+    operation =
+      Enum.find_value(Wire.commands(), :runtime_machine_status, fn %{name: name, words: words} ->
+        if words == [command], do: name
+      end)
 
     case Wire.options(:runtime_machine_status_options, argv) do
       {:invalid, why} ->
-        error(id, environment, "invalid_options", why, "--json" in argv)
+        error(id, environment, "invalid_options", why, "--json" in argv, operation)
 
       {:ok, options} ->
         machine = options["machine"] || configured_machine(settings)
@@ -15,17 +27,27 @@ defmodule AtlasRuntimeStatusCLI do
         if is_binary(machine) and machine != "" do
           target = %{environment: environment, machine: machine}
 
-          {:ok, :runtime_machine_status, request} =
-            Wire.cli(["status"], %{id: id, target: target})
+          case Wire.cli([command], %{id: id, target: target}) do
+            {:ok, operation, request} ->
+              observe(root, client, environment, operation, request, options["json"] == true)
 
-          observe(root, environment, request, options["json"] == true)
+            {:invalid, _} ->
+              error(
+                id,
+                environment,
+                "unsupported",
+                "operation is not in the built Runtime contract",
+                options["json"] == true
+              )
+          end
         else
           error(
             id,
             environment,
             "machine_required",
             "machine identity unknown; supply --machine or a matching Runtime configuration",
-            options["json"] == true
+            options["json"] == true,
+            operation
           )
         end
     end
@@ -39,15 +61,18 @@ defmodule AtlasRuntimeStatusCLI do
          else: (_ -> nil)
   end
 
-  defp observe(root, environment, request, json?) do
+  defp observe(root, client, environment, operation, request, json?) do
     {bytes, code} =
       System.cmd(
         System.find_executable("python3"),
         [
           Path.join(root, "tools/runtime.py"),
-          "_runtime-status-observe",
+          if(operation == :runtime_machine_status,
+            do: "_runtime-status-observe",
+            else: "_runtime-machine-operate"
+          ),
           root,
-          "unused",
+          client,
           environment,
           JSON.encode!(request)
         ],
@@ -58,8 +83,23 @@ defmodule AtlasRuntimeStatusCLI do
       with {:ok, %{} = status} <- JSON.decode(bytes),
            :ok <- validate_status(status),
            true <- status["target"] == request["target"] do
+        if operation != :runtime_machine_status and status["state"] not in ["owned", "stopped"] do
+          reply =
+            Wire.reply(operation, :error, %{
+              id: request["id"],
+              target: request["target"],
+              error: %{code: status["basis"], message: status["message"], retryable: false}
+            })
+
+          if json?,
+            do: IO.puts(JSON.encode!(reply)),
+            else: IO.puts(:stderr, "Runtime #{environment}: refused; #{status["message"]}")
+
+          System.halt(2)
+        end
+
         reply =
-          Wire.reply(:runtime_machine_status, :result, %{
+          Wire.reply(operation, :result, %{
             id: request["id"],
             target: request["target"],
             status: status
@@ -80,7 +120,9 @@ defmodule AtlasRuntimeStatusCLI do
             environment,
             "invalid_diagnostic",
             "local status handler returned malformed or mismatched diagnostics",
-            json?
+            json?,
+            operation,
+            request["target"]
           )
       end
     else
@@ -88,8 +130,10 @@ defmodule AtlasRuntimeStatusCLI do
         request["id"],
         environment,
         "diagnostic_unavailable",
-        "local status handler unavailable; no Runtime was started",
-        json?
+        "local handler unavailable; lifecycle outcome unconfirmed, inspect retained records",
+        json?,
+        operation,
+        request["target"]
       )
     end
   end
@@ -100,10 +144,19 @@ defmodule AtlasRuntimeStatusCLI do
     ArgumentError -> :invalid
   end
 
-  defp error(id, environment, code, message, json?) do
+  defp error(
+         id,
+         environment,
+         code,
+         message,
+         json?,
+         operation \\ :runtime_machine_status,
+         target \\ nil
+       ) do
     reply =
-      Wire.reply(:runtime_machine_status, :error, %{
+      Wire.reply(operation, :error, %{
         id: id,
+        target: target,
         error: %{code: code, message: message, retryable: false}
       })
 

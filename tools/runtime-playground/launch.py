@@ -46,6 +46,30 @@ def parse_pid(record):
     return validate_pid(int(digits, 10))
 
 
+def process_state(pid):
+    """Exact birth and OS terminal state; no argument parsing or signalling."""
+    validate_pid(pid)
+    if sys.platform == 'linux':
+        proc = Path('/proc')/str(pid)
+        fields = (proc/'stat').read_text().rsplit(')', 1)[1].split()
+        return dict(pid=pid, start=[Path('/proc/sys/kernel/random/boot_id').read_text().strip(), fields[19]], uid=proc.stat().st_uid, terminal=fields[0] in ('Z', 'X'))
+    if sys.platform != 'darwin':
+        raise ValueError('process identity inspection unsupported on this OS')
+    import errno
+    library = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+    library.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+    library.proc_pidinfo.restype = ctypes.c_int
+    data = ctypes.create_string_buffer(136)
+    ctypes.set_errno(0)
+    if library.proc_pidinfo(pid, 3, 0, data, 136) != 136:
+        if ctypes.get_errno() == errno.ESRCH:
+            raise ProcessLookupError(errno.ESRCH, 'process no longer exists')
+        raise ValueError('retained process state unavailable')
+    if struct.unpack_from('=I', data.raw, 12)[0] != pid:
+        raise ValueError('OS process PID does not match requested identity')
+    return dict(pid=pid, start=list(struct.unpack_from('=QQ', data.raw, 120)), uid=struct.unpack_from('=I', data.raw, 20)[0], terminal=struct.unpack_from('=I', data.raw, 4)[0] == 5)
+
+
 def process_identity(pid):
     """Read OS argv boundaries and process birth identity; never parse ps prose."""
     validate_pid(pid)
