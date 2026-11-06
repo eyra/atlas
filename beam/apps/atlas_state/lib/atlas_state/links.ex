@@ -20,18 +20,31 @@ defmodule AtlasState.Links do
     # DETS hashes the complete {kind, key, relation} key. Matching a partial
     # tuple scans the entire history table for every returned fact. Keep just
     # the relation names indexed in memory, rebuilt from the unchanged disk file.
-    index = :ets.new(__MODULE__, [:bag, :protected])
+    try do
+      index = :ets.new(__MODULE__, [:bag, :protected])
 
-    :dets.foldl(
-      fn {{kind, key, relation}, _entries}, :ok ->
-        true = :ets.insert(index, {{kind, key}, relation})
-        :ok
-      end,
-      :ok,
-      table
-    )
+      try do
+        :ok =
+          :dets.foldl(
+            fn {{kind, key, relation}, _entries}, :ok ->
+              true = :ets.insert(index, {{kind, key}, relation})
+              :ok
+            end,
+            :ok,
+            table
+          )
 
-    %{disk: table, index: index}
+        %{disk: table, index: index}
+      catch
+        kind, reason ->
+          :ets.delete(index)
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      end
+    catch
+      kind, reason ->
+        :dets.close(table)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
   end
 
   def close(%{disk: disk, index: index}) do
