@@ -1,5 +1,11 @@
 defmodule AtlasControl.WorkerPages do
-  @moduledoc "Worker content uses ordinary BFF blocks; Console owns its renderer and shell."
+  @moduledoc """
+  Worker content uses ordinary BFF blocks; Console owns its renderer and shell.
+  The Worker and Conversation parts retain stable boundaries. Internal Console
+  declarations fix the execution and keep durable history separate from output.
+  An optional `:output_capability` render callback supplies authorized output
+  availability; absent capability never implies an available stream.
+  """
   alias AtlasControl.{Pages, Workers}
   require AtlasControl.Blocks, as: Blocks
 
@@ -51,6 +57,15 @@ defmodule AtlasControl.WorkerPages do
         if mode == :worker_guidance do
           guidance(view, execution, form)
         else
+          view =
+            case form[:output_capability] do
+              capability when is_function(capability, 1) ->
+                Map.put(view, "output", capability.(execution))
+
+              _ ->
+                view
+            end
+
           detail(view, execution, description, actor, read)
         end
 
@@ -106,7 +121,7 @@ defmodule AtlasControl.WorkerPages do
         actions: actions
       )
 
-    history =
+    {history, history_actions} =
       case call("worker_history", %{"execution" => execution}, description, actor, read) do
         {:ok, data} ->
           fields =
@@ -127,19 +142,99 @@ defmodule AtlasControl.WorkerPages do
               do: "First history page; full bounded history is available through worker_history.",
               else: "Durable guidance"
 
-          Blocks.item(title: note, fields: fields)
+          {Blocks.item(title: note, fields: fields), history_actions(execution, data)}
 
         {:error, reason} ->
-          Blocks.item(
-            title: "History unavailable",
-            fields: [Blocks.pair(label: "Reason", value: reason)]
-          )
+          {Blocks.item(
+             title: "History unavailable",
+             fields: [Blocks.pair(label: "Reason", value: reason)]
+           ), []}
       end
 
-    page("Worker #{execution["worker"]["worker"]}", "/workers", [
-      {"worker", content},
-      {"guidance-history", history}
-    ])
+    {output, output_actions} = output(view, execution)
+
+    page(
+      "Worker #{execution["worker"]["worker"]}",
+      "/workers",
+      [
+        {"worker", content},
+        {"guidance-history", history},
+        {"worker-output", output}
+      ],
+      [
+        Blocks.part("worker", "worker", title: "Worker", role: "main"),
+        Blocks.part("guidance-history", "worker-output", title: "Conversation", role: "related")
+      ]
+    )
+    |> Map.put(:console_actions, history_actions ++ output_actions)
+  end
+
+  defp history_actions(execution, data) do
+    receipts =
+      worker_action("Inspect selected guidance receipts", "e", "guidance-history", %{
+        "name" => "worker_receipts",
+        "execution" => execution,
+        "interaction_source" => "selected_history"
+      })
+
+    if data["more"] do
+      [
+        worker_action("More guidance history", "h", "guidance-history", %{
+          "name" => "worker_history",
+          "execution" => execution,
+          "cursor" => data["cursor"]
+        }),
+        receipts
+      ]
+    else
+      [receipts]
+    end
+  end
+
+  defp output(view, execution) do
+    case view["output"] do
+      %{"available" => true} ->
+        {Blocks.item(
+           title: "Worker output",
+           fields: [
+             Blocks.pair(
+               label: "Ephemeral output",
+               value: "Output is available for this exact execution; connect to read it."
+             )
+           ]
+         ),
+         [
+           worker_action("Connect or retry output", "o", "worker-output", %{
+             "name" => "worker_output_subscribe",
+             "execution" => execution
+           })
+         ]}
+
+      capability ->
+        reason = if is_map(capability), do: capability["reason"]
+
+        {Blocks.item(
+           title: "Output unavailable",
+           fields: [
+             Blocks.pair(
+               label: "Reason",
+               value: reason || "Output support has not been established for this execution."
+             )
+           ]
+         ), []}
+    end
+  end
+
+  defp worker_action(label, key, on, operation) do
+    %{
+      label: label,
+      keys: [key],
+      operation: operation,
+      on: on,
+      row: nil,
+      available: true,
+      reason: nil
+    }
   end
 
   defp guidance(view, execution, form) do
@@ -221,7 +316,7 @@ defmodule AtlasControl.WorkerPages do
   defp text(""), do: "—"
   defp text(value), do: to_string(value)
 
-  defp page(title, back, blocks) do
+  defp page(title, back, blocks, markup \\ []) do
     content =
       Enum.with_index(blocks, fn block, index ->
         case block do
@@ -230,6 +325,6 @@ defmodule AtlasControl.WorkerPages do
         end
       end)
 
-    Map.merge(%{title: title, back: back}, Blocks.view_model(content, []))
+    Map.merge(%{title: title, back: back}, Blocks.view_model(content, markup))
   end
 end

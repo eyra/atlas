@@ -48,6 +48,9 @@ defmodule AtlasControl.Session do
        route: :home,
        form: %{},
        pending: %{},
+       output: nil,
+       output_connection: false,
+       output_idle: nil,
        by: "agent",
        by_kind: nil,
        # What is assigned to the client, for the header of every page (`start.assigned`):
@@ -60,17 +63,30 @@ defmodule AtlasControl.Session do
 
   @impl true
   def handle_info(:go, state) do
-    :ok = :inet.setopts(state.socket, active: true)
+    :ok = :inet.setopts(state.socket, active: :once)
     {:noreply, state}
   end
 
   def handle_info({:tcp, _socket, line}, state) do
-    case JSON.decode(line) do
-      {:ok, %{"op" => op} = message} ->
-        handle_op(op, message, state)
+    result =
+      case JSON.decode(line) do
+        {:ok, %{"op" => op} = message} ->
+          handle_op(op, message, state)
 
-      _ ->
-        {:noreply, notice(state, "error", "Control could not read: #{String.slice(line, 0, 80)}")}
+        _ ->
+          {:noreply,
+           notice(state, "error", "Control could not read: #{String.slice(line, 0, 80)}")}
+      end
+
+    case result do
+      {:noreply, next} ->
+        case :inet.setopts(next.socket, active: :once) do
+          :ok -> {:noreply, next}
+          {:error, _} -> {:stop, :normal, next}
+        end
+
+      stopped ->
+        stopped
     end
   end
 
@@ -78,6 +94,17 @@ defmodule AtlasControl.Session do
 
   def handle_info({:tcp_closed, _}, state), do: {:stop, :normal, state}
   def handle_info({:tcp_error, _, _}, state), do: {:stop, :normal, state}
+
+  def handle_info({:output_idle, marker}, %{output_idle: {_, marker}} = state),
+    do: {:stop, :normal, state}
+
+  def handle_info({:output_idle, _}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:atlas_bus, %Envelope{class: "stored"}, _},
+        %{output_connection: true} = state
+      ),
+      do: {:noreply, state}
 
   def handle_info({:atlas_bus, %Envelope{class: class, id: id} = envelope, content}, state)
       when is_map_key(state.pending, id) and class in ["stored", "refused"] do
@@ -169,6 +196,10 @@ defmodule AtlasControl.Session do
   # A client says which contract version it implements. One older than Control's cannot
   # render what Control sends now: it is told so and closed, rather than shown a page it
   # breaks on. A newer one shows what it knows, and the rest as fallbacks.
+  defp handle_op(op, _message, %{output_connection: true} = state)
+       when op not in ~w(worker_output_subscribe worker_output_next worker_output_unsubscribe),
+       do: bye(state, "This connection is reserved for worker output.")
+
   defp handle_op("hello", message, state) do
     environment = AtlasBus.environment()
     version = AtlasControl.Blocks.version()
@@ -233,6 +264,80 @@ defmodule AtlasControl.Session do
     do: {:noreply, notice(state, "error", "Say hello first.")}
 
   defp handle_op(op, message, state)
+       when op in ~w(worker_output_subscribe worker_output_next worker_output_unsubscribe) do
+    alias AtlasBFFContract.Workers.Protocol, as: Wire
+
+    case Wire.decode_request(message) do
+      {:ok, name, request} ->
+        # Output reconciliation reads authority explicitly; State hints must not queue behind a slow viewer.
+        Enum.each(state.listening, &Registry.unregister(AtlasBus.Listeners, &1))
+
+        :ok =
+          :inet.setopts(state.socket,
+            send_timeout: 1_000,
+            send_timeout_close: true,
+            packet_size: 262_144
+          )
+
+        inspect = fn execution ->
+          worker_call(state, "worker_inspect", %{"execution" => execution})
+        end
+
+        {reply, output} =
+          case AtlasControl.Output.handle(op, request, state.output, inspect) do
+            {:ok, result, output} ->
+              props = result |> Map.put("id", request["id"]) |> compact_worker_reply()
+              {Wire.reply(name, :result, props), output}
+
+            {:error, reason, extra, output} ->
+              props =
+                Map.merge(extra, %{
+                  "id" => request["id"],
+                  "error" => %{
+                    "code" => reason,
+                    "message" => reason,
+                    "retryable" => reason in ~w(output_unavailable state_unavailable viewer_limit)
+                  }
+                })
+
+              {Wire.reply(name, :error, compact_worker_reply(props)), output}
+          end
+
+        if state.output_idle, do: Process.cancel_timer(elem(state.output_idle, 0))
+        marker = make_ref()
+
+        timer =
+          Process.send_after(self(), {:output_idle, marker}, AtlasControl.Output.idle_timeout())
+
+        send_client(state, reply)
+
+        {:noreply,
+         %{
+           state
+           | output: output,
+             output_connection: true,
+             output_idle: {timer, marker},
+             listening: MapSet.new()
+         }}
+
+      _ ->
+        send_client(state, %{
+          "op" => op <> "_error",
+          "channel" => "control",
+          "version" => "0.1.0",
+          "id" => if(is_binary(message["id"]), do: message["id"], else: ""),
+          "error" => %{
+            "code" => "invalid_request",
+            "message" => "Invalid output request",
+            "retryable" => false
+          }
+        })
+
+        {:noreply, state}
+    end
+  end
+
+  defp handle_op(op, message, state)
        when op in ~w(worker_overview worker_inspect worker_submit worker_query worker_history worker_receipts) do
     alias AtlasBFFContract.Workers.Protocol, as: Wire
 
@@ -241,6 +346,15 @@ defmodule AtlasControl.Session do
         {:ok, name, request} ->
           case worker_call(state, op, request) do
             {:ok, result} ->
+              result =
+                if op == "worker_inspect" do
+                  update_in(result, ["view"], fn view ->
+                    Map.put(view, "output", AtlasControl.Output.capability(view["execution"]))
+                  end)
+                else
+                  result
+                end
+
               props = result |> Map.put("id", request["id"]) |> compact_worker_reply()
 
               try do
@@ -991,7 +1105,7 @@ defmodule AtlasControl.Session do
                 description,
                 actor,
                 &ask/2,
-                state.form
+                Map.put(state.form, :output_capability, &AtlasControl.Output.capability/1)
               )
 
             _ ->
@@ -1041,7 +1155,12 @@ defmodule AtlasControl.Session do
     projected =
       if state.surface == "console" do
         with {:ok, shell} <- AtlasControl.Shell.boot(state.description, state.by_kind),
-             {:ok, page} <- AtlasControl.Console.project(message, length(shell["tabs"])),
+             {:ok, page} <-
+               AtlasControl.Console.project(
+                 message,
+                 length(shell["tabs"]),
+                 Map.get(page, :console_actions, [])
+               ),
              do: {:ok, page}
       else
         {:ok, message}

@@ -99,7 +99,7 @@ that registers attempts and reconciles interactions and receipts.
 
 ## Control worker access and guidance
 
-`AtlasBFFContract.Workers` owns six typed Control operations:
+`AtlasBFFContract.Workers` owns these six durable Control operations:
 `worker_overview`, `worker_inspect`, `worker_submit`, `worker_query`,
 `worker_history` and `worker_receipts`. Each request carries `channel: "control"`,
 `version: "0.1.0"` and a correlation `id`; results and errors retain that id.
@@ -166,7 +166,56 @@ Bus and State with a private durable synthetic backend. Its e2e entry point is
 form submission, two-client history, duplicate conflicts, scoped paging, reconnect,
 unsupported adapters and recovery after a real post-commit lost acknowledgement.
 This is an automated test fixture, not a required local Runtime installation.
-The current local-first Runtime prototype does not register executions or reconcile
-guidance; this server contract does not claim that integration or Codex live input.
+Runtime output production is separate from durable guidance acceptance. A readable
+output ring does not establish queued-input support or prove guidance consumption.
+
+## Bounded worker output and conversation actions (IS-Atlas-110 / IS-Atlas-111)
+
+`worker_output_subscribe`, `worker_output_next` and `worker_output_unsubscribe`
+use a separate admitted Control connection with the same typed request correlation.
+The first valid output operation reserves that connection for output; ordinary
+commands and guidance stay on the main connection. Each subscribe and next request
+reauthorizes the exact execution through State before reading Runtime. Missing
+permission never returns a worker view.
+
+Control addresses `request` envelopes of kind `runtime.output` to
+`runtime@<machine>/output`. The authenticated Bus link permits only the designated
+machine endpoint and `control/*` request senders; Runtime answers preserve the
+request ID. Control checks sender, address, environment, ID and typed execution.
+Output creates no State facts, positions or hints.
+
+Each connection owns one active subscription. Aggregate admission is limited to
+128 viewers; process death and unsubscribe release admission. Output connections
+expire after 60 seconds without a valid output request. Runtime reads have a
+2-second deadline and socket writes a 1-second deadline. Active-once socket reads
+bound in-flight dispatch; slow viewers cannot queue output requests in another
+viewer's session. Connection-local authenticated tokens let repeated unsubscribe
+remain harmless even after a newer subscription replaces the old one, without
+retaining an unbounded tombstone list. Reconnect uses a fresh connection/token
+and the last accepted opaque output cursor.
+
+Output cursors never substitute for durable-history cursors. Retention gaps,
+epoch changes and missing rings remain explicit; reset-bearing replies include a
+fresh independently confirmed worker view. Missing output is unavailable, not an
+empty successful stream. `stream.ended` closes only the ephemeral producer, not the
+authoritative worker lifecycle. Detach and reads neither stop workers nor renew
+their leases. Detail-page output availability is probed only after authorization
+against the exact existing ring; overview does not serially probe every Runtime.
+
+Worker pages preserve `worker`, `guidance-history` and `worker-output` boundaries
+with existing Worker/Conversation parts. Server-declared history, selected-history
+receipt and capability-gated output actions remain the authority for operations,
+targets and legends. Clients may advance only a successfully correlated history
+cursor and bind receipts only to a selected record for that same execution; they
+may narrow availability but never enable undeclared operations.
+
+Focused Control output tests cover ownership, revoked access, reset facts, missing
+rings, invalid cursors, correlation and admission cleanup. The private
+`beam/integration/worker_control.exs` path also exercises real TCP Control, Bus,
+State and Runtime output store/endpoint delivery with two viewers, retention gaps,
+forbidden-view suppression, invalid-cursor refusal, continued production after
+unsubscribe, and explicit epoch reset after replacing only the private output
+store/endpoint. This is not a claim that the full Console conversation acceptance
+or deployed behavior has been verified.
 
 <sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>
