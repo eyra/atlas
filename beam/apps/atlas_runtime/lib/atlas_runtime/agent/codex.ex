@@ -30,9 +30,11 @@ defmodule AtlasRuntime.Agent.Codex do
     workspace = settings["workspace"]
     goal = settings["goal"]
     sandbox = Map.get(settings, "sandbox", "read-only")
+    session = settings["session_id"]
 
     if command && python && is_binary(workspace) && File.dir?(workspace) &&
-         is_binary(goal) && String.trim(goal) != "" && sandbox in ["read-only", "workspace-write"] do
+         is_binary(goal) && String.trim(goal) != "" && sandbox in ["read-only", "workspace-write"] &&
+         (is_nil(session) || (is_binary(session) && session != "")) do
       File.mkdir_p!(folder)
       helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
       kept = ~w(HOME USER LOGNAME PATH TMPDIR LANG LC_ALL LC_CTYPE CODEX_HOME)
@@ -45,7 +47,16 @@ defmodule AtlasRuntime.Agent.Codex do
           :binary,
           :exit_status,
           {:line, 65_536},
-          {:args, [helper, command, Path.expand(workspace), Path.expand(folder), goal, sandbox]},
+          {:args,
+           [
+             helper,
+             command,
+             Path.expand(workspace),
+             Path.expand(folder),
+             goal,
+             sandbox,
+             session || ""
+           ]},
           {:env, unset}
         ])
 
@@ -112,6 +123,18 @@ defmodule AtlasRuntime.Agent.Codex do
 
   defp consume(%{"type" => "runtime.process_ended", "exit_code" => code}, state),
     do: %{state | process_exit: code}
+
+  defp consume(
+         %{
+           "type" => "runtime.event",
+           "event" => %{"type" => "thread.started", "thread_id" => id}
+         },
+         state
+       )
+       when is_binary(id) and id != "" do
+    send(state.owner, {:agent, self(), {:session, id}})
+    state
+  end
 
   defp consume(%{"type" => "runtime.event", "event" => event}, state) do
     type = event["type"] || "output"
