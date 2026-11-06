@@ -28,6 +28,11 @@ report; a handshake alone does not prove State/rela health.
 
 `atlas up --env test` is gone: a merge to develop deploys test (CI job `deploy-test`, which runs `fly/deploy.sh test`):
 
+Test deployment waits for the focused generator, contract, core, TUI and agent jobs,
+not the full native end-to-end suite. End-to-end checks still run independently;
+production deployment continues to require them. Data compatibility checks, paired
+deployment serialization and the deployed read-only smoke remain mandatory.
+
 1. On rela's machine, on a copy of its data: does this build's description describe all of it? When it does not, nothing is deployed and test keeps its build; that data needs a migration first (below).
 2. rela, then the core.
 3. A smoke check that reads only (`fly/smoke.sh test`).

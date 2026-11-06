@@ -150,7 +150,7 @@ jobs:
   deploy-test:
     name: Deploy test on Fly, and a smoke check
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    needs: [generator, contract, beam, tui, agent, e2e]
+    needs: [generator, contract, beam, tui, agent]
     runs-on: ubuntu-latest
     env:
       ATLAS_RELA_BIN: ${{ github.workspace }}/.rela-bin
