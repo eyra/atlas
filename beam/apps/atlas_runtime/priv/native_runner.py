@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Own a native CLI process group; parent EOF/stop interrupts it before this helper exits."""
+from datetime import datetime, timezone
 import fcntl
 import json
 import os
@@ -179,6 +180,35 @@ def prepare_repository(executable, scope, repository, created):
     return {**repository, 'base_sha': base}
 
 
+def codex_model(session, workspace, started_at):
+    # Exec JSON omits model identity; only this invocation's native turn context is evidence.
+    if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', session):
+        return None
+    home = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex'))
+    model = None
+    try:
+        for path in (home / 'sessions').glob(f'*/*/*/rollout-*-{session}.jsonl'):
+            with path.open() as records:
+                metadata = json.loads(next(records))
+                if (metadata.get('type') != 'session_meta' or
+                        metadata.get('payload', {}).get('id') != session):
+                    continue
+                for line in records:
+                    record = json.loads(line)
+                    if record.get('type') != 'turn_context':
+                        continue
+                    context = record.get('payload', {})
+                    timestamp = datetime.fromisoformat(record.get('timestamp', '').replace('Z', '+00:00'))
+                    if (timestamp.tzinfo is not None and timestamp >= started_at and
+                            context.get('cwd') == workspace and
+                            isinstance(context.get('model'), str) and context['model'] and
+                            context['model'] != '<synthetic>'):
+                        model = context['model']
+    except (OSError, ValueError, TypeError, AttributeError, StopIteration):
+        return None
+    return model
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == '--permission-scope':
         print(json.dumps(permission_scope(sys.argv[2])))
@@ -193,12 +223,16 @@ def main():
     executable, workspace, folder, goal, sandbox, session, *extra = sys.argv[1:]
     scope = json.loads(extra[0]) if extra else None
     repository = json.loads(extra[1]) if len(extra) >= 2 else None
-    backend = extra[2] if len(extra) == 3 else 'codex'
+    backend = extra[2] if len(extra) >= 3 else 'codex'
+    model = json.loads(extra[3]) if len(extra) >= 4 else None
+    if model is not None and (not isinstance(model, str) or
+                              not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,199}', model)):
+        raise ValueError('Model must be a nonempty identifier of at most 200 characters')
     if backend not in ('codex', 'claude'):
         raise ValueError('Backend must be codex or claude')
     if backend == 'claude' and (sandbox != 'read-only' or scope or repository or session):
         raise ValueError('Claude supports only fresh read-only assignments; no provisioning or continuation')
-    if len(extra) > 3 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
+    if len(extra) > 4 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
         raise ValueError('Sandbox must be read-only or workspace-write')
     if repository is not None and (scope != dedicated_scope(Path(workspace)) or
                                    bool(session) != ('base_sha' in repository)):
@@ -210,25 +244,27 @@ def main():
     else:
         permissions = ['--sandbox', sandbox]
     folder = Path(folder)
+    model_arguments = ['--model', model] if model is not None else []
     if backend == 'claude':
         command = [executable, '--print', '--output-format', 'stream-json', '--verbose',
                    '--restricted', '--safe-mode', '--strict-mcp-config', '--no-chrome',
                    '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep',
                    '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
-                   '--no-session-persistence', '--', goal]
+                   '--no-session-persistence', *model_arguments, '--', goal]
     else:
         command = [executable, 'exec', *permissions, '--disable', 'hooks',
                    '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
                    '--color', 'never', '--cd', workspace]
         if session:
             command.append('resume')
-        command += ['--json', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+        command += [*model_arguments, '--json', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
                     '--output-last-message', str(folder / 'answer.txt'), '--']
         command += [session, goal] if session else [goal]
     session_seen = False
+    native_session = None
 
     def forward(event):
-        nonlocal session_seen
+        nonlocal session_seen, native_session
         if backend == 'claude' and event.get('type') == 'result' and isinstance(event.get('result'), str):
             (folder / 'answer.txt').write_text(event['result'])
         if event.get('type') == 'runtime.repository_prepared':
@@ -239,6 +275,8 @@ def main():
             if not isinstance(identifier, str) or not identifier or (session and identifier != session):
                 raise ValueError('Codex did not confirm the requested session')
             session_seen = True
+            if backend == 'codex':
+                native_session = identifier
         emit({'type': 'runtime.event', 'event': event})
 
     process = None
@@ -259,6 +297,7 @@ def main():
                 command = [sys.executable, str(Path(__file__).resolve()), '--execute-assignment',
                            workspace, json.dumps(scope), json.dumps(repository), json.dumps(created),
                            *command]
+            started_at = datetime.now(timezone.utc)
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=errors, start_new_session=True,
                                        cwd=workspace if backend == 'claude' else None)
@@ -307,6 +346,10 @@ def main():
                     signal_group(process, signal.SIGKILL)
                     if session and not session_seen and not stopped:
                         raise ValueError('Codex resume ended without confirming its session')
+                    if backend == 'codex' and native_session and not stopped:
+                        actual_model = codex_model(native_session, workspace, started_at)
+                        if actual_model:
+                            emit({'type': 'runtime.identity', 'backend': 'codex', 'model': actual_model})
                     emit({'type': 'runtime.process_ended', 'exit_code': code, 'stopped': stopped})
                     return
     finally:

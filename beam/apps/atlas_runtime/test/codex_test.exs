@@ -33,6 +33,27 @@ defmodule AtlasRuntime.CodexTest do
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
   end
 
+  test "requested Codex model and Claude quota-shaped events cannot fabricate evidence", %{
+    tmp_dir: dir
+  } do
+    {:ok, pid} =
+      launch(
+        dir,
+        ~S"""
+        printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1794052800}}'
+        printf '%s\n' '{"type":"turn.completed"}'
+        """,
+        nil,
+        %{"model" => "requested-model"}
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:agent, ^pid, {:ended, _}}, 5_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+    refute_received {:agent, ^pid, {:identity, _, _}}
+    refute_received {:agent, ^pid, {:quota, _}}
+  end
+
   test "normal completion terminates descendants with redirected output", %{tmp_dir: dir} do
     {:ok, pid} =
       launch(dir, ~S"""
