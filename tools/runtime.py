@@ -40,7 +40,7 @@ def observe_status(root, environment, request, inspect_process=None, client_file
             return dict(status, state='unverified', basis='missing_configuration', message='retained PID has no matching machine configuration; ownership unknown')
     except (OSError, ValueError):
         return dict(status, basis='unreadable_configuration', message='local Runtime configuration is unavailable or malformed')
-    if (base/'runtime.processes.json').exists() or (isinstance(settings, dict) and settings.get('bus_link', {}).get('mode') == 'client' and settings.get('runtime', {}).get('agents')):
+    if (base/'runtime.processes.json').exists() or (isinstance(settings, dict) and settings.get('bus_link', {}).get('mode') == 'client'):
         try:
             controller = load_lifecycle(root, environment, target['machine'], client_file)
             controller.configuration_data()

@@ -33,6 +33,19 @@ Durable conversation remains on its existing guidance/evidence boundary. Ephemer
 output uses the separate profile below. Run `mix test` here for executable
 compatibility fixtures; CI runs these with the generated-file check.
 
+## Connection-only local Runtime
+
+The managed `atlas runtime start --env test --machine <machine>` path accepts an
+explicit `runtime.agents: {}` declaration. Missing or non-map declarations remain
+invalid. An empty map starts Bus and Runtime's read-only output endpoint without
+starting the reconciliation Engine or any worker/model turns. Status advertises
+local start only after the same configuration validation used by startup.
+
+Identity, credentials and process ownership checks are unchanged. An owned PID or
+boot receipt does not prove an authenticated Bus connection; verify remote endpoint
+registration separately. Use the matching managed stop command for the owned
+instance, not the standalone `atlas-runtime` daemon.
+
 ## Bounded ephemeral output
 
 `Wire.Runtime.OutputProtocol` defines `runtime_output_snapshot` and
