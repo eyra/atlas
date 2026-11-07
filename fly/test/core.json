@@ -2,6 +2,7 @@
   "env": "test",
   "tui_user": "melle",
   "control": { "host": "::", "port": 7691 },
+  "bus_link": { "host": "::", "port": 7694 },
   "rela": {
     "url": "http://eyra-atlas-test-rela.internal:7690/api/v1",
     "ipv6": true,
