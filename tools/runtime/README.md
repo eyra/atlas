@@ -84,6 +84,34 @@ Real isolated public-CLI proof on 2026-11-07: native Claude turn `turn-b549ec16f
 
 Focused verification passed: 106 ExUnit tests across handoff storage/service, execution events, service, question records and command/native admission; Go CLI checks passed. Owned native group/private temp and both proof daemons were absent afterward; disposable client/build/clone were removed and compact native evidence retained. No product test suite, default installation, default-daemon restart or deployment was performed.
 
+## Explicit coordinator-routed peer correlation
+
+```sh
+atlas-runtime route-peer-question --worker sender --turn "$SENDER_TURN" --question "$QUESTION_ID" --peer-worker peer --peer-turn "$PEER_SOURCE"
+atlas-runtime peer-question --worker sender --turn "$SENDER_TURN" --question "$QUESTION_ID"
+# Dispatch is a separate, explicit coordinator decision:
+atlas-runtime continue --worker peer --turn "$PEER_SOURCE" "$QUESTION_ASSIGNMENT"
+atlas-runtime bind-peer-reply --worker sender --turn "$SENDER_TURN" --question "$QUESTION_ID" --response-turn "$FINISHED_RESPONSE"
+# Delivery is also separate; use the actual peer response:
+atlas-runtime answer --worker sender --turn "$SENDER_TURN" --question "$QUESTION_ID" --answers "$ANSWERS_JSON"
+```
+
+Routing pins one existing sender question to a distinct peer worker and its successfully finished, attributed source turn. First routing and first reply binding require the exact current running sender attempt, an active pending durable question, and matching native-derived pending evidence. Answered, stopped, replaced or restarted senders cannot acquire a new transition. This check is a current-state admission check, not a lease guaranteeing that a native process cannot exit immediately afterward.
+
+Binding accepts only a successfully finished continuation of that exact peer source, with matching worker, backend, native session, model, cwd, sandbox, permissions and repository metadata. New continuations persist `source_turn_id`; older responses without it are refused rather than inferred from a shared session. The response must differ from both sender and source turns. The peer may already be busy on other work: these record commands never start, continue, stop, interrupt, answer or authorize an execution.
+
+Each bounded 16 KiB record at `turns/<sender-turn>/peer-questions/<question-id>.json` stores sender worker/turn/question, `question_ref`, peer worker/source turn, nullable `response_turn_id`, `record_ref`, `created_at`, nullable `bound_at`, revision and fixed `provenance: "coordinator_routed_declaration"`. It references existing question and response evidence, without a second payload store. This provenance is not authenticated native peer delivery or proof that the answer is correct; authenticated/scoped routing remains a separate gate.
+
+Routing creates revision 1; binding makes the sole transition to revision 2. Identical routing repeats return original revision-1 evidence even after binding. Identical binding repeats return the original bound evidence; inspection returns current evidence. Historical repeats survive sender completion, replacement and restart without retargeting or revalidation against later mutable turn state. Changed peer targets or responses conflict.
+
+`peer_question_routed` and `peer_reply_bound` events contain sender/peer identities, response turn when bound, record reference, revision, timestamp and sequence, not copied payloads. They have separate deduplication from native question events. Existing atomic replacement, outbox checkpoint recovery, 256-event retention and explicit cursor gaps apply. Peer publication recovery precedes restart question invalidation. Corrupt authoritative records fail closed; this is not an fsync/power-loss guarantee.
+
+Public-CLI verification on 2026-11-07 used two separately labelled proofs. A synthetic native executable proved unchanged launch/input/answer counts and pending question evidence across routing/binding, conflicting-target refusal, and exact record/event replay after restart: three explicit turns, one explicit answer and twelve events. It does not establish provider acceptance.
+
+The independent real-provider documentation exchange used default-model Claude (`claude-opus-5-5[1m]`) without model or safety changes. Peer source `turn-331188a7413e35e7` read the handoff README section. Sender `turn-f6d114e6a89ff5be` emitted native question `question-be3e022e4784482fbc0f070de647728b`; explicit continuation `turn-a554012197811559` returned `atlas-runtime handoff --worker NAME --turn TURN_ID`. Routing and binding left the pending question and turn set unchanged. A separate explicit answer delivered the actual reply; native processing was observed and the sender returned that exact command. This fresh documentation task did not retry the earlier provider-blocked constant task; its failure evidence and native identity guard remain unchanged.
+
+Focused checks cover stale attempts, wrong ownership/source/session/scope, missing legacy source metadata, concurrent duplicates/conflicts, backward clock movement, event recovery and namespace isolation. All six owned native groups and three isolated daemons were absent afterward; disposable binaries, fixture executable and builds were removed. Compact evidence remains at `/Users/melle/.ac-pc-xwkhvk4s/public-peer-proof-evidence.json`. No default installation, default-daemon restart, deployment or authenticated peer-delivery claim.
+
 ## Durable execution discovery
 
 ```sh
@@ -92,7 +120,7 @@ atlas-runtime events --cursor "$NEXT_CURSOR" --limit 50
 atlas-runtime output --turn turn-0123456789abcdef
 ```
 
-`events` is a finite query, not a watcher. It returns immutable ordered execution, question-evidence and handoff-reference snapshots with stable turn IDs, worker attribution for new events, native identity when known, and references usable by `output --turn`, `question` or `handoff` for inspection. `execution_accepted` means Runtime accepted a start or continuation; `execution_finished` means the native turn ended normally, **not that its assigned task was verified successful**. Failure and explicit stop use `execution_failed` and `execution_stopped`. Assignments, questions, answers, handoff declarations and full logs are not copied into the event stream.
+`events` is a finite query, not a watcher. It returns immutable ordered execution, question-evidence, peer-correlation and handoff-reference snapshots with stable turn IDs, worker attribution for new events, native identity when known, and references usable by `output --turn`, `question`, `peer-question` or `handoff` for inspection. `execution_accepted` means Runtime accepted a start or continuation; `execution_finished` means the native turn ended normally, **not that its assigned task was verified successful**. Failure and explicit stop use `execution_failed` and `execution_stopped`. Assignments, questions, answers, handoff declarations and full logs are not copied into the event stream.
 
 The response includes `events`, `next_cursor`, `has_more`, `earliest_cursor`, `retention_gap` and `recording_started_at`. Save `next_cursor` only after processing the returned page. It advances only through returned events; an empty page preserves the supplied cursor. The initial empty query still returns a usable cursor. Replaying a retained cursor returns the same ordered prefix; newly appended events may extend a previously short page.
 

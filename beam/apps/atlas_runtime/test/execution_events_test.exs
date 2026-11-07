@@ -391,4 +391,88 @@ defmodule AtlasRuntime.ExecutionEventsTest do
       assert_raise ArgumentError, fn -> ExecutionEvents.append_question(dir, store, invalid) end
     end
   end
+
+  defp peer_transition do
+    %{"kind" => "peer_question_routed", "worker_id" => "alpha",
+      "turn_id" => "turn-0000000000000001", "question_id" => "question-ab12",
+      "peer_worker_id" => "beta", "peer_source_turn_id" => "turn-0000000000000002",
+      "response_turn_id" => nil, "revision" => 1, "timestamp" => @started,
+      "record_ref" => "turns/turn-0000000000000001/peer-questions/question-ab12.json"}
+  end
+
+  test "peer and native question revisions use distinct namespaces in either append order", %{dir: dir} do
+    peer = peer_transition()
+    question = peer |> Map.drop(~w(peer_worker_id peer_source_turn_id response_turn_id)) |>
+      Map.merge(%{"kind" => "question_available",
+        "record_ref" => "turns/turn-0000000000000001/questions/question-ab12.json"})
+    for order <- [:peer_first, :question_first] do
+      folder = Path.join(dir, Atom.to_string(order))
+      store = ExecutionEvents.open(folder)
+      cursor = ExecutionEvents.query(store, nil, 100)["next_cursor"]
+      store =
+        if order == :peer_first do
+          store = ExecutionEvents.append_peer_question(folder, store, peer)
+          ExecutionEvents.append_question(folder, store, question)
+        else
+          store = ExecutionEvents.append_question(folder, store, question)
+          ExecutionEvents.append_peer_question(folder, store, peer)
+        end
+      assert ExecutionEvents.append_question(folder, store, question) == store
+      assert ExecutionEvents.append_peer_question(folder, store, peer) == store
+      bound = %{peer | "kind" => "peer_reply_bound", "revision" => 2,
+        "response_turn_id" => "turn-0000000000000003", "timestamp" => @ended}
+      store = ExecutionEvents.append_peer_question(folder, store, bound)
+      assert ExecutionEvents.append_peer_question(folder, store, bound) == store
+      assert ExecutionEvents.open(folder) == store
+      assert [first, second, last] = ExecutionEvents.query(store, cursor, 100)["events"]
+      assert Enum.sort([first["kind"], second["kind"]]) == ["peer_question_routed", "question_available"]
+      assert Map.delete(last, "sequence") == bound
+      assert last["sequence"] == 3
+      assert map_size(last) == 11
+      assert_raise ArgumentError, ~r/conflicting peer question/, fn ->
+        ExecutionEvents.append_peer_question(folder, store, Map.put(peer, "peer_worker_id", "gamma"))
+      end
+    end
+  end
+
+  test "peer event shape, revisions and references reject malformed inputs", %{dir: dir, path: path} do
+    store = ExecutionEvents.open(dir)
+    before = File.read!(path)
+    peer = peer_transition()
+    for invalid <- [
+      Map.put(peer, "answer", "private"), Map.put(peer, "question_id", "question-"),
+      Map.put(peer, "worker_id", "../alpha"), Map.put(peer, "peer_worker_id", "alpha"),
+      Map.put(peer, "peer_worker_id", String.duplicate("a", 65)),
+      Map.put(peer, "peer_source_turn_id", peer["turn_id"]),
+      Map.put(peer, "peer_source_turn_id", "../outside"), Map.put(peer, "revision", 2),
+      Map.put(peer, "record_ref", "turns/turn-0000000000000001/questions/question-ab12.json"),
+      Map.put(peer, "response_turn_id", "turn-0000000000000003"), Map.put(peer, "timestamp", "bad"),
+      Map.merge(peer, %{"kind" => "peer_reply_bound", "revision" => 2}),
+      Map.merge(peer, %{"kind" => "peer_reply_bound", "revision" => 2, "response_turn_id" => peer["peer_source_turn_id"]}),
+      Map.merge(peer, %{"kind" => "peer_reply_bound", "revision" => 2, "response_turn_id" => peer["turn_id"]})
+    ] do
+      assert_raise ArgumentError, ~r/invalid peer question event/, fn ->
+        ExecutionEvents.append_peer_question(dir, store, invalid)
+      end
+      assert File.read!(path) == before
+    end
+    assert_raise ArgumentError, fn -> ExecutionEvents.append_question(dir, store, peer) end
+  end
+
+  test "peer event reload rejects duplicate revisions and corrupt attributed replay", %{dir: dir, path: path} do
+    store = ExecutionEvents.append_peer_question(dir, ExecutionEvents.open(dir), peer_transition())
+    [event] = store["events"]
+    for invalid <- [
+      %{store | "events" => [Map.put(event, "answer", "private")]},
+      %{store | "events" => [Map.put(event, "peer_worker_id", event["worker_id"])]},
+      %{store | "events" => [Map.put(event, "response_turn_id", "turn-0000000000000003")]},
+      %{store | "sequence" => 2, "events" => [event, %{event | "sequence" => 2}]},
+      %{store | "sequence" => 2, "events" => [event, %{event | "sequence" => 2, "peer_worker_id" => "gamma"}]}
+    ] do
+      bytes = JSON.encode!(invalid)
+      File.write!(path, bytes)
+      assert_raise ArgumentError, ~r/execution event journal/, fn -> ExecutionEvents.open(dir) end
+      assert File.read!(path) == bytes
+    end
+  end
 end

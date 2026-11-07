@@ -260,8 +260,12 @@ defmodule AtlasRuntime.NativeAdmissionTest do
     assert reply["source_turn_id"] == source.id
     assert record["binding"]["session_id"] == source.session_id
     assert record["binding"]["source_turn_id"] == source.id
-    finished(context.service)
+    resumed_run = finished(context.service)
+    assert resumed_run.source_turn_id == source.id
+    assert record["recorded_result"]["source_turn_id"] == source.id
+    assert JSON.decode!(File.read!(Path.join(resumed_run.artifacts, "turn.json")))["source_turn_id"] == source.id
     successor = call(context.service, %{"command" => "continue", "assignment" => "plain:successor"})
+    assert successor.source_turn_id == resumed_run.id
     finished(context.service)
     assert successor.id != reply["turn_id"]
     assert call(context.service, request) == reply
@@ -288,7 +292,9 @@ defmodule AtlasRuntime.NativeAdmissionTest do
     record = accepted(context.dir, reply)
     assert record["binding"]["worker_id"] == "alpha"
     assert record["binding"]["source_turn_id"] == source.id
-    finished(context.service, "alpha")
+    resumed_run = finished(context.service, "alpha")
+    assert resumed_run.source_turn_id == source.id
+    assert record["recorded_result"]["source_turn_id"] == source.id
     assert command_error(context.service, Map.put(request, "turn_id", reply["turn_id"])) =~ "Conflicting request ID"
     assert command_error(context.service, Map.delete(request, "turn_id")) =~ "Conflicting request ID"
     assert call(context.service, request) == reply
