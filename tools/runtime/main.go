@@ -178,6 +178,17 @@ func service(dir, action string) (map[string]any, error) {
 }
 
 var workerName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+func requestIDFlag(flags *flag.FlagSet, command map[string]any) {
+	flags.Func("request-id", "caller-supplied start/continue identity; never generated or retried automatically", func(value string) error {
+		if !requestIDPattern.MatchString(value) {
+			return errors.New("request-id must match ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+		}
+		command["request_id"] = value
+		return nil
+	})
+}
 
 func workerFlag(flags *flag.FlagSet, command map[string]any) {
 	flags.Func("worker", "worker name (lowercase letter, then lowercase letters, digits, _ or -; at most 64 characters)", func(value string) error {
@@ -287,6 +298,7 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 	case "start":
 		flags := flag.NewFlagSet("start", flag.ContinueOnError)
 		workerFlag(flags, command)
+		requestIDFlag(flags, command)
 		cwd := flags.String("cwd", "", "existing working directory")
 		sandbox := flags.String("sandbox", "read-only", "read-only or workspace-write")
 		permissions := flags.String("permissions", "", "explicit dedicated-repository Git/GitHub scope")
@@ -350,12 +362,15 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, err
-		}
-		if !info.IsDir() {
-			return nil, errors.New("cwd is not a directory")
+		// ID replay must reach the recorded admission even if its workspace no longer exists.
+		if command["request_id"] == nil {
+			info, err := os.Stat(path)
+			if err != nil {
+				return nil, err
+			}
+			if !info.IsDir() {
+				return nil, errors.New("cwd is not a directory")
+			}
 		}
 		command["cwd"] = path
 		command["assignment"] = flags.Arg(0)
@@ -413,11 +428,12 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 		flags := flag.NewFlagSet("continue", flag.ContinueOnError)
 		workerFlag(flags, command)
 		turnFlag(flags, command)
+		requestIDFlag(flags, command)
 		if err = flags.Parse(args[1:]); err != nil {
 			return nil, err
 		}
 		if flags.NArg() != 1 || strings.TrimSpace(flags.Arg(0)) == "" {
-			return nil, errors.New("use continue [--worker NAME] [--turn TURN_ID] \"assignment\"; working directory and sandbox cannot change")
+			return nil, errors.New("use continue [--request-id ID] [--worker NAME] [--turn TURN_ID] \"assignment\"; working directory and sandbox cannot change")
 		}
 		command["assignment"] = flags.Arg(0)
 	case "answer", "question":
@@ -629,6 +645,7 @@ func main() {
 		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start [--worker NAME] --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start [--worker NAME] --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH [--backend codex|claude] --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--worker NAME] [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|stop [--worker NAME]\natlas-runtime turns\natlas-runtime output [--worker NAME] [--follow | --turn TURN_ID]\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude defaults to read-only; explicit dedicated-repository uses native sandboxed Bash in an independent repository outside system temp roots. Both use their official CLI login. Managed provisioning requires the installed Codex sandbox for Git preparation, including for Claude. Claude workspace-write is refused. Continue requires a successful saved native session and retains its worker, backend, model and scope. One active execution per worker. NAME must match ^[a-z][a-z0-9_-]{0,63}$. Omitted --worker selects the sole registered worker, or default when none exist; multiple workers require an explicit name. --turn selects its recorded worker; an explicit --worker must match. Flags precede assignment text; use -- before an assignment starting with a dash. Follow pins the selected worker and turn. Turns and events include all workers. Service status lists worker states; service stop stops all workers.")
 		fmt.Println("atlas-runtime events [--cursor CURSOR] [--limit N]\nEvents returns one finite page of durable execution events, not native output or task-success claims. Limit defaults to 50 (1..100); follow is not supported.")
 		fmt.Println("Claude question opt-in: add --questions to start; continuation retains the saved capability.\natlas-runtime question --worker NAME --turn TURN_ID --question QUESTION_ID\natlas-runtime answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT\nAnswers map exact question texts to strings. Identical repeats return recorded admission without resending; conflicting answers refuse. Admission, delivery, native processing and verified task success are distinct. Codex does not support questions.")
+		fmt.Println("Lost-response-safe admission: add --request-id ID to start or continue. Reuse exactly that ID and request to inspect recorded admission without launching twice; changed requests conflict. ID matches ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$. Accepted admission is not verified execution; indeterminate requires operator reconciliation and never auto-resends. recorded_result is the original admission snapshot, not live status.")
 		return
 	}
 	result, err := executeTo(os.Args[1:], os.Stdout)
