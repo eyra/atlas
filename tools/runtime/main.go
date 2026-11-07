@@ -176,7 +176,7 @@ func service(dir, action string) (map[string]any, error) {
 
 func execute(args []string) (map[string]any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("use service start|status|stop, start --cwd PATH ASSIGNMENT, continue ASSIGNMENT, preferences, status, output, or stop")
+		return nil, errors.New("use service start|status|stop, start --cwd PATH ASSIGNMENT, continue ASSIGNMENT, preferences, status, turns, events [--cursor CURSOR] [--limit N], output, or stop")
 	}
 	dir, err := home()
 	if err != nil {
@@ -328,6 +328,32 @@ func execute(args []string) (map[string]any, error) {
 		} else {
 			return nil, errors.New("use continue [--turn TURN_ID] \"assignment\"; working directory and sandbox cannot change")
 		}
+	case "events":
+		flags := flag.NewFlagSet("events", flag.ContinueOnError)
+		cursor := flags.String("cursor", "", "opaque cursor from an earlier events page")
+		limit := flags.Int("limit", 50, "maximum events to return (1..100)")
+		if err = flags.Parse(args[1:]); err != nil {
+			return nil, err
+		}
+		if flags.NArg() != 0 {
+			return nil, errors.New("events does not accept positional arguments")
+		}
+		if *limit < 1 || *limit > 100 {
+			return nil, errors.New("events limit must be between 1 and 100")
+		}
+		cursorSet := false
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name == "cursor" {
+				cursorSet = true
+			}
+		})
+		if cursorSet {
+			if *cursor == "" {
+				return nil, errors.New("events cursor must be nonempty")
+			}
+			command["cursor"] = *cursor
+		}
+		command["limit"] = *limit
 	case "output":
 		if len(args) == 3 && args[1] == "--turn" && args[2] != "" {
 			command["turn_id"] = args[2]
@@ -449,6 +475,7 @@ func followOutput(out io.Writer) error {
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH [--backend codex|claude] --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude defaults to read-only; explicit dedicated-repository uses native sandboxed Bash in an independent repository outside system temp roots. Both use their official CLI login. Managed provisioning requires the installed Codex sandbox for Git preparation, including for Claude. Claude workspace-write is refused. Continue requires a successful saved native session and retains its backend, model and scope. One agent at a time.")
+		fmt.Println("atlas-runtime events [--cursor CURSOR] [--limit N]\nEvents returns one finite page of durable execution events, not native output or task-success claims. Limit defaults to 50 (1..100); follow is not supported.")
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "output" && os.Args[2] == "--follow" {
