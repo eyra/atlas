@@ -1024,17 +1024,19 @@ defmodule AtlasControl.Session do
 
   defp ask(kind, content), do: ask(kind, content, @read_attempts, read_timeout())
 
-  defp ask(_kind, _content, 0, _timeout), do: %{"error" => "State did not answer"}
+  defp ask(kind, content, attempts, timeout),
+    do: await_read(Envelope.new("read", kind), content, attempts, timeout)
 
-  defp ask(kind, content, attempts, timeout) do
-    envelope = Envelope.new("read", kind)
+  defp await_read(_envelope, _content, 0, _timeout), do: %{"error" => "State did not answer"}
+
+  defp await_read(envelope, content, attempts, timeout) do
     :ok = AtlasBus.send(envelope, content)
     id = envelope.id
 
     receive do
       {:atlas_bus, %Envelope{id: ^id, class: "answer"}, answer} -> answer
     after
-      timeout -> ask(kind, content, attempts - 1, timeout)
+      timeout -> await_read(envelope, content, attempts - 1, timeout)
     end
   end
 
