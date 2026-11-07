@@ -4,6 +4,8 @@ defmodule AtlasRuntime.Agent.Native do
   the default, with its read-only, workspace-write and dedicated-repository modes.
   Claude supports fresh restricted read-only assignments and explicit independent
   repository Bash execution, including managed provisioning and explicit saved continuation.
+  Claude questions require explicit `questions_enabled: true`; answer delivery
+  acknowledges a native stdin write, while processed evidence requires a tool result.
   Requires explicit `command`, `workspace` and `goal` agent settings. The Python
   runner owns a process group and reaps it on stop or parent loss. JSONL output,
   stderr and the final answer stay under `turns_dir/<turn key>`. Guidance is not
@@ -22,6 +24,32 @@ defmodule AtlasRuntime.Agent.Native do
     :exit, {:noproc, _} -> :ok
     :exit, {:normal, _} -> :ok
   end
+
+  def answer(pid, question_id, answers) when is_pid(pid) and is_binary(question_id) do
+    GenServer.call(pid, {:answer, question_id, answers}, :infinity)
+  catch
+    :exit, reason -> {:error, {:native_unavailable, reason}}
+  end
+
+  def answer(_, _, _), do: {:error, :invalid_answer}
+
+  def validate_answers(%{questions: questions}, answers) when is_list(questions) and is_map(answers) do
+    keys = Enum.map(questions, & &1["question"])
+
+    if length(keys) in 1..4 and map_size(answers) == length(keys) and
+         Enum.sort(Map.keys(answers)) == Enum.sort(keys) and
+         Enum.all?(answers, fn {key, value} -> bounded_text?(key) and bounded_text?(value) end) and
+         byte_size(JSON.encode!(answers)) <= 16_384,
+      do: :ok,
+      else: {:error, :invalid_answers}
+  rescue
+    _ -> {:error, :invalid_answers}
+  end
+
+  def validate_answers(_, _), do: {:error, :invalid_answers}
+
+  defp bounded_text?(text),
+    do: is_binary(text) and byte_size(text) <= 4_096 and String.valid?(text) and String.trim(text) != ""
 
   def permission_scope(workspace), do: runner_request(["--permission-scope", workspace])
 
@@ -55,6 +83,7 @@ defmodule AtlasRuntime.Agent.Native do
     backend = Map.get(settings, "backend", "codex")
     model = settings["model"]
     resume_context = settings["resume_context"]
+    questions_enabled = Map.get(settings, "questions_enabled", false)
 
     valid_model =
       is_nil(model) ||
@@ -75,7 +104,7 @@ defmodule AtlasRuntime.Agent.Native do
          (File.dir?(workspace) || is_map(repository)) &&
          (is_nil(repository) || (is_map(repository) && is_map(scope))) &&
          is_binary(goal) && String.trim(goal) != "" && valid_permissions && supported &&
-         valid_model &&
+         valid_model && is_boolean(questions_enabled) && (not questions_enabled or backend == "claude") &&
          (is_nil(session) || (is_binary(session) && session != "")) do
       File.mkdir_p!(folder)
       helper = Path.join(:code.priv_dir(:atlas_runtime), "native_runner.py")
@@ -102,7 +131,8 @@ defmodule AtlasRuntime.Agent.Native do
              JSON.encode!(repository),
              backend,
              JSON.encode!(model),
-             JSON.encode!(resume_context)
+             JSON.encode!(resume_context),
+             JSON.encode!(questions_enabled)
            ]},
           {:env, unset}
         ])
@@ -113,6 +143,10 @@ defmodule AtlasRuntime.Agent.Native do
        %{
          owner: owner,
          backend: backend,
+         questions_enabled: questions_enabled,
+         pending_question: nil,
+         answer_waiter: nil,
+         last_answer: nil,
          model: nil,
          session: nil,
          quota_seen: false,
@@ -131,16 +165,40 @@ defmodule AtlasRuntime.Agent.Native do
   end
 
   @impl true
+  def handle_call({:answer, question_id, answers}, from, state) do
+    with true <- state.questions_enabled and is_nil(state.stopping) and not state.completed and not state.failed,
+         %{id: ^question_id} = question <- state.pending_question,
+         nil <- state.answer_waiter,
+         :ok <- validate_answers(question, answers) do
+      command = JSON.encode!(%{command: "answer", question_id: question_id, answers: answers})
+
+      if write_control(state.port, command <> "\n") do
+        timer = Process.send_after(self(), {:answer_timeout, question_id}, 5_000)
+        {:noreply, %{state | answer_waiter: {question_id, from, timer}}}
+      else
+        {:stop, :native_transport_closed, {:error, :native_transport_closed}, clear_question(state)}
+      end
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+      _ -> {:reply, {:error, :no_matching_pending_question}, state}
+    end
+  end
+
   def handle_call(:stop, from, state) do
-    Port.command(state.port, "stop\n")
+    state = clear_question(state)
+    write_control(state.port, "stop\n")
     {:noreply, %{state | stopping: from}}
   end
 
   @impl true
   def handle_info({:DOWN, ref, :process, _, _}, %{monitor: ref} = state) do
-    Port.command(state.port, "stop\n")
+    state = clear_question(state)
+    write_control(state.port, "stop\n")
     {:noreply, %{state | stopping: :owner_gone}}
   end
+
+  def handle_info({:answer_timeout, id}, %{answer_waiter: {id, _, _}} = state),
+    do: {:stop, :answer_delivery_timeout, clear_question(state)}
 
   def handle_info({port, {:data, {:noeol, part}}}, %{port: port} = state) do
     if byte_size(state.partial) + byte_size(part) > 2_097_152,
@@ -178,6 +236,60 @@ defmodule AtlasRuntime.Agent.Native do
 
   def handle_info(_, state), do: {:noreply, state}
 
+  defp write_control(port, bytes) do
+    Port.command(port, bytes)
+  rescue
+    ArgumentError -> false
+  end
+
+  defp clear_question(state) do
+    if state.answer_waiter do
+      {_, from, timer} = state.answer_waiter
+      Process.cancel_timer(timer)
+      GenServer.reply(from, {:error, :native_question_cancelled})
+    end
+
+    %{state | pending_question: nil, answer_waiter: nil}
+  end
+
+  defp consume(
+         %{"type" => "runtime.question", "question" => %{"id" => id, "questions" => questions}},
+         %{questions_enabled: true, pending_question: nil, answer_waiter: nil, stopping: nil,
+           completed: false, failed: false} = state
+       ) when is_binary(id) and is_list(questions) do
+    question = %{id: id, questions: questions}
+    send(state.owner, {:agent, self(), {:question, question}})
+    %{state | pending_question: question}
+  end
+
+  defp consume(
+         %{"type" => "runtime.answer_delivered", "question_id" => id},
+         %{answer_waiter: {id, from, timer}, pending_question: %{id: id}} = state
+       ) do
+    Process.cancel_timer(timer)
+    evidence = %{question_id: id, status: "delivered"}
+    GenServer.reply(from, {:ok, evidence})
+    send(state.owner, {:agent, self(), {:answer, evidence}})
+    %{state | answer_waiter: nil, pending_question: nil, last_answer: evidence}
+  end
+
+  defp consume(
+         %{"type" => "runtime.answer_processed", "question_id" => id},
+         %{last_answer: %{question_id: id, status: "delivered"}, stopping: nil} = state
+       ) do
+    evidence = %{question_id: id, status: "processed"}
+    send(state.owner, {:agent, self(), {:answer, evidence}})
+    %{state | last_answer: evidence}
+  end
+
+  defp consume(
+         %{"type" => "runtime.answer_rejected", "question_id" => id, "error" => error},
+         %{answer_waiter: {id, from, timer}} = state
+       ) do
+    Process.cancel_timer(timer)
+    GenServer.reply(from, {:error, error})
+    %{state | answer_waiter: nil}
+  end
   defp consume(%{"type" => "runtime.process_ended", "exit_code" => code}, state),
     do: %{state | process_exit: code}
 
@@ -284,7 +396,7 @@ defmodule AtlasRuntime.Agent.Native do
     )
 
     %{
-      state
+      clear_question(state)
       | completed: success,
         failed: state.failed or not success,
         result: if(is_binary(text), do: String.slice(text, 0, 2_000), else: nil)
@@ -293,6 +405,7 @@ defmodule AtlasRuntime.Agent.Native do
 
   defp consume(%{"type" => "runtime.event", "event" => event}, %{backend: "claude"} = state) do
     AtlasRuntime.Agent.emit(state.owner, "claude: activity", [])
+    state = if event["type"] == "error", do: clear_question(state), else: state
     %{state | failed: state.failed or event["type"] == "error"}
   end
 
@@ -353,12 +466,12 @@ defmodule AtlasRuntime.Agent.Native do
   defp summary(_), do: "codex: activity"
 
   @impl true
-  def terminate(_, %{port: port}) when is_port(port) do
+  def terminate(_, state) do
+    clear_question(state)
     # Closing stdin tells the helper to stop and reap its owned process group.
-    Port.close(port)
+    if is_port(state.port), do: Port.close(state.port)
   rescue
     ArgumentError -> :ok
   end
 
-  def terminate(_, _), do: :ok
 end

@@ -10,6 +10,10 @@ defmodule AtlasRuntime.ServiceTest do
     use GenServer
     def init(reply), do: {:ok, reply}
     def handle_call(:stop, _from, reply), do: {:reply, reply, reply}
+    def handle_call({:answer, question_id, answers}, {caller, _}, reply) do
+      send(caller, {:answer_write, question_id, answers})
+      {:reply, {:ok, %{question_id: question_id, status: "delivered"}}, reply}
+    end
   end
 
   setup %{tmp_dir: dir} do
@@ -33,6 +37,8 @@ defmodule AtlasRuntime.ServiceTest do
     File.mkdir_p!(folder)
     run = %{id: id, worker_id: name, state: Keyword.get(opts, :state, "running"),
             backend: Keyword.get(opts, :backend, "codex"), model: nil, session_id: nil,
+            questions_enabled: Keyword.get(opts, :questions_enabled, false),
+            pending_question: nil, last_answer: nil,
             started_at: "2026-11-07T10:00:00Z", artifacts: folder,
             cwd: Keyword.get(opts, :cwd, state.dir), sandbox: "read-only"}
     File.write!(Path.join(folder, "turn.json"), JSON.encode!(run))
@@ -125,8 +131,10 @@ defmodule AtlasRuntime.ServiceTest do
   end
 
   test "legacy saved turns belong to default and restart does not resume", %{state: state} do
-    id = saved(state, 1, %{"state" => "running", "session_id" => "old-session"})
-    assert {%{"state" => "unknown", "recorded_state" => "running", "worker_id" => "default"}, ^state, false} =
+    id = saved(state, 1, %{"state" => "running", "session_id" => "old-session",
+                          "pending_question" => %{"id" => "question-ab12", "questions" => [%{"question" => "Choose?"}]}})
+    assert {%{"state" => "unknown", "recorded_state" => "running", "worker_id" => "default",
+              "pending_question" => nil, "questions_enabled" => false}, ^state, false} =
              call(state, %{"command" => "output", "turn_id" => id})
     for command <- ["output", "continue"] do
       error(state, %{"command" => command, "turn_id" => id, "worker_id" => "other", "assignment" => "next"},
@@ -261,7 +269,7 @@ defmodule AtlasRuntime.ServiceTest do
     end
 
     id = saved(state, 20, base)
-    for field <- ["backend", "cwd", "sandbox", "permissions"] do
+    for field <- ["backend", "cwd", "sandbox", "permissions", "questions_enabled"] do
       error(state, %{"command" => "continue", "turn_id" => id, "assignment" => "next", field => "changed"},
             "working directory and permissions cannot change")
     end
@@ -269,5 +277,88 @@ defmodule AtlasRuntime.ServiceTest do
     error(active, %{"command" => "continue", "turn_id" => id, "assignment" => "next"},
           "already has an active agent")
     assert events(state) == []
+  end
+  test "question capability is opt-in, boolean and never changes backend selection", %{state: state} do
+    request = %{"command" => "start", "cwd" => state.dir, "assignment" => "Read"}
+    error(state, Map.put(request, "questions_enabled", true), "only by Claude")
+    for value <- [nil, "true", 1, %{}] do
+      error(state, Map.put(request, "questions_enabled", value), "must be a boolean")
+    end
+    for request <- [request, Map.put(request, "questions_enabled", false)] do
+      occupied = worker(state, "alpha", 1)
+      error(occupied, Map.put(request, "worker_id", "beta"), "Workspace overlaps")
+    end
+    id = saved(state, 20, %{"state" => "finished", "backend" => "codex", "questions_enabled" => true})
+    error(state, %{"command" => "continue", "turn_id" => id, "assignment" => "Read"}, "only by Claude")
+    legacy = saved(state, 21, %{"state" => "finished"})
+    assert {%{"questions_enabled" => false, "pending_question" => nil}, _, false} =
+             call(state, %{"command" => "output", "turn_id" => legacy})
+  end
+
+  test "answer requires every exact selector and bounded exact question keys before writing", %{state: state} do
+    state = state |> worker("alpha", 1, backend: "claude", questions_enabled: true) |> worker("beta", 2)
+    alpha = state.workers["alpha"]
+    question = %{id: "question-ab12", questions: [%{"question" => "Choose?"}]}
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, question}}, state)
+    request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
+                "question_id" => question.id, "answers" => %{"Choose?" => "custom"}}
+    for key <- ["worker_id", "turn_id", "question_id", "answers"] do
+      error(state, Map.delete(request, key), "requires exactly")
+    end
+    for key <- ["permissions", "updatedPermissions", "questions_enabled", "backend"] do
+      error(state, Map.put(request, key, true), "requires exactly")
+    end
+    error(state, %{request | "worker_id" => "missing"}, "Unknown worker")
+    error(state, %{request | "worker_id" => "beta"}, "current active worker turn")
+    error(state, %{request | "turn_id" => "turn-ffffffffffffffff"}, "current active worker turn")
+    error(state, %{request | "question_id" => "question-dead"}, "No matching pending")
+    for value <- [nil, "", 1, true, %{}] do
+      error(state, %{request | "worker_id" => value}, "Invalid worker ID")
+      error(state, %{request | "turn_id" => value}, "Invalid turn ID")
+      error(state, %{request | "question_id" => value}, "Invalid question ID")
+    end
+    for answers <- [nil, [], %{}, %{"Other?" => "x"}, %{"Choose?" => nil}, %{"Choose?" => " "},
+                    %{"Choose?" => 1}, %{"Choose?" => String.duplicate("x", 4097)},
+                    %{"Choose?" => "yes", "updatedPermissions" => "allow"}] do
+      error(state, %{request | "answers" => answers}, "Invalid answers")
+    end
+    refute_received {:answer_write, _, _}
+    assert {%{worker_id: "alpha", turn_id: turn_id, question_id: "question-ab12", status: "delivered"}, state, false} =
+             call(state, request)
+    assert turn_id == alpha.run.id
+    assert_received {:answer_write, "question-ab12", %{"Choose?" => "custom"}}
+    assert state.workers["alpha"].run.pending_question == nil
+    assert state.workers["alpha"].run.last_answer.status == "delivered"
+    error(state, request, "No matching pending")
+    {:noreply, state} = Service.handle_info(
+      {:agent, alpha.agent, {:answer, %{question_id: question.id, status: "processed"}}}, state)
+    assert state.workers["alpha"].run.last_answer.status == "processed"
+    assert {:noreply, ^state} = Service.handle_info(
+      {:agent, alpha.agent, {:answer, %{question_id: question.id, status: "delivered"}}}, state)
+    assert events(state) == []
+  end
+
+  test "pending questions clear on every terminal path and old pid cannot affect a successor", %{state: state} do
+    for terminal <- [:stop, :finish, :loss, :service_stop] do
+      current = worker(state, "alpha", 1, backend: "claude", questions_enabled: true)
+      alpha = current.workers["alpha"]
+      question = %{id: "question-ab12", questions: [%{"question" => "Choose?"}]}
+      {:noreply, current} = Service.handle_info({:agent, alpha.agent, {:question, question}}, current)
+      current = case terminal do
+        :stop -> {_, next, false} = call(current, %{"command" => "stop", "worker_id" => "alpha"}); next
+        :service_stop -> {_, next, true} = call(current, %{"command" => "service-stop"}); next
+        :finish -> {:noreply, next} = Service.handle_info({:agent, alpha.agent, {:ended, "done"}}, current); next
+        :loss -> {:noreply, next} = Service.handle_info({:DOWN, alpha.monitor, :process, alpha.agent, :lost}, current); next
+      end
+      assert current.workers["alpha"].run.pending_question == nil
+      late = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
+               "question_id" => question.id, "answers" => %{"Choose?" => "x"}}
+      assert {%{command_error: _}, ^current, false} = call(current, late)
+      successor = worker(%{current | stopping: false}, "alpha", 2, backend: "claude", questions_enabled: true)
+      for message <- [{:question, question}, {:answer, %{question_id: question.id, status: "processed"}},
+                      {:ended, "stale"}, {:session, "stale"}] do
+        assert {:noreply, ^successor} = Service.handle_info({:agent, alpha.agent, message}, successor)
+      end
+    end
   end
 end
