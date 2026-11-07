@@ -15,7 +15,7 @@ defmodule AtlasRuntime.Agent do
   ends the agent's turn from Runtime's side (silent, too long, no longer the owner).
 
   The ports: `stub` (synthetic), `claude` (Claude Code headless), and `codex`
-  (official Codex CLI, one explicitly configured goal; read-only unless workspace-write is selected).
+  (official Codex CLI, one explicitly configured goal; read-only unless write permissions are selected).
   """
 
   @doc "Start the agent for `turn` (`%{key, item, agent}`); messages go to the caller."

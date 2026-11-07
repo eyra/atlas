@@ -2,6 +2,8 @@ defmodule AtlasRuntime.Agent.Codex do
   @moduledoc """
   Official Codex CLI, using its existing ChatGPT login. Goals default to read-only;
   explicit `sandbox: workspace-write` permits edits under Codex's workspace policy.
+  Dedicated-repository permissions explicitly allow isolated Git metadata writes
+  and enforced GitHub-only command networking instead of a legacy sandbox mode.
   Requires explicit `command`, `workspace` and `goal` agent settings. The Python
   runner owns a process group and reaps it on stop or parent loss. JSONL output,
   stderr and the final answer stay under `turns_dir/<turn key>`. Guidance is not
@@ -21,6 +23,15 @@ defmodule AtlasRuntime.Agent.Codex do
     :exit, {:normal, _} -> :ok
   end
 
+  def permission_scope(workspace) do
+    helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
+    python = System.find_executable("python3") || raise("Python 3 is required")
+    case System.cmd(python, [helper, "--permission-scope", workspace], stderr_to_stdout: true) do
+      {scope, 0} -> JSON.decode!(scope)
+      {error, _} -> raise(String.trim(error))
+    end
+  end
+
   @impl true
   def init({owner, turn, opts}) do
     settings = Keyword.fetch!(opts, :agent)
@@ -31,9 +42,13 @@ defmodule AtlasRuntime.Agent.Codex do
     goal = settings["goal"]
     sandbox = Map.get(settings, "sandbox", "read-only")
     session = settings["session_id"]
+    scope = settings["permissions"]
+    valid_permissions =
+      (is_nil(scope) && sandbox in ["read-only", "workspace-write"]) ||
+        (is_map(scope) && is_nil(sandbox))
 
     if command && python && is_binary(workspace) && File.dir?(workspace) &&
-         is_binary(goal) && String.trim(goal) != "" && sandbox in ["read-only", "workspace-write"] &&
+         is_binary(goal) && String.trim(goal) != "" && valid_permissions &&
          (is_nil(session) || (is_binary(session) && session != "")) do
       File.mkdir_p!(folder)
       helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
@@ -54,9 +69,9 @@ defmodule AtlasRuntime.Agent.Codex do
              Path.expand(workspace),
              Path.expand(folder),
              goal,
-             sandbox,
+             sandbox || "",
              session || ""
-           ]},
+           ] ++ if(scope, do: [JSON.encode!(scope)], else: [])},
           {:env, unset}
         ])
 

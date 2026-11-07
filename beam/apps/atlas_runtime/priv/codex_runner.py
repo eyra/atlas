@@ -32,12 +32,64 @@ def signal_group(process, sig):
         pass
 
 
+def permission_scope(workspace):
+    root = Path(workspace).absolute()
+    if root != root.resolve() or not (root / '.git').is_dir() or (root / '.git').is_symlink():
+        raise ValueError('Dedicated repository requires a canonical root with its own .git directory')
+    git_dir = root / '.git'
+    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    result = subprocess.run(
+        ['git', '-C', str(root), 'rev-parse', '--path-format=absolute',
+         '--show-toplevel', '--git-dir', '--git-common-dir'],
+        env=env, capture_output=True, text=True, check=True)
+    if result.stdout.splitlines() != [str(root), str(git_dir), str(git_dir)]:
+        raise ValueError('Dedicated repository cannot use worktree or external Git metadata')
+    if any((git_dir / path).exists() for path in
+           ('commondir', 'objects/info/alternates', 'objects/info/http-alternates', 'worktrees')):
+        raise ValueError('Dedicated repository cannot share Git metadata or object stores')
+    for directory, dirs, files in os.walk(git_dir):
+        for name in dirs + files:
+            path = Path(directory) / name
+            if path.is_symlink() or (path.is_file() and path.stat().st_nlink > 1):
+                raise ValueError('Dedicated Git metadata cannot contain symlinks or shared hardlinks')
+    # Project config can select legacy sandbox settings instead of the explicit profile.
+    ignored_config = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')).resolve() / 'config.toml'
+    configs = [directory / '.codex/config.toml' for directory in (root, *root.parents)]
+    configs.append(Path('/etc/codex/config.toml'))
+    if any(path != ignored_config and path.exists() for path in configs):
+        raise ValueError('Dedicated repository cannot load project or system Codex config')
+    return {'profile': 'dedicated-repository', 'version': 1, 'root': str(root),
+            'git_dir': str(git_dir), 'network_hosts': ['github.com', 'api.github.com']}
+
+
+def permission_arguments(scope):
+    root = Path(scope['root'])
+    filesystem = {str(root): 'write', str(root / '.git'): 'write'}
+    filesystem.update({str(root / name): 'read' for name in ('.agents', '.codex', '.aws')})
+    paths = ','.join(f'{json.dumps(path)}={json.dumps(access)}' for path, access in filesystem.items())
+    # One TOML table preserves quoted path keys; dotted CLI override keys do not.
+    profile = ('permissions={atlas_repository={extends=":read-only",filesystem={' + paths +
+               '},network={enabled=true,domains={"github.com"="allow","api.github.com"="allow"}}}}')
+    return ['-c', 'default_permissions="atlas_repository"', '-c', profile,
+            '-c', 'features.network_proxy=true']
+
+
 def main():
-    executable, workspace, folder, goal, sandbox, session = sys.argv[1:]
-    if sandbox not in ('read-only', 'workspace-write'):
+    if len(sys.argv) == 3 and sys.argv[1] == '--permission-scope':
+        print(json.dumps(permission_scope(sys.argv[2])))
+        return
+    executable, workspace, folder, goal, sandbox, session, *extra = sys.argv[1:]
+    scope = json.loads(extra[0]) if len(extra) == 1 else None
+    if len(extra) > 1 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
         raise ValueError('Sandbox must be read-only or workspace-write')
+    if scope is not None:
+        if sandbox or scope != permission_scope(workspace):
+            raise ValueError('Dedicated repository permission scope changed or conflicts with sandbox')
+        permissions = permission_arguments(scope)
+    else:
+        permissions = ['--sandbox', sandbox]
     folder = Path(folder)
-    command = [executable, 'exec', '--sandbox', sandbox, '--disable', 'hooks',
+    command = [executable, 'exec', *permissions, '--disable', 'hooks',
                '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
                '--color', 'never', '--cd', workspace]
     if session:
