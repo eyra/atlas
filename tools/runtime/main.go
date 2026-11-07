@@ -245,6 +245,41 @@ func parseAnswers(raw string) (map[string]string, error) {
 	return answers, nil
 }
 
+func parseHandoff(raw string) (map[string]json.RawMessage, error) {
+	const invalid = "handoff must be one UTF-8 JSON object with unique fields (32768 bytes maximum)"
+	if len(raw) > 32768 || !utf8.ValidString(raw) {
+		return nil, errors.New(invalid)
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, errors.New(invalid)
+	}
+	handoff := make(map[string]json.RawMessage, 10)
+	for decoder.More() {
+		token, err = decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, errors.New(invalid)
+		}
+		if _, duplicate := handoff[key]; duplicate {
+			return nil, errors.New(invalid)
+		}
+		var value json.RawMessage
+		if err = decoder.Decode(&value); err != nil {
+			return nil, errors.New(invalid)
+		}
+		handoff[key] = value
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') || len(handoff) == 0 {
+		return nil, errors.New(invalid)
+	}
+	if _, err = decoder.Token(); err != io.EOF {
+		return nil, errors.New(invalid)
+	}
+	return handoff, nil
+}
+
 func parseOutput(args []string) (map[string]any, bool, error) {
 	command := map[string]any{"command": "output"}
 	flags := flag.NewFlagSet("output", flag.ContinueOnError)
@@ -460,6 +495,27 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 			}
 			command["answers"] = answers
 		}
+	case "submit-handoff", "handoff":
+		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+		workerFlag(flags, command)
+		turnFlag(flags, command)
+		var raw string
+		if args[0] == "submit-handoff" {
+			flags.StringVar(&raw, "handoff", "", "bounded JSON completion or pull_request declaration")
+		}
+		if err = flags.Parse(args[1:]); err != nil {
+			return nil, err
+		}
+		if flags.NArg() != 0 || command["worker_id"] == nil || command["turn_id"] == nil {
+			return nil, errors.New("handoff commands require --worker and --turn, with no positional arguments")
+		}
+		if args[0] == "submit-handoff" {
+			handoff, parseErr := parseHandoff(raw)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			command["handoff"] = handoff
+		}
 	case "events":
 		flags := flag.NewFlagSet("events", flag.ContinueOnError)
 		cursor := flags.String("cursor", "", "opaque cursor from an earlier events page")
@@ -646,6 +702,7 @@ func main() {
 		fmt.Println("atlas-runtime events [--cursor CURSOR] [--limit N]\nEvents returns one finite page of durable execution events, not native output or task-success claims. Limit defaults to 50 (1..100); follow is not supported.")
 		fmt.Println("Claude question opt-in: add --questions to start; continuation retains the saved capability.\natlas-runtime question --worker NAME --turn TURN_ID --question QUESTION_ID\natlas-runtime answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT\nAnswers map exact question texts to strings. Identical repeats return recorded admission without resending; conflicting answers refuse. Admission, delivery, native processing and verified task success are distinct. Codex does not support questions.")
 		fmt.Println("Lost-response-safe admission: add --request-id ID to start or continue. Reuse exactly that ID and request to inspect recorded admission without launching twice; changed requests conflict. ID matches ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$. Accepted admission is not verified execution; indeterminate requires operator reconciliation and never auto-resends. recorded_result is the original admission snapshot, not live status.")
+		fmt.Println("Explicit coordinator handoff:\natlas-runtime submit-handoff --worker NAME --turn TURN_ID --handoff JSON_OBJECT\natlas-runtime handoff --worker NAME --turn TURN_ID\nDeclaration fields: kind (completion|pull_request), repository_url, branch, base_sha, head_sha, result, verification, limits, remaining_processes; pull_request requires pr_url, completion forbids it. The last three fields are arrays of strings. Stored provenance is coordinator_submitted_declaration, not authenticated native submission or verified task/PR acceptance. Identical repeats return the original record; replacement conflicts. Execution, merge and next assignment remain separate.")
 		return
 	}
 	result, err := executeTo(os.Args[1:], os.Stdout)

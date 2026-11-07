@@ -35,6 +35,84 @@ defmodule AtlasRuntime.ExecutionEventsTest do
     epoch <> ":" <> Integer.to_string(sequence)
   end
 
+
+  defp handoff do
+    %{"worker_id" => "alpha", "turn_id" => "turn-0000000000000001",
+      "record_ref" => "turns/turn-0000000000000001/handoff.json", "submitted_at" => @ended,
+      "handoff" => %{"result" => "Private declaration"}, "provenance" => "coordinator_submitted_declaration"}
+  end
+
+  test "handoff events deduplicate exact attribution and replay without declaration contents", %{dir: dir} do
+    initial = ExecutionEvents.open(dir)
+    cursor = ExecutionEvents.query(initial, nil, 100)["next_cursor"]
+    store = ExecutionEvents.append_handoff(dir, initial, handoff())
+    assert ExecutionEvents.append_handoff(dir, store, handoff()) == store
+    assert ExecutionEvents.open(dir) == store
+    assert [event] = ExecutionEvents.query(store, cursor, 100)["events"]
+    assert event == %{"sequence" => 1, "kind" => "handoff_submitted", "timestamp" => @ended,
+      "turn_id" => "turn-0000000000000001", "worker_id" => "alpha",
+      "record_ref" => "turns/turn-0000000000000001/handoff.json"}
+    for {key, value} <- [{"worker_id", "beta"}, {"submitted_at", @started}] do
+      assert_raise ArgumentError, ~r/conflicting handoff event/, fn ->
+        ExecutionEvents.append_handoff(dir, store, Map.put(handoff(), key, value))
+      end
+    end
+    assert ExecutionEvents.open(dir) == store
+  end
+
+  test "handoff event attribution and references reject malformed input before persistence", %{dir: dir, path: path} do
+    store = ExecutionEvents.open(dir)
+    before = File.read!(path)
+    for {key, value} <- [{"worker_id", nil}, {"worker_id", "Upper"}, {"worker_id", "../alpha"},
+                         {"worker_id", String.duplicate("a", 65)}, {"turn_id", "turn-1"},
+                         {"turn_id", "../turn-0000000000000001"}, {"turn_id", nil},
+                         {"record_ref", "turns/turn-0000000000000002/handoff.json"},
+                         {"record_ref", "/turns/turn-0000000000000001/handoff.json"},
+                         {"record_ref", "turns/turn-0000000000000001/../handoff.json"},
+                         {"record_ref", nil}, {"submitted_at", "yesterday"},
+                         {"submitted_at", nil}, {"submitted_at", String.duplicate("x", 65)}] do
+      assert_raise ArgumentError, ~r/invalid handoff event/, fn ->
+        ExecutionEvents.append_handoff(dir, store, Map.put(handoff(), key, value))
+      end
+      assert File.read!(path) == before
+    end
+  end
+
+  test "reloading rejects extra handoff fields and duplicate turn publication", %{dir: dir, path: path} do
+    store = ExecutionEvents.append_handoff(dir, ExecutionEvents.open(dir), handoff())
+    [event] = store["events"]
+    malformed = [
+      %{store | "events" => [Map.put(event, "handoff", %{})]},
+      %{store | "events" => [Map.put(event, "worker_id", "../alpha")]},
+      %{store | "events" => [Map.put(event, "record_ref", "turns/other/handoff.json")]},
+      %{store | "sequence" => 2, "events" => [event, %{event | "sequence" => 2}]}
+    ]
+    for invalid <- malformed do
+      bytes = JSON.encode!(invalid)
+      File.write!(path, bytes)
+      assert_raise ArgumentError, ~r/execution event journal/, fn -> ExecutionEvents.open(dir) end
+      assert File.read!(path) == bytes
+    end
+  end
+
+  test "handoff publication shares bounded retention and cursor semantics", %{dir: dir} do
+    initial = ExecutionEvents.open(dir)
+    cursor = ExecutionEvents.query(initial, nil, 100)["next_cursor"]
+    store = Enum.reduce(1..257, initial, fn number, store ->
+      turn = "turn-" <> (number |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(16, "0"))
+      record = %{handoff() | "turn_id" => turn, "record_ref" => "turns/#{turn}/handoff.json"}
+      ExecutionEvents.append_handoff(dir, store, record)
+    end)
+    assert length(store["events"]) == 256
+    assert ExecutionEvents.open(dir) == store
+    assert_raise ArgumentError, ~r/stale execution event cursor/, fn ->
+      ExecutionEvents.query(store, cursor, 100)
+    end
+    page = ExecutionEvents.query(store, nil, 100)
+    assert page["retention_gap"]
+    assert Enum.map(page["events"], & &1["sequence"]) == Enum.to_list(2..101)
+    assert ExecutionEvents.query(store, page["earliest_cursor"], 100)["events"] == page["events"]
+  end
   test "opening creates a persistent empty checkpoint without historical synthesis", %{dir: dir} do
     File.mkdir_p!(Path.join(dir, "turns/old-turn"))
     File.write!(Path.join(dir, "turns/old-turn/turn.json"), JSON.encode!(run("old", "finished")))

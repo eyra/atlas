@@ -4,6 +4,7 @@ defmodule AtlasRuntime.Service do
   alias AtlasRuntime.BackendPolicy
   alias AtlasRuntime.CommandAdmissions
   alias AtlasRuntime.ExecutionEvents
+  alias AtlasRuntime.HandoffRecords
   alias AtlasRuntime.QuestionRecords
 
   def start(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
@@ -14,7 +15,8 @@ defmodule AtlasRuntime.Service do
       {:error, :enoent} -> BackendPolicy.empty()
       {:error, reason} -> raise("Cannot read backend policy: #{inspect(reason)}")
     end
-    events = QuestionRecords.recover(dir, ExecutionEvents.open(dir))
+    events = HandoffRecords.recover(dir, ExecutionEvents.open(dir))
+    events = QuestionRecords.recover(dir, events)
     path = Path.join(dir, "runtime.sock")
 
     {:ok, listener} =
@@ -71,7 +73,7 @@ defmodule AtlasRuntime.Service do
       try do
         command(request, state)
       rescue
-        error in [QuestionRecords.StorageError, CommandAdmissions.StorageError] -> reraise error, __STACKTRACE__
+        error in [QuestionRecords.StorageError, CommandAdmissions.StorageError, HandoffRecords.StorageError] -> reraise error, __STACKTRACE__
         error -> {%{command_error: Exception.message(error)}, state, false}
       catch
         :exit, why -> {%{command_error: "Operation not confirmed: #{inspect(why)}"}, state, false}
@@ -112,6 +114,25 @@ defmodule AtlasRuntime.Service do
   end
 
   defp command(_, %{stopping: true}), do: raise("Runtime service is stopping")
+
+  defp command(%{"command" => "handoff"} = request, state) do
+    handoff_selectors!(request, [])
+    record = owned_handoff!(state, request) || raise("No handoff recorded for this turn")
+    {HandoffRecords.public(record), state, false}
+  end
+
+  defp command(%{"command" => "submit-handoff"} = request, state) do
+    handoff_selectors!(request, ["handoff"])
+    record = owned_handoff!(state, request)
+    run =
+      if record do
+        Map.take(record, ["worker_id", "turn_id"])
+      else
+        handoff_run!(state, request)
+      end
+    {record, events} = HandoffRecords.submit(state.dir, state.events, run, request["handoff"])
+    {HandoffRecords.public(record), %{state | events: events}, false}
+  end
 
   defp command(%{"command" => "question"} = request, state) do
     question_selectors!(request, [])
@@ -228,6 +249,38 @@ defmodule AtlasRuntime.Service do
   end
 
   defp command(_, _), do: raise("Unknown or malformed command")
+
+  defp handoff_selectors!(request, extra) do
+    fields = ["command", "worker_id", "turn_id"] ++ extra
+    if Enum.sort(Map.keys(request)) != Enum.sort(fields),
+      do: raise("#{request["command"]} requires exactly worker_id, turn_id#{if extra == [], do: "", else: " and handoff"}")
+    if not valid_worker_id?(request["worker_id"]), do: raise("Invalid worker ID")
+    if not valid_id?(request["turn_id"]), do: raise("Invalid turn ID")
+  end
+
+  defp owned_handoff!(state, request) do
+    record = HandoffRecords.load(state.dir, request["turn_id"])
+    if record && record["worker_id"] != request["worker_id"],
+      do: raise("Handoff belongs to worker #{record["worker_id"]}, not #{request["worker_id"]}")
+    record
+  end
+
+  defp handoff_run!(state, request) do
+    turn = request["turn_id"]
+    path = Path.join([state.dir, "turns", turn, "turn.json"])
+    run =
+      case File.read(path) do
+        {:ok, bytes} -> JSON.decode!(bytes)
+        {:error, :enoent} -> raise("Unknown saved turn: #{turn}")
+        {:error, reason} -> raise File.Error, reason: reason, action: "read saved turn", path: path
+      end
+    if not is_map(run) or run["id"] != turn or not valid_worker_id?(run["worker_id"]),
+      do: raise("Invalid saved execution identity")
+    if run["worker_id"] != request["worker_id"],
+      do: raise("Turn belongs to worker #{run["worker_id"]}, not #{request["worker_id"]}")
+    %{"worker_id" => run["worker_id"], "turn_id" => turn, "repository" => run["repository"]}
+  end
+
   defp question_selectors!(request, extra) do
     fields = ["command", "worker_id", "turn_id", "question_id"] ++ extra
     if Enum.sort(Map.keys(request)) != Enum.sort(fields),
