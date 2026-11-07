@@ -117,12 +117,17 @@ defmodule AtlasRuntime.BackendPolicyTest do
            )["selected"] == @fallback
   end
 
-  test "Claude repository admission requires explicit scope and never admits provisioning" do
-    request = %{"permissions" => "dedicated-repository"}
+  test "Claude provisioning requires explicit scope and preserves provider selection" do
+    request = %{
+      "permissions" => "dedicated-repository",
+      "repository" => "https://github.com/eyra/atlas.git"
+    }
     assert Policy.select(configured(), nil, request, @now)["selected"] == @preferred
+    assert Policy.select(blocked(), "claude", request, @now)["selected"] == @preferred
+    assert Policy.select(blocked(), nil, request, @now)["selected"] == @fallback
 
     for unsupported <- [
-          Map.put(request, "repository", "https://github.com/eyra/atlas.git"),
+          Map.delete(request, "permissions"),
           Map.put(request, "sandbox", "read-only")
         ] do
       assert_raise RuntimeError, ~r/Selected claude/, fn ->

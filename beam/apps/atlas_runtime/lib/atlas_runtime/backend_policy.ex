@@ -143,9 +143,9 @@ defmodule AtlasRuntime.BackendPolicy do
     supported =
       case backend do
         "claude" ->
-          not Map.has_key?(request, "repository") and
-            ((is_nil(permissions) and sandbox == "read-only") or
-               (permissions == "dedicated-repository" and not Map.has_key?(request, "sandbox")))
+          (is_nil(permissions) and sandbox == "read-only" and
+             not Map.has_key?(request, "repository")) or
+            (permissions == "dedicated-repository" and not Map.has_key?(request, "sandbox"))
 
         "codex" ->
           (is_nil(permissions) and sandbox in ["read-only", "workspace-write"] and
