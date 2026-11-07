@@ -132,6 +132,27 @@ class ClaudeRepositoryLifecycleTest(unittest.TestCase):
                 process.kill()
                 process.wait()
 
+    def test_saved_claude_context_preserves_work_but_refuses_git_identity_drift(self):
+        saved = runner.claude_context(str(self.repo), self.scope)
+        (self.repo / 'unfinished.txt').write_text('keep this work\n')
+        self.assertEqual(runner.claude_context(str(self.repo), self.scope), saved)
+        for args in (
+                ['symbolic-ref', 'HEAD', 'refs/heads/other'],
+                ['remote', 'add', 'origin', 'https://github.com/other/repo.git']):
+            subprocess.run(['git', '-C', str(self.repo), *args], check=True)
+            with self.assertRaisesRegex(ValueError, 'repository identity'):
+                runner.execute_assignment(
+                    str(self.repo), self.scope, None, False, 'claude',
+                    str(self.root), saved, ['/must-not-execute'])
+            subprocess.run(['git', '-C', str(self.repo), 'symbolic-ref', 'HEAD',
+                            saved['git']['branch']], check=True)
+        self.assertEqual((self.repo / 'unfinished.txt').read_text(), 'keep this work\n')
+
+    def test_unreadable_git_identity_is_not_treated_as_a_non_repository(self):
+        (self.repo / '.git/config').write_text('invalid git configuration\n')
+        with self.assertRaisesRegex(ValueError, 'Cannot inspect Claude working directory'):
+            runner.claude_context(str(self.repo), None)
+
 
 class NativeModelTest(unittest.TestCase):
     session = '01a1b578-c3b5-7972-9664-1d250bf64cdf'
@@ -517,7 +538,7 @@ class ProvisioningTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'installed Codex sandbox'):
                 runner.execute_assignment(
                     str(self.repo), self.request['permissions'], self.request['repository'],
-                    False, 'claude', ['/missing-claude'])
+                    False, 'claude', str(self.root), None, ['/missing-claude'])
         self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), head)
         self.assertEqual(self.git(self.repo, 'branch', '--show-current'), 'task/first')
 

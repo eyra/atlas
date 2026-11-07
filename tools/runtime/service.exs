@@ -183,9 +183,7 @@ defmodule AtlasRuntime.Service do
         do: historical(request["turn_id"], state),
         else: Map.new(state.run, fn {key, value} -> {Atom.to_string(key), value} end)
     backend = Map.get(run, "backend", "codex")
-    if backend == "claude",
-      do: raise("Claude continuation is unsupported; explicitly start a new Claude session if needed")
-    if backend != "codex", do: raise("Unknown saved backend; sessions cannot switch vendors")
+    if backend not in ["codex", "claude"], do: raise("Unknown saved backend; sessions cannot switch vendors")
     if run["state"] != "finished",
       do: raise("Continue requires a successfully finished turn")
     session = run["session_id"]
@@ -193,16 +191,22 @@ defmodule AtlasRuntime.Service do
     sandbox = run["sandbox"]
     scope = run["permissions"]
     if not is_binary(session) or String.trim(session) == "",
-      do: raise("The selected turn has no confirmed Codex session")
+      do: raise("The selected turn has no confirmed native session")
     if not is_binary(cwd) or Path.type(cwd) != :absolute or
          not ((is_nil(scope) and sandbox in ["read-only", "workspace-write"]) or
            (is_map(scope) and is_nil(sandbox))),
       do: raise("The selected turn has no valid saved working directory and permissions")
     if scope && scope != Native.permission_scope(cwd),
       do: raise("The selected turn's permission scope changed")
+    context =
+      if backend == "claude" do
+        if not is_binary(run["model"]) or run["model"] == "",
+          do: raise("The selected Claude turn has no confirmed model")
+        Path.join(run["artifacts"], "claude-context.json") |> File.read!() |> JSON.decode!()
+      end
     target = %{"backend" => backend, "model" => run["model"] || run["requested_model"]}
     selection = %{"requested" => target, "selected" => target, "reason" => "continuation"}
-    start_turn(assignment, cwd, sandbox, scope, session, state, run["repository"], selection)
+    start_turn(assignment, cwd, sandbox, scope, session, state, run["repository"], selection, context)
   end
 
   defp command(_, _), do: raise("Unknown or malformed command")
@@ -213,7 +217,7 @@ defmodule AtlasRuntime.Service do
     BackendPolicy.select(state.policy, request["backend"], request, System.system_time(:second))
   end
 
-  defp start_turn(assignment, cwd, sandbox, scope, session, state, repository, selection) do
+  defp start_turn(assignment, cwd, sandbox, scope, session, state, repository, selection, context \\ nil) do
     backend = selection["selected"]["backend"]
     model = selection["selected"]["model"]
     if (not File.dir?(cwd) and is_nil(repository)) or String.trim(assignment) == "",
@@ -232,7 +236,8 @@ defmodule AtlasRuntime.Service do
       "sandbox" => sandbox,
       "permissions" => scope,
       "repository" => repository,
-      "session_id" => session
+      "session_id" => session,
+      "resume_context" => context
     }
 
     case Native.start(%{key: key}, agent: settings, turns_dir: turns) do
