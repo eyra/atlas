@@ -511,6 +511,16 @@ class ProvisioningTest(unittest.TestCase):
         self.assertFalse(created)
         os.close(acquired)
 
+    def test_claude_provisioning_without_codex_sandbox_preserves_repository(self):
+        head = self.git(self.repo, 'rev-parse', 'HEAD')
+        with patch.object(runner.shutil, 'which', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'installed Codex sandbox'):
+                runner.execute_assignment(
+                    str(self.repo), self.request['permissions'], self.request['repository'],
+                    False, 'claude', ['/missing-claude'])
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), head)
+        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), 'task/first')
+
     def test_untrusted_repository_and_branch_inputs_are_rejected(self):
         for url, branch in (
                 ('file:///tmp/repo', 'task/new'), ('https://example.com/test/repo', 'task/new'),

@@ -179,7 +179,7 @@ defmodule AtlasRuntime.NativeClaudeTest do
     end
   end
 
-  test "unsupported permissions, provisioning, resume and unknown vendors never launch", %{
+  test "unsupported permissions, unscoped provisioning, resume and unknown vendors never launch", %{
     tmp_dir: dir
   } do
     for settings <- [

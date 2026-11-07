@@ -146,9 +146,12 @@ def lock_repository(workspace, create):
     return lock, created
 
 
-def execute_assignment(workspace, scope, repository, created, command):
+def execute_assignment(workspace, scope, repository, created, backend, command):
     if repository is not None:
-        prepared = prepare_repository(command[0], scope, repository, created)
+        executable = shutil.which('codex') if backend == 'claude' else command[0]
+        if executable is None:
+            raise ValueError('Managed repository preparation requires the installed Codex sandbox')
+        prepared = prepare_repository(executable, scope, repository, created)
         emit({'type': 'runtime.repository_prepared', 'repository': prepared})
     if scope is not None and scope != permission_scope(workspace):
         raise ValueError('Dedicated repository permission scope changed')
@@ -239,9 +242,9 @@ def main():
     if len(sys.argv) == 5 and sys.argv[1] == '--repository-request':
         print(json.dumps(repository_request(*sys.argv[2:])))
         return
-    if len(sys.argv) > 6 and sys.argv[1] == '--execute-assignment':
+    if len(sys.argv) > 7 and sys.argv[1] == '--execute-assignment':
         execute_assignment(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]),
-                           json.loads(sys.argv[5]), sys.argv[6:])
+                           json.loads(sys.argv[5]), sys.argv[6], sys.argv[7:])
         return
     executable, workspace, folder, goal, sandbox, session, *extra = sys.argv[1:]
     scope = json.loads(extra[0]) if extra else None
@@ -253,9 +256,8 @@ def main():
         raise ValueError('Model must be a nonempty identifier of at most 200 characters')
     if backend not in ('codex', 'claude'):
         raise ValueError('Backend must be codex or claude')
-    if backend == 'claude' and (repository or session or
-                               (scope is None and sandbox != 'read-only')):
-        raise ValueError('Claude requires fresh read-only or dedicated-repository execution; no provisioning or continuation')
+    if backend == 'claude' and (session or (scope is None and sandbox != 'read-only')):
+        raise ValueError('Claude requires fresh read-only or dedicated-repository execution; no continuation')
     if len(extra) > 4 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
         raise ValueError('Sandbox must be read-only or workspace-write')
     if repository is not None and (scope != dedicated_scope(Path(workspace)) or
@@ -322,7 +324,7 @@ def main():
                     errors.write(str(error).encode())
                     raise
                 if backend == 'claude' and scope is not None:
-                    if scope != permission_scope(workspace):
+                    if repository is None and scope != permission_scope(workspace):
                         raise ValueError('Dedicated repository permission scope changed')
                     native_temporary = tempfile.mkdtemp(prefix='.ac-', dir=Path.home().resolve())
                     command[1:1] = ['--settings', json.dumps(
@@ -330,7 +332,7 @@ def main():
                     environment = dict(os.environ, CLAUDE_CODE_TMPDIR=native_temporary)
                 command = [sys.executable, str(Path(__file__).resolve()), '--execute-assignment',
                            workspace, json.dumps(scope), json.dumps(repository), json.dumps(created),
-                           *command]
+                           backend, *command]
             started_at = datetime.now(timezone.utc)
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=errors, start_new_session=True,
