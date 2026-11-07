@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -104,7 +105,8 @@ func service(dir, action string) (map[string]any, error) {
 		for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 			conn, dialErr := net.DialTimeout("unix", filepath.Join(dir, "runtime.sock"), time.Second)
 			if absent(dialErr) {
-				return map[string]any{"service": "stopped", "agent": result["agent"]}, nil
+				result["service"] = "stopped"
+				return result, nil
 			}
 			if conn != nil {
 				conn.Close()
@@ -174,9 +176,53 @@ func service(dir, action string) (map[string]any, error) {
 	return nil, fmt.Errorf("Runtime startup timed out; inspect %s", filepath.Join(dir, "service.log"))
 }
 
+var workerName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
+func workerFlag(flags *flag.FlagSet, command map[string]any) {
+	flags.Func("worker", "worker name (lowercase letter, then lowercase letters, digits, _ or -; at most 64 characters)", func(value string) error {
+		if !workerName.MatchString(value) {
+			return errors.New("worker must match ^[a-z][a-z0-9_-]{0,63}$")
+		}
+		command["worker_id"] = value
+		return nil
+	})
+}
+
+func turnFlag(flags *flag.FlagSet, command map[string]any) {
+	flags.Func("turn", "saved turn ID (must belong to --worker when both are supplied)", func(value string) error {
+		if strings.TrimSpace(value) == "" {
+			return errors.New("turn must be nonempty")
+		}
+		command["turn_id"] = value
+		return nil
+	})
+}
+
+func parseOutput(args []string) (map[string]any, bool, error) {
+	command := map[string]any{"command": "output"}
+	flags := flag.NewFlagSet("output", flag.ContinueOnError)
+	workerFlag(flags, command)
+	turnFlag(flags, command)
+	follow := flags.Bool("follow", false, "follow the selected worker's current turn without switching turns")
+	if err := flags.Parse(args); err != nil {
+		return nil, false, err
+	}
+	if flags.NArg() != 0 {
+		return nil, false, errors.New("output does not accept positional arguments")
+	}
+	if *follow && command["turn_id"] != nil {
+		return nil, false, errors.New("output --follow cannot be combined with --turn")
+	}
+	return command, *follow, nil
+}
+
 func execute(args []string) (map[string]any, error) {
+	return executeTo(args, nil)
+}
+
+func executeTo(args []string, out io.Writer) (map[string]any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("use service start|status|stop, start --cwd PATH ASSIGNMENT, continue ASSIGNMENT, preferences, status, turns, events [--cursor CURSOR] [--limit N], output, or stop")
+		return nil, errors.New("use service start|status|stop, start [--worker NAME] --cwd PATH ASSIGNMENT, continue [--worker NAME] [--turn TURN_ID] ASSIGNMENT, preferences, status [--worker NAME], turns, events [--cursor CURSOR] [--limit N], output [--worker NAME] [--follow | --turn TURN_ID], or stop [--worker NAME]")
 	}
 	dir, err := home()
 	if err != nil {
@@ -204,6 +250,7 @@ func execute(args []string) (map[string]any, error) {
 	switch args[0] {
 	case "start":
 		flags := flag.NewFlagSet("start", flag.ContinueOnError)
+		workerFlag(flags, command)
 		cwd := flags.String("cwd", "", "existing working directory")
 		sandbox := flags.String("sandbox", "read-only", "read-only or workspace-write")
 		permissions := flags.String("permissions", "", "explicit dedicated-repository Git/GitHub scope")
@@ -320,14 +367,16 @@ func execute(args []string) (map[string]any, error) {
 			}
 		}
 	case "continue":
-		if len(args) == 2 && strings.TrimSpace(args[1]) != "" {
-			command["assignment"] = args[1]
-		} else if len(args) == 4 && args[1] == "--turn" && args[2] != "" && strings.TrimSpace(args[3]) != "" {
-			command["turn_id"] = args[2]
-			command["assignment"] = args[3]
-		} else {
-			return nil, errors.New("use continue [--turn TURN_ID] \"assignment\"; working directory and sandbox cannot change")
+		flags := flag.NewFlagSet("continue", flag.ContinueOnError)
+		workerFlag(flags, command)
+		turnFlag(flags, command)
+		if err = flags.Parse(args[1:]); err != nil {
+			return nil, err
 		}
+		if flags.NArg() != 1 || strings.TrimSpace(flags.Arg(0)) == "" {
+			return nil, errors.New("use continue [--worker NAME] [--turn TURN_ID] \"assignment\"; working directory and sandbox cannot change")
+		}
+		command["assignment"] = flags.Arg(0)
 	case "events":
 		flags := flag.NewFlagSet("events", flag.ContinueOnError)
 		cursor := flags.String("cursor", "", "opaque cursor from an earlier events page")
@@ -355,12 +404,28 @@ func execute(args []string) (map[string]any, error) {
 		}
 		command["limit"] = *limit
 	case "output":
-		if len(args) == 3 && args[1] == "--turn" && args[2] != "" {
-			command["turn_id"] = args[2]
-		} else if len(args) != 1 {
-			return nil, errors.New("use output, output --follow, or output --turn TURN_ID")
+		var follow bool
+		command, follow, err = parseOutput(args[1:])
+		if err != nil {
+			return nil, err
 		}
-	case "status", "turns", "stop":
+		if follow {
+			if out == nil {
+				return nil, errors.New("output --follow requires streaming output")
+			}
+			worker, _ := command["worker_id"].(string)
+			return nil, followOutput(out, worker)
+		}
+	case "status", "stop":
+		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
+		workerFlag(flags, command)
+		if err = flags.Parse(args[1:]); err != nil {
+			return nil, err
+		}
+		if flags.NArg() != 0 {
+			return nil, errors.New("unexpected arguments")
+		}
+	case "turns":
 		if len(args) != 1 {
 			return nil, errors.New("unexpected arguments")
 		}
@@ -376,10 +441,11 @@ func execute(args []string) (map[string]any, error) {
 
 // eventReader retains incomplete records across EOF while the native log grows.
 type eventReader struct {
-	reader  *bufio.Reader
-	pending []byte
-	turnID  string
-	encoder *json.Encoder
+	reader   *bufio.Reader
+	pending  []byte
+	turnID   string
+	workerID string
+	encoder  *json.Encoder
 }
 
 func (events *eventReader) drain(final bool) error {
@@ -398,7 +464,7 @@ func (events *eventReader) drain(final bool) error {
 				return errors.New("native output contains an invalid or truncated JSON event")
 			}
 			if writeErr := events.encoder.Encode(map[string]any{
-				"type": "event", "turn_id": events.turnID, "event": json.RawMessage(events.pending),
+				"type": "event", "turn_id": events.turnID, "worker_id": events.workerID, "event": json.RawMessage(events.pending),
 			}); writeErr != nil {
 				return writeErr
 			}
@@ -410,8 +476,12 @@ func (events *eventReader) drain(final bool) error {
 	}
 }
 
-func followOutput(out io.Writer) error {
-	current, err := execute([]string{"status"})
+func followOutput(out io.Writer, worker string) error {
+	statusArgs := []string{"status"}
+	if worker != "" {
+		statusArgs = append(statusArgs, "--worker", worker)
+	}
+	current, err := execute(statusArgs)
 	if err != nil {
 		return err
 	}
@@ -424,6 +494,14 @@ func followOutput(out io.Writer) error {
 	if !idOK || id == "" || !folderOK || folder == "" {
 		return errors.New("Runtime did not provide a turn ID and artifact directory")
 	}
+	workerID, _ := current["worker_id"].(string)
+	if workerID == "" {
+		workerID = "default"
+	}
+	if worker != "" && workerID != worker {
+		return errors.New("Runtime returned a different worker while following output")
+	}
+	statusArgs = []string{"status", "--worker", workerID}
 	if err = encoder.Encode(map[string]any{"type": "status", "turn": current}); err != nil {
 		return err
 	}
@@ -433,7 +511,7 @@ func followOutput(out io.Writer) error {
 			file.Close()
 		}
 	}()
-	events := eventReader{turnID: id, encoder: encoder}
+	events := eventReader{turnID: id, workerID: workerID, encoder: encoder}
 	for {
 		final := current["state"] != "running"
 		if file == nil {
@@ -462,33 +540,35 @@ func followOutput(out io.Writer) error {
 			return encoder.Encode(map[string]any{"type": "result", "turn": current})
 		}
 		time.Sleep(200 * time.Millisecond)
-		current, err = execute([]string{"status"})
+		current, err = execute(statusArgs)
 		if err != nil {
 			return err
 		}
 		if current["id"] != id {
 			return errors.New("current turn changed while following output; refusing to switch turns")
 		}
+		currentWorker, _ := current["worker_id"].(string)
+		if currentWorker == "" {
+			currentWorker = "default"
+		}
+		if currentWorker != workerID {
+			return errors.New("current worker changed while following output; refusing to switch workers")
+		}
 	}
 }
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH [--backend codex|claude] --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude defaults to read-only; explicit dedicated-repository uses native sandboxed Bash in an independent repository outside system temp roots. Both use their official CLI login. Managed provisioning requires the installed Codex sandbox for Git preparation, including for Claude. Claude workspace-write is refused. Continue requires a successful saved native session and retains its backend, model and scope. One agent at a time.")
+		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start [--worker NAME] --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start [--worker NAME] --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH [--backend codex|claude] --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--worker NAME] [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|stop [--worker NAME]\natlas-runtime turns\natlas-runtime output [--worker NAME] [--follow | --turn TURN_ID]\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude defaults to read-only; explicit dedicated-repository uses native sandboxed Bash in an independent repository outside system temp roots. Both use their official CLI login. Managed provisioning requires the installed Codex sandbox for Git preparation, including for Claude. Claude workspace-write is refused. Continue requires a successful saved native session and retains its worker, backend, model and scope. One active execution per worker. NAME must match ^[a-z][a-z0-9_-]{0,63}$. Omitted --worker selects the sole registered worker, or default when none exist; multiple workers require an explicit name. --turn selects its recorded worker; an explicit --worker must match. Flags precede assignment text; use -- before an assignment starting with a dash. Follow pins the selected worker and turn. Turns and events include all workers. Service status lists worker states; service stop stops all workers.")
 		fmt.Println("atlas-runtime events [--cursor CURSOR] [--limit N]\nEvents returns one finite page of durable execution events, not native output or task-success claims. Limit defaults to 50 (1..100); follow is not supported.")
 		return
 	}
-	if len(os.Args) == 3 && os.Args[1] == "output" && os.Args[2] == "--follow" {
-		if err := followOutput(os.Stdout); err != nil {
-			json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
-			os.Exit(1)
-		}
-		return
-	}
-	result, err := execute(os.Args[1:])
+	result, err := executeTo(os.Args[1:], os.Stdout)
 	if err != nil {
 		json.NewEncoder(os.Stdout).Encode(map[string]any{"error": err.Error()})
 		os.Exit(1)
 	}
-	json.NewEncoder(os.Stdout).Encode(result)
+	if result != nil {
+		json.NewEncoder(os.Stdout).Encode(result)
+	}
 }

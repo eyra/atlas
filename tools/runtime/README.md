@@ -1,6 +1,6 @@
 # Runtime service and CLI
 
-One Go command-line client, a separate Elixir Runtime daemon, and one native agent at a time. Codex remains the default without configured preferences; Claude requires explicit selection or an explicit preference. No Atlas server connection or orchestration. Runtime and Bus are the only Atlas applications started; State, Flow, Control and Rela are not started.
+One Go command-line client, a separate Elixir Runtime daemon, and explicitly targeted concurrent native workers. Each worker has at most one active execution. Codex remains the default without configured preferences; Claude requires explicit selection or an explicit preference. No Atlas server connection or orchestration. Runtime and Bus are the only Atlas applications started; State, Flow, Control and Rela are not started.
 
 ```sh
 atlas-runtime service start
@@ -11,7 +11,27 @@ atlas-runtime stop
 atlas-runtime service stop
 ```
 
-Commands return one JSON response, except `output --follow`, which streams JSON lines. `start` returns while the selected native agent runs. `stop` stops the agent, not the service. `service stop` stops both. `service status` checks the daemon. No automatic daemon startup, assignment retries or stdin session. Command failures exit nonzero. A successful `status` or `output` query exits zero even for a failed turn, retaining its `state: "failed"`, `error`, ID and artifact location.
+Commands return one JSON response, except `output --follow`, which streams JSON lines. `start` returns while the selected native agent runs. `stop` stops only the selected worker's agent, not the service. `service stop` stops all workers and then the daemon; a partial stop failure retains completed stops and refuses shutdown. `service status` exposes a `workers` map. Single-worker `agent_state`/stop `agent` fields remain available only when unambiguous. No automatic daemon startup, assignment retries or stdin session. Command failures exit nonzero. A successful `status` or `output` query exits zero even for a failed turn, retaining its `state: "failed"`, `error`, ID and artifact location.
+
+## Explicit concurrent workers
+
+```sh
+atlas-runtime start --worker server --backend claude --repo https://github.com/eyra/atlas.git --branch work/server-task --permissions dedicated-repository "Server assignment"
+atlas-runtime start --worker console --backend claude --repo https://github.com/eyra/atlas.git --branch work/console-task --permissions dedicated-repository "Console assignment"
+atlas-runtime start --worker runtime --backend claude --repo https://github.com/eyra/atlas.git --branch work/runtime-task --permissions dedicated-repository "Runtime assignment"
+atlas-runtime status --worker server
+atlas-runtime output --worker console --follow
+atlas-runtime stop --worker runtime
+atlas-runtime continue --worker server --turn turn-0123456789abcdef "Next server assignment"
+```
+
+Worker names match `[a-z][a-z0-9_-]{0,63}`. Flags precede the assignment; use `--` before a dash-leading assignment. Start/status/output/stop/continue accept `--worker`. Omission selects `default` when no workers are registered, or the sole registered worker; multiple workers always require a selector, even when only one is active. Workers register only after accepted start/continue and remain registered until daemon restart. Explicit unknown workers refuse except when starting or selecting a saved turn. A duplicate active worker refuses rather than queues.
+
+`output --turn ID` and `continue --turn ID` resolve the saved worker. Supplying `--worker` as well must match; a session cannot transfer to another worker. Older saved turns without worker attribution belong to the original single-worker `default`. Restart clears the worker registry, starts no native processes and selects no historical execution automatically. `turns` lists all workers' history; `events` remains one global ordered stream, with `worker_id` on every new event. Older journal entries remain unchanged and unattributed. There is no per-worker cursor/filter or scheduler.
+
+Real isolated public-CLI proof on 2026-11-07: Server `turn-849a0f44f47663c9`, Console `turn-711cf725b155be0f` and Runtime `turn-a7e5136ac3891023` each provisioned a separate clone/branch from base `568217bf7986b3f266be4df27fc121cb13200fb9`. All three real `claude-opus-5-5` sessions overlapped inside bounded Bash calls. Stopping Runtime removed its process group/private temp while Server and Console remained running, then independently finished with exact worker-specific file contents and answers. Events attributed accepted/finished/stopped transitions to the correct workers/turns. Ambiguous control, duplicate worker, workspace collision and mismatched saved ownership refused; repeated stop added no event.
+
+After daemon restart, explicit Server continuation `turn-6f4aa53f92af74df` retained session `b400b621-68e0-488e-8d16-c95fec47e819`, model, cwd, repository and permissions, recalling the previous answer without tools. Targeted follow pinned worker/turn; replay from the prior global cursor returned only the continuation pair. The 39 focused ExUnit tests, 27 Python runner tests and Go CLI suite passed. All owned proof daemons/process groups/private temp directories were absent afterward; disposable binaries/builds were removed. Question/reply, peer chat, scheduling, automatic recovery and Server/Console integration remain outside this capability.
 
 ## Durable execution discovery
 
@@ -21,7 +41,7 @@ atlas-runtime events --cursor "$NEXT_CURSOR" --limit 50
 atlas-runtime output --turn turn-0123456789abcdef
 ```
 
-`events` is a finite query, not a watcher. It returns immutable ordered lifecycle snapshots with stable turn IDs, backend/native identity when known, and references usable by `output --turn` for status and logs. `execution_accepted` means Runtime accepted a start or continuation; `execution_finished` means the native turn ended normally, **not that its assigned task was verified successful**. Failure and explicit stop use `execution_failed` and `execution_stopped`. Assignments, answers and full logs are not copied into the event stream.
+`events` is a finite query, not a watcher. It returns immutable ordered lifecycle snapshots with stable turn IDs, worker attribution for new events, backend/native identity when known, and references usable by `output --turn` for status and logs. `execution_accepted` means Runtime accepted a start or continuation; `execution_finished` means the native turn ended normally, **not that its assigned task was verified successful**. Failure and explicit stop use `execution_failed` and `execution_stopped`. Assignments, answers and full logs are not copied into the event stream.
 
 The response includes `events`, `next_cursor`, `has_more`, `earliest_cursor`, `retention_gap` and `recording_started_at`. Save `next_cursor` only after processing the returned page. It advances only through returned events; an empty page preserves the supplied cursor. The initial empty query still returns a usable cursor. Replaying a retained cursor returns the same ordered prefix; newly appended events may extend a previously short page.
 
@@ -39,7 +59,7 @@ After `status` reports `finished`, continue that Codex conversation:
 atlas-runtime continue "Now explain the tradeoff in more detail"
 ```
 
-`continue` starts a new Runtime turn using the previous explicit native `session_id`, working directory and sandbox. No setting overrides are accepted. Without a selector, the current turn must be successfully finished. `start` always creates a fresh conversation. Native session confirmation is required; there is no `--last` selection or fallback to another session. Both native CLIs retain conversation history in their normal local storage; Runtime artifacts remain separate. Restart clears the current-turn view and never restores a conversation automatically.
+`continue` starts a new Runtime turn for the selected worker using its previous explicit native `session_id`, working directory and sandbox. No setting overrides are accepted. Without a turn selector, that worker's current turn must be successfully finished. `start` always creates a fresh conversation. Native session confirmation is required; there is no `--last` selection or fallback to another session. Both native CLIs retain conversation history in their normal local storage; Runtime artifacts remain separate. Restart clears all current-turn views and never restores a conversation automatically.
 
 To explicitly resume a saved successful conversation, including after daemon restart:
 
@@ -47,7 +67,7 @@ To explicitly resume a saved successful conversation, including after daemon res
 atlas-runtime continue --turn turn-0123456789abcdef "Next assignment"
 ```
 
-The saved turn must be `finished`, with a native session ID and valid saved cwd/sandbox; its working directory must still exist. Failed, stopped, unknown and incomplete records are refused. Any active agent blocks continuation, even when selecting another turn. A new Runtime turn/artifact folder is created; the selected record is unchanged. Selecting an older turn resumes that conversation's current native history, not a rollback or fork at the selected turn. If the selected native backend cannot resume the exact session, the new turn fails without fallback.
+The saved turn must be `finished`, with a native session ID and valid saved cwd/sandbox; its working directory must still exist. Failed, stopped, unknown and incomplete records are refused. An active agent for that worker blocks continuation; other workers may continue independently unless their workspaces overlap. A new Runtime turn/artifact folder is created; the selected record is unchanged. Selecting an older turn resumes that conversation's current native history, not a rollback or fork at the selected turn. If the selected native backend cannot resume the exact session, the new turn fails without fallback.
 
 Codex defaults to **read-only**, using the official CLI and the user's existing ChatGPT login (`codex login`). Explicitly opt into Codex's workspace-write sandbox for an editing assignment:
 
@@ -140,19 +160,19 @@ To have Runtime provision the clone and task branch, supply an explicit GitHub H
 atlas-runtime start --repo https://github.com/eyra/atlas.git --branch work/server-task --permissions dedicated-repository "Complete the assigned change"
 ```
 
-The daemon manages one independent clone per normalized owner/repository beneath its selected state directory: `repositories/<owner>/<repository>`. The URL must name `https://github.com/OWNER/REPO[.git]`, without embedded credentials, query strings or fragments. `--repo` and `--branch` must be supplied together with explicit dedicated-repository permissions, and cannot be combined with `--cwd` or `--sandbox`. Repository choice, branch name and assignment remain external decisions.
+The daemon manages one independent clone per worker and normalized owner/repository beneath its selected state directory: `workers/<worker>/repositories/<owner>/<repository>`. Each caller supplies its own task branch. Older managed paths remain available to their saved continuations; new starts use worker-specific paths without moving existing work. The URL must name `https://github.com/OWNER/REPO[.git]`, without embedded credentials, query strings or fragments. `--repo` and `--branch` must be supplied together with explicit dedicated-repository permissions, and cannot be combined with `--cwd` or `--sandbox`. Repository choice, branch name and assignment remain external decisions.
 
 Runtime clones an absent path or reuses only a matching Runtime-marked independent clone with a matching origin and clean tracked/untracked state. It freshly fetches remote heads, records the exact `origin/develop` commit, and creates the requested new branch at that commit. Existing local or remote task branches are refused, including `develop`. Dirty, unmanaged, mismatched or actively owned paths are refused without reset, stash, deletion or branch overwrite; ignored-file collisions also prevent checkout. Previous task branches/commits stay intact. Stale remote-tracking branches are not automatically pruned.
 
-Git preparation runs under the same native repository/network profile, using the existing GitHub credential helper without copying credentials or changing global Git config. The existing runner holds an advisory directory lock through preparation, native execution and process-group cleanup. Dedicated-repository starts, and legacy `--cwd` starts on a marked managed clone, honor that lock. This coordinates Runtime owners; it is not a lock against humans or other tools that ignore it.
+Git preparation runs under the same native repository/network profile, using the existing GitHub credential helper without copying credentials or changing global Git config. The existing runner holds an advisory directory lock through preparation, native execution and process-group cleanup. Dedicated-repository starts, and legacy `--cwd` starts on a marked managed clone, honor that lock. The daemon also refuses canonical identical, nested or parent workspace overlap with any active worker, including symlink aliases and unscoped sandbox modes. Directory locks coordinate Runtime owners; they are not locks against humans or other tools that ignore them.
 
 `start` still returns before completion: a running turn is not proof that preparation or native execution succeeded. On preparation success, the stream includes `runtime.repository_prepared`, and status/history persist `repository: {url, branch, base_sha}` before the worker starts. Preparation refusals leave a failed turn with diagnostics in its `stderr.log`; partially prepared paths are preserved for explicit inspection, never automatically deleted or retried.
 
 Saved/ordinary continuation reuses the exact session and scope without fetching, recreating a branch or discarding unfinished work. Managed continuation additionally requires the saved origin and branch to still match. If another task reused the clone and switched its branch, continuation refuses rather than switching it back. No automatic scheduling, recovery, installation, merging or deployment is introduced.
 
-The client talks to an owner-only Unix socket under `~/.local/state/atlas-runtime/`. `service.log` contains daemon diagnostics. Per-turn artifacts retain full native JSONL, stderr, final answer and process details. `output` returns the final answer and a bounded 64 KiB native event tail. Restart resets the in-memory current-turn view to idle; retained artifacts do not trigger restoration or re-execution.
+The client talks to an owner-only Unix socket under `~/.local/state/atlas-runtime/`. `service.log` contains daemon diagnostics. Per-turn artifacts retain full native JSONL, stderr, final answer and process details. `output` returns the selected worker's final answer and a bounded 64 KiB native event tail. Restart resets the in-memory worker registry; retained artifacts do not trigger restoration or re-execution.
 
-Watch the current turn with `atlas-runtime output --follow`. The Go client reads that turn's local `stream.jsonl` from the beginning and polls status over the existing socket every 200 ms; no daemon changes or restart are needed for this feature. Output is newline-delimited JSON: initial `{"type":"status","turn":...}`, native `{"type":"event","turn_id":...,"event":...}` records, then `{"type":"result","turn":...}` with terminal status and answer. Completed turns replay and exit; idle returns one result immediately. Native events are emitted once per invocation, including events larger than the ordinary output tail. Incomplete records wait for completion; malformed/truncated final JSON fails rather than disappearing.
+Watch a worker's current turn with `atlas-runtime output --worker NAME --follow`, or omit the worker only when unambiguous. The client resolves and pins worker/turn identity once, reads that turn's local `stream.jsonl` from the beginning and polls targeted status every 200 ms. Output is newline-delimited JSON: initial `{"type":"status","turn":...}`, native `{"type":"event","worker_id":...,"turn_id":...,"event":...}` records, then `{"type":"result","turn":...}` with terminal status and answer. Completed turns replay and exit; idle returns one result immediately. Native events are emitted once per invocation, including events larger than the ordinary output tail. Incomplete records wait for completion; malformed/truncated final JSON fails rather than disappearing.
 
 Ctrl-C stops the viewer, not the agent. Another `start`/`continue` replacing the selected turn causes a command error rather than silently following another assignment; service loss also fails visibly. Failed/stopped terminal results remain successful inspection commands (exit zero), not proof of assignment success. This is native event output, not a guarantee of token-by-token text streaming.
 
@@ -163,7 +183,7 @@ atlas-runtime turns
 atlas-runtime output --turn turn-0123456789abcdef
 ```
 
-`turns` returns a `turns` array, newest start first, with assignments, states, settings, native session IDs and timestamps. Each new turn saves `turn.json` atomically beside its existing artifacts at start, native session confirmation, and terminal transition. `output --turn ID` returns the selected turn's answer and bounded native event tail without changing the current turn. Unknown/malformed IDs fail; historical failed/stopped turns remain inspectable with exit zero. Explicit historical selection is a snapshot command, not combined with `--follow`.
+`turns` returns a `turns` array, newest start first, with worker IDs, assignments, states, settings, native session IDs and timestamps. Each new turn saves `turn.json` atomically beside its existing artifacts at start, native session confirmation, and terminal transition. `output --turn ID` returns the selected turn's answer and bounded native event tail without changing any worker's current turn. Unknown/malformed IDs fail; historical failed/stopped turns remain inspectable with exit zero. Explicit historical selection is a snapshot command, not combined with `--follow`.
 
 History survives daemon restart, but `status` still starts idle and plain `continue` does not select saved history. Only explicit `continue --turn ID` selects a saved successful conversation. Older artifact folders without metadata remain readable with state `unknown`; missing assignment/timestamp/session fields are not guessed. A saved `running` turn no longer owned by this daemon is shown as `unknown` with `recorded_state: running`, not claimed to be active or successful. No automatic restart, crash recovery, retention/deletion policy or server connection is introduced.
 

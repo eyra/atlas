@@ -49,6 +49,7 @@ defmodule AtlasRuntime.ExecutionEvents do
       "sequence" => store["sequence"] + 1,
       "kind" => kind,
       "turn_id" => run.id,
+      "worker_id" => run.worker_id,
       "backend" => run.backend,
       "session_id" => Map.get(run, :session_id),
       "model" => Map.get(run, :model),
@@ -172,19 +173,24 @@ defmodule AtlasRuntime.ExecutionEvents do
          "model" => model,
          "timestamp" => timestamp
        } = event) do
+    worker_fields = if Map.has_key?(event, "worker_id"), do: 1, else: 0
+    worker_valid = worker_fields == 0 or
+      (is_binary(event["worker_id"]) and
+         Regex.match?(~r/\A[a-z][a-z0-9_-]{0,63}\z/, event["worker_id"]))
+
     shape =
       case kind do
         "execution_accepted" ->
-          map_size(event) == 8 and event["operation"] in ["start", "continue"]
+          map_size(event) == 8 + worker_fields and event["operation"] in ["start", "continue"]
 
         terminal when terminal in ["execution_finished", "execution_failed", "execution_stopped"] ->
-          map_size(event) == 7
+          map_size(event) == 7 + worker_fields
 
         _ ->
           false
       end
 
-    shape and is_integer(sequence) and sequence > 0 and sequence <= @max_sequence and
+    shape and worker_valid and is_integer(sequence) and sequence > 0 and sequence <= @max_sequence and
       text?(turn, 128) and text?(backend, 64) and nullable_text?(session, 1024) and
       nullable_text?(model, 256) and timestamp?(timestamp)
   end

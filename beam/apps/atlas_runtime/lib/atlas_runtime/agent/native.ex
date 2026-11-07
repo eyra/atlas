@@ -25,6 +25,8 @@ defmodule AtlasRuntime.Agent.Native do
 
   def permission_scope(workspace), do: runner_request(["--permission-scope", workspace])
 
+  def workspace_path(workspace), do: runner_request(["--workspace-path", workspace])
+
   def repository_request(home, url, branch),
     do: runner_request(["--repository-request", home, url, branch])
 

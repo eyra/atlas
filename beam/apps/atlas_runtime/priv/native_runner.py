@@ -263,6 +263,9 @@ def codex_model(session, workspace, started_at):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == '--workspace-path':
+        print(json.dumps(str(Path(sys.argv[2]).resolve())))
+        return
     if len(sys.argv) == 3 and sys.argv[1] == '--permission-scope':
         print(json.dumps(permission_scope(sys.argv[2])))
         return
