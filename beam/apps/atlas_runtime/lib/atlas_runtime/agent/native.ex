@@ -427,6 +427,10 @@ defmodule AtlasRuntime.Agent.Native do
   # Local Claude failures can carry a synthetic assistant instead of a model response.
   defp identify(state, "<synthetic>"), do: state
 
+  # Keep the native context-window option when assistant records name only its base model.
+  defp identify(%{backend: "claude", model: configured} = state, model)
+       when is_binary(model) and configured == model <> "[1m]", do: state
+
   defp identify(state, model) when is_binary(model) and model != "" do
     if state.model != model,
       do: send(state.owner, {:agent, self(), {:identity, state.backend, model}})
