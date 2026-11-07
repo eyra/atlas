@@ -120,9 +120,22 @@ defmodule AtlasRuntime.Service do
     {Map.merge(state.run, turn_output(state.run[:artifacts])), state, false}
   end
 
+  defp command(%{"command" => "start", "repository" => url, "branch" => branch,
+                 "permissions" => "dedicated-repository", "assignment" => assignment} = request, state)
+       when is_binary(url) and is_binary(branch) and is_binary(assignment) do
+    if state.agent, do: raise("An agent is already active; use status or stop")
+    if Map.keys(request) -- ["command", "repository", "branch", "permissions", "assignment"] != [],
+      do: raise("Repository provisioning cannot be combined with cwd or sandbox")
+    prepared = Codex.repository_request(state.dir, url, branch)
+    scope = prepared["permissions"]
+    start_turn(assignment, scope["root"], nil, scope, nil, state, prepared["repository"])
+  end
+
   defp command(%{"command" => "start", "cwd" => cwd, "assignment" => assignment} = request, state)
        when is_binary(cwd) and is_binary(assignment) do
     if state.agent, do: raise("An agent is already active; use status or stop")
+    if Map.has_key?(request, "repository") or Map.has_key?(request, "branch"),
+      do: raise("Repository provisioning requires a URL, branch and dedicated-repository permissions")
     {sandbox, scope} =
       case Map.get(request, "permissions") do
         nil ->
@@ -161,14 +174,14 @@ defmodule AtlasRuntime.Service do
       do: raise("The selected turn has no valid saved working directory and permissions")
     if scope && scope != Codex.permission_scope(cwd),
       do: raise("The selected turn's permission scope changed")
-    start_turn(assignment, cwd, sandbox, scope, session, state)
+    start_turn(assignment, cwd, sandbox, scope, session, state, run["repository"])
   end
 
   defp command(_, _), do: raise("Unknown or malformed command")
 
-  defp start_turn(assignment, cwd, sandbox, scope, session, state) do
+  defp start_turn(assignment, cwd, sandbox, scope, session, state, repository \\ nil) do
 
-    if not File.dir?(cwd) or String.trim(assignment) == "",
+    if (not File.dir?(cwd) and is_nil(repository)) or String.trim(assignment) == "",
       do: raise("An existing working directory and nonempty assignment are required")
 
     executable = System.find_executable("codex") || raise("Install Codex and run codex login")
@@ -181,6 +194,7 @@ defmodule AtlasRuntime.Service do
       "goal" => assignment,
       "sandbox" => sandbox,
       "permissions" => scope,
+      "repository" => repository,
       "session_id" => session
     }
 
@@ -197,6 +211,7 @@ defmodule AtlasRuntime.Service do
           artifacts: Path.join(turns, key)
         }
         run = if scope, do: Map.put(run, :permissions, scope), else: run
+        run = if repository, do: Map.put(run, :repository, repository), else: run
 
         next = %{state | agent: pid, monitor: Process.monitor(pid), run: run}
         {run, next, false}
@@ -214,6 +229,12 @@ defmodule AtlasRuntime.Service do
     Process.demonitor(state.monitor, [:flush])
     %{state | agent: nil, monitor: nil,
       run: Map.merge(state.run, %{state: "stopped", ended_at: DateTime.to_iso8601(DateTime.utc_now())})}
+  end
+
+  def handle_info({:agent, pid, {:repository, repository}}, %{agent: pid} = state) do
+    run = Map.put(state.run, :repository, repository)
+    persist(run)
+    {:noreply, %{state | run: run}}
   end
 
   def handle_info({:agent, pid, {:session, id}}, %{agent: pid} = state) do
