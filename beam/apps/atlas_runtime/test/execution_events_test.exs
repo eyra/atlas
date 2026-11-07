@@ -280,4 +280,37 @@ defmodule AtlasRuntime.ExecutionEventsTest do
       assert File.read!(path) == bytes
     end
   end
+
+  test "question references interleave with execution events and deduplicate exact revisions", %{dir: dir, path: path} do
+    store = ExecutionEvents.append(dir, ExecutionEvents.open(dir), run(1))
+    checkpoint = ExecutionEvents.query(store, nil, 100)["next_cursor"]
+    transition = %{"kind" => "question_available", "worker_id" => "alpha",
+      "turn_id" => "turn-0000000000000001", "question_id" => "question-ab12",
+      "record_ref" => "turns/turn-0000000000000001/questions/question-ab12.json",
+      "revision" => 1, "timestamp" => @started}
+    store = ExecutionEvents.append_question(dir, store, transition)
+    assert ExecutionEvents.append_question(dir, store, transition) == store
+    bytes = File.read!(path)
+    assert_raise ArgumentError, ~r/conflicting/, fn ->
+      ExecutionEvents.append_question(dir, store, %{transition | "kind" => "answer_accepted"})
+    end
+    assert File.read!(path) == bytes
+    store = ExecutionEvents.append_question(dir, store,
+      %{transition | "kind" => "answer_accepted", "revision" => 2})
+    store = ExecutionEvents.append(dir, store, run(1, "finished"))
+    reply = ExecutionEvents.query(ExecutionEvents.open(dir), checkpoint, 100)
+    assert Enum.map(reply["events"], & &1["kind"]) ==
+      ["question_available", "answer_accepted", "execution_finished"]
+    assert Enum.map(reply["events"], & &1["sequence"]) == [2, 3, 4]
+    assert ExecutionEvents.query(store, checkpoint, 100) == reply
+    for invalid <- [
+      Map.put(transition, "questions", []),
+      %{transition | "question_id" => "../question"},
+      %{transition | "revision" => 6},
+      %{transition | "worker_id" => "../worker"},
+      %{transition | "record_ref" => "/unrelated"}
+    ] do
+      assert_raise ArgumentError, fn -> ExecutionEvents.append_question(dir, store, invalid) end
+    end
+  end
 end
