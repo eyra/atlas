@@ -21,6 +21,77 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class ClaudeRepositoryLifecycleTest(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory(prefix='.runtime-claude-scope-', dir=Path.home())
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name).resolve()
+        self.repo = self.root / 'repo'
+        self.repo.mkdir()
+        subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
+        self.scope = runner.permission_scope(str(self.repo))
+        self.capture = self.root / 'owned-temp.txt'
+        self.native = self.root / 'fixture-native'
+
+    def launch(self, scope, hang=False):
+        self.native.write_text(
+            f'#!{sys.executable}\n'
+            'import os, time\nfrom pathlib import Path\n'
+            f'Path({str(self.capture)!r}).write_text(os.environ["CLAUDE_CODE_TMPDIR"])\n'
+            'print(\'{"type":"fixture.ready"}\', flush=True)\n' +
+            ('time.sleep(30)\n' if hang else ''))
+        self.native.chmod(0o700)
+        return subprocess.Popen(
+            [sys.executable, str(HELPER), str(self.native), str(self.repo), str(self.root),
+             'fixture lifecycle only', '', '', json.dumps(scope), 'null', 'claude'],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    def test_owned_repository_temp_is_removed_after_completion_and_stop(self):
+        for stop in (False, True):
+            with self.subTest(stop=stop):
+                process = self.launch(self.scope, hang=stop)
+                try:
+                    self.assertEqual(json.loads(process.stdout.readline())['type'], 'runtime.process_started')
+                    self.assertEqual(json.loads(process.stdout.readline())['event']['type'], 'fixture.ready')
+                    temporary = Path(self.capture.read_text())
+                    self.assertEqual(temporary.parent, self.repo / '.git')
+                    if stop:
+                        process.stdin.write('stop\n')
+                        process.stdin.flush()
+                    process.wait(timeout=5)
+                    _, error = process.communicate()
+                    self.assertEqual(process.returncode, 0, error)
+                    self.assertFalse(temporary.exists())
+                    subprocess.run(['git', '-C', str(self.repo), 'rev-parse', '--git-dir'],
+                                   check=True, capture_output=True)
+                finally:
+                    if process.poll() is None:
+                        process.stdin.close()
+                        process.wait(timeout=5)
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        stream.close()
+
+    def test_changed_scope_never_executes_native_cli(self):
+        process = self.launch({**self.scope, 'network_hosts': ['example.com']})
+        try:
+            process.wait(timeout=5)
+            _, error = process.communicate()
+            self.assertNotEqual(process.returncode, 0)
+            self.assertIn('permission scope changed', error)
+            self.assertFalse(self.capture.exists())
+        finally:
+            if process.poll() is None:
+                process.stdin.close()
+                process.wait(timeout=5)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+
+    def test_system_temp_repository_cannot_bypass_native_temp_denial(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'outside system temporary directories'):
+                runner.claude_repository_settings(runner.dedicated_scope(Path(directory).resolve()))
+
+
 class NativeModelTest(unittest.TestCase):
     session = '01a1b578-c3b5-7972-9664-1d250bf64cdf'
 

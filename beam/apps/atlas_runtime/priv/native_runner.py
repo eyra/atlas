@@ -8,9 +8,11 @@ from pathlib import Path
 import re
 import selectors
 import signal
+import shutil
 import subprocess
 import sys
 import time
+import tempfile
 
 
 def emit(event):
@@ -98,6 +100,24 @@ def permission_arguments(scope):
                '},network={enabled=true,domains={"github.com"="allow","api.github.com"="allow"}}}}')
     return ['-c', 'default_permissions="atlas_repository"', '-c', profile,
             '-c', 'features.network_proxy=true']
+
+
+def claude_repository_settings(scope):
+    root = Path(scope['root'])
+    temporary_roots = {Path(path).resolve() for path in
+                       ('/tmp', '/var/tmp', tempfile.gettempdir())}
+    if any(root == path or root.is_relative_to(path) for path in temporary_roots):
+        raise ValueError('Claude dedicated repositories must be outside system temporary directories')
+    protected = [root / name for name in ('.agents', '.codex', '.aws', '.claude')]
+    protected += [root / '.git/config', root / '.git/hooks']
+    return {'sandbox': {
+        'enabled': True, 'failIfUnavailable': True, 'allowUnsandboxedCommands': False,
+        'excludedCommands': [],
+        'filesystem': {'allowWrite': [str(root)],
+                       'denyWrite': sorted(str(path) for path in temporary_roots) +
+                                    [str(path) for path in protected]},
+        'network': {'allowedDomains': scope['network_hosts'],
+                    'allowAllUnixSockets': False, 'allowLocalBinding': False}}}
 
 
 def lock_repository(workspace, create):
@@ -230,8 +250,9 @@ def main():
         raise ValueError('Model must be a nonempty identifier of at most 200 characters')
     if backend not in ('codex', 'claude'):
         raise ValueError('Backend must be codex or claude')
-    if backend == 'claude' and (sandbox != 'read-only' or scope or repository or session):
-        raise ValueError('Claude supports only fresh read-only assignments; no provisioning or continuation')
+    if backend == 'claude' and (repository or session or
+                               (scope is None and sandbox != 'read-only')):
+        raise ValueError('Claude requires fresh read-only or dedicated-repository execution; no provisioning or continuation')
     if len(extra) > 4 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
         raise ValueError('Sandbox must be read-only or workspace-write')
     if repository is not None and (scope != dedicated_scope(Path(workspace)) or
@@ -246,11 +267,13 @@ def main():
     folder = Path(folder)
     model_arguments = ['--model', model] if model is not None else []
     if backend == 'claude':
+        tools = 'Bash,Read,Glob,Grep' if scope is not None else 'Read,Glob,Grep'
+        settings = ['--settings', json.dumps(claude_repository_settings(scope))] if scope is not None else []
         command = [executable, '--print', '--output-format', 'stream-json', '--verbose',
                    '--restricted', '--safe-mode', '--strict-mcp-config', '--no-chrome',
-                   '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep',
+                   '--tools', tools, '--allowedTools', tools,
                    '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
-                   '--no-session-persistence', *model_arguments, '--', goal]
+                   '--no-session-persistence', *settings, *model_arguments, '--', goal]
     else:
         command = [executable, 'exec', *permissions, '--disable', 'hooks',
                    '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
@@ -281,6 +304,8 @@ def main():
 
     process = None
     lock = None
+    native_temporary = None
+    environment = None
     selector = selectors.DefaultSelector()
     stopped = False
     deadline = None
@@ -294,13 +319,18 @@ def main():
                 except Exception as error:
                     errors.write(str(error).encode())
                     raise
+                if backend == 'claude' and scope is not None:
+                    if scope != permission_scope(workspace):
+                        raise ValueError('Dedicated repository permission scope changed')
+                    native_temporary = tempfile.mkdtemp(prefix='atlas-claude-', dir=Path(workspace) / '.git')
+                    environment = dict(os.environ, CLAUDE_CODE_TMPDIR=native_temporary)
                 command = [sys.executable, str(Path(__file__).resolve()), '--execute-assignment',
                            workspace, json.dumps(scope), json.dumps(repository), json.dumps(created),
                            *command]
             started_at = datetime.now(timezone.utc)
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=errors, start_new_session=True,
-                                       cwd=workspace if backend == 'claude' else None)
+                                       cwd=workspace if backend == 'claude' else None, env=environment)
             (folder / 'process.json').write_text(json.dumps({'pid': process.pid, 'command': command}))
             emit({'type': 'runtime.process_started', 'pid': process.pid})
             selector.register(sys.stdin, selectors.EVENT_READ, 'control')
@@ -357,6 +387,11 @@ def main():
         if process is not None and process.returncode is None:
             signal_group(process, signal.SIGKILL)
             process.wait()
+        if native_temporary is not None:
+            try:
+                shutil.rmtree(native_temporary)
+            except FileNotFoundError:
+                pass
         # Keep ownership until the complete process group has been reaped, including on stop.
         if lock is not None:
             os.close(lock)
