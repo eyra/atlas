@@ -2,9 +2,10 @@
 
 Runtime can run on a separate machine without Erlang distribution. Its Bus connects
 through a private TCP link, forwarding envelopes and replaying endpoints and listeners
-after reconnect. The node starts only Runtime and Bus. Every endpoint is named
-`runtime@<machine>` or `runtime@<machine>/<turn>`; Control discovers machine endpoints
-for failure actions. A core with no configured agents starts no Runtime engine.
+after reconnect. The node starts only Runtime and Bus. Runtime endpoints include
+`runtime@<machine>`, `runtime@<machine>/<turn>` and `runtime@<machine>/output`;
+Control discovers exact machine endpoints for failure actions. A node with no
+configured agents starts no Runtime engine, but still starts its output endpoint.
 
 Tracked test core settings enable the private Bus listener on `::`, port `7694`;
 the Fly configuration declares no public service for it. Production remains opt-in.
@@ -37,15 +38,25 @@ Create `~/.local/share/atlas/test-runtime/runtime.json` locally:
 ```
 
 This connection-only example uses local tunnel port `7695` to test's private Bus
-port `7694`, with a token bound to `macbook`. Configuring agents or assigning work
+port `7694`, with a token bound to `macbook`. With `agents: {}`, it connects without
+creating workers: after Bus authentication it registers `runtime@macbook/output`,
+but no engine registers `runtime@macbook`. Configuring agents or assigning work
 requires separate authorization; an authenticated connection is not a running worker.
 
 `atlas runtime --env test` starts the tunnel and node in the background;
 `atlas runtime-status --env test` reports its process and log;
 `atlas runtime-stop --env test` stops that node and its tunnel. A started process can be
-waiting to reconnect; consult its log and the turn's lease in Control for progress.
+waiting to reconnect; process status proves neither authenticated remote registration
+nor a running worker. Consult its log for link progress and, when work is running,
+the turn's lease in Control.
 The token is removed from Runtime's process environment before agent ports start.
 Agents' CLI calls still use the ordinary environment file and reach Control.
+
+The separate standalone `atlas-runtime` CLI runs Codex through a local Runtime
+service and Unix socket ([service guide](../../tools/runtime/README.md)). It has no
+Atlas server connection or orchestration and does not appear in Atlas Console.
+Its `status` and `output` commands inspect standalone turns; they do not establish
+registration of the connected `atlas runtime` node described here.
 
 Private test instances use `ATLAS_RUNTIME_FILE` and `ATLAS_RUNTIME_HOME` pointing inside
 their temporary directory, a loopback link, and an ephemeral `ATLAS_BUS_LINK_TOKEN` in
@@ -128,8 +139,10 @@ names deny before lookup, preserving the session without logging the bearer. Thi
 not authenticated human sign-in or a new role engine. No live defaults change.
 
 The reply contains only the requested exact machine's `registered` flag and
-`bus_endpoint_registry` basis. An exact `runtime@machine` entry counts; a turn
-endpoint alone does not. This is a point-in-time endpoint observation, not a probe
+`bus_endpoint_registry` basis. An exact `runtime@machine` entry counts; neither a
+turn endpoint nor `runtime@machine/output` alone counts. Thus a connection-only
+node with `agents: {}` can be authenticated and connected while discovery returns
+`registered: false`. This is a point-in-time endpoint observation, not a probe
 of link responsiveness, worker lifecycle, models or leases. There is no global
 machine enumeration. Typed refusals, registry failure and transport/malformed or
 identity-mismatched replies are distinct from a successful unregistered result.
