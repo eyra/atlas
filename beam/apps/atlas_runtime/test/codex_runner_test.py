@@ -13,8 +13,8 @@ import unittest
 from unittest.mock import patch
 
 
-HELPER = Path(__file__).resolve().parents[1] / 'priv' / 'codex_runner.py'
-spec = importlib.util.spec_from_file_location('codex_runner', HELPER)
+HELPER = Path(__file__).resolve().parents[1] / 'priv' / 'native_runner.py'
+spec = importlib.util.spec_from_file_location('native_runner', HELPER)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 

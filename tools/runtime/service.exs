@@ -8,7 +8,7 @@ if Enum.any?([:atlas_state, :atlas_flow, :atlas_control], &(&1 in started)),
 
 defmodule AtlasRuntime.Service do
   use GenServer
-  alias AtlasRuntime.Agent.Codex
+  alias AtlasRuntime.Agent.Native
 
   def start(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
 
@@ -124,9 +124,11 @@ defmodule AtlasRuntime.Service do
                  "permissions" => "dedicated-repository", "assignment" => assignment} = request, state)
        when is_binary(url) and is_binary(branch) and is_binary(assignment) do
     if state.agent, do: raise("An agent is already active; use status or stop")
-    if Map.keys(request) -- ["command", "repository", "branch", "permissions", "assignment"] != [],
+    if Map.get(request, "backend", "codex") != "codex",
+      do: raise("Repository provisioning supports only the codex backend")
+    if Map.keys(request) -- ["command", "repository", "branch", "permissions", "assignment", "backend"] != [],
       do: raise("Repository provisioning cannot be combined with cwd or sandbox")
-    prepared = Codex.repository_request(state.dir, url, branch)
+    prepared = Native.repository_request(state.dir, url, branch)
     scope = prepared["permissions"]
     start_turn(assignment, scope["root"], nil, scope, nil, state, prepared["repository"])
   end
@@ -136,6 +138,11 @@ defmodule AtlasRuntime.Service do
     if state.agent, do: raise("An agent is already active; use status or stop")
     if Map.has_key?(request, "repository") or Map.has_key?(request, "branch"),
       do: raise("Repository provisioning requires a URL, branch and dedicated-repository permissions")
+    backend = Map.get(request, "backend", "codex")
+    if backend not in ["codex", "claude"], do: raise("Backend must be codex or claude")
+    if backend == "claude" and
+         (Map.get(request, "sandbox", "read-only") != "read-only" or not is_nil(request["permissions"])),
+      do: raise("Claude supports only read-only assignments; write and dedicated-repository permissions are unsupported")
     {sandbox, scope} =
       case Map.get(request, "permissions") do
         nil ->
@@ -145,10 +152,10 @@ defmodule AtlasRuntime.Service do
           {sandbox, nil}
         "dedicated-repository" ->
           if Map.has_key?(request, "sandbox"), do: raise("Permissions cannot be combined with sandbox")
-          {nil, Codex.permission_scope(cwd)}
+          {nil, Native.permission_scope(cwd)}
         _ -> raise("Unknown permission profile")
       end
-    start_turn(assignment, cwd, sandbox, scope, nil, state)
+    start_turn(assignment, cwd, sandbox, scope, nil, state, nil, backend)
   end
 
   defp command(%{"command" => "continue", "assignment" => assignment} = request, state)
@@ -160,6 +167,10 @@ defmodule AtlasRuntime.Service do
       if Map.has_key?(request, "turn_id"),
         do: historical(request["turn_id"], state),
         else: Map.new(state.run, fn {key, value} -> {Atom.to_string(key), value} end)
+    backend = Map.get(run, "backend", "codex")
+    if backend == "claude",
+      do: raise("Claude continuation is unsupported; explicitly start a new Claude session if needed")
+    if backend != "codex", do: raise("Unknown saved backend; sessions cannot switch vendors")
     if run["state"] != "finished",
       do: raise("Continue requires a successfully finished turn")
     session = run["session_id"]
@@ -172,24 +183,25 @@ defmodule AtlasRuntime.Service do
          not ((is_nil(scope) and sandbox in ["read-only", "workspace-write"]) or
            (is_map(scope) and is_nil(sandbox))),
       do: raise("The selected turn has no valid saved working directory and permissions")
-    if scope && scope != Codex.permission_scope(cwd),
+    if scope && scope != Native.permission_scope(cwd),
       do: raise("The selected turn's permission scope changed")
     start_turn(assignment, cwd, sandbox, scope, session, state, run["repository"])
   end
 
   defp command(_, _), do: raise("Unknown or malformed command")
 
-  defp start_turn(assignment, cwd, sandbox, scope, session, state, repository \\ nil) do
+  defp start_turn(assignment, cwd, sandbox, scope, session, state, repository \\ nil, backend \\ "codex") do
 
     if (not File.dir?(cwd) and is_nil(repository)) or String.trim(assignment) == "",
       do: raise("An existing working directory and nonempty assignment are required")
 
-    executable = System.find_executable("codex") || raise("Install Codex and run codex login")
+    executable = System.find_executable(backend) || raise("Install #{backend} and authenticate with its official CLI")
     key = "turn-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
     turns = Path.join(state.dir, "turns")
 
     settings = %{
       "command" => executable,
+      "backend" => backend,
       "workspace" => Path.expand(cwd),
       "goal" => assignment,
       "sandbox" => sandbox,
@@ -198,10 +210,12 @@ defmodule AtlasRuntime.Service do
       "session_id" => session
     }
 
-    case Codex.start(%{key: key}, agent: settings, turns_dir: turns) do
+    case Native.start(%{key: key}, agent: settings, turns_dir: turns) do
       {:ok, pid} ->
         run = %{
           id: key,
+          backend: backend,
+          model: nil,
           started_at: DateTime.to_iso8601(DateTime.utc_now()),
           state: "running",
           cwd: Path.expand(cwd),
@@ -217,7 +231,7 @@ defmodule AtlasRuntime.Service do
         {run, next, false}
 
       {:error, why} ->
-        raise("Codex start failed: #{inspect(why)}")
+        raise("#{backend} start failed: #{inspect(why)}")
     end
   end
 
@@ -225,7 +239,7 @@ defmodule AtlasRuntime.Service do
   defp stop(%{agent: nil} = state), do: state
 
   defp stop(state) do
-    :ok = Codex.stop(state.agent)
+    :ok = Native.stop(state.agent)
     Process.demonitor(state.monitor, [:flush])
     %{state | agent: nil, monitor: nil,
       run: Map.merge(state.run, %{state: "stopped", ended_at: DateTime.to_iso8601(DateTime.utc_now())})}
@@ -233,6 +247,13 @@ defmodule AtlasRuntime.Service do
 
   def handle_info({:agent, pid, {:repository, repository}}, %{agent: pid} = state) do
     run = Map.put(state.run, :repository, repository)
+    persist(run)
+    {:noreply, %{state | run: run}}
+  end
+
+  def handle_info({:agent, pid, {:identity, backend, model}},
+                  %{agent: pid, run: %{backend: backend}} = state) do
+    run = Map.put(state.run, :model, model)
     persist(run)
     {:noreply, %{state | run: run}}
   end

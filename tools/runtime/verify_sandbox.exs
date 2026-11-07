@@ -6,7 +6,7 @@ ExUnit.start()
 
 defmodule AtlasRuntime.NativeSandboxVerification do
   use ExUnit.Case, async: true
-  alias AtlasRuntime.Agent.Codex
+  alias AtlasRuntime.Agent.Native
   @moduletag :tmp_dir
 
   setup %{tmp_dir: dir} do
@@ -55,7 +55,7 @@ defmodule AtlasRuntime.NativeSandboxVerification do
       mode = unquote(mode)
 
       {:ok, pid} =
-        Codex.start(%{key: "turn-native-probe"},
+        Native.start(%{key: "turn-native-probe"},
           turns_dir: Path.join(context.tmp_dir, "turns"),
           agent: %{
             "command" => context.bridge,
@@ -65,7 +65,7 @@ defmodule AtlasRuntime.NativeSandboxVerification do
           }
         )
 
-      on_exit(fn -> if Process.alive?(pid), do: Codex.stop(pid) end)
+      on_exit(fn -> if Process.alive?(pid), do: Native.stop(pid) end)
       ref = Process.monitor(pid)
       assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 15_000
 

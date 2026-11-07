@@ -319,7 +319,7 @@ defmodule WorkerControlTest do
              turn_kind: "run",
              names: names,
              cause: "private native output proof",
-             port: AtlasRuntime.Agent.Codex,
+             port: AtlasRuntime.Agent.Native,
              port_opts: [
                turns_dir: Path.join(c.tmp_dir, "native-turns"),
                agent: %{

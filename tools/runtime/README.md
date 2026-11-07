@@ -1,6 +1,6 @@
 # Runtime service and CLI
 
-One Go command-line client, a separate Elixir Runtime daemon, and one Codex agent at a time. No Atlas server connection or orchestration. Runtime and Bus are the only Atlas applications started; State, Flow, Control and Rela are not started.
+One Go command-line client, a separate Elixir Runtime daemon, and one native agent at a time. Codex remains the default; Claude requires explicit selection. No Atlas server connection or orchestration. Runtime and Bus are the only Atlas applications started; State, Flow, Control and Rela are not started.
 
 ```sh
 atlas-runtime service start
@@ -11,7 +11,7 @@ atlas-runtime stop
 atlas-runtime service stop
 ```
 
-Commands return one JSON response, except `output --follow`, which streams JSON lines. `start` returns while Codex runs. `stop` stops the agent, not the service. `service stop` stops both. `service status` checks the daemon. No automatic daemon startup, assignment retries or stdin session. Command failures exit nonzero. A successful `status` or `output` query exits zero even for a failed turn, retaining its `state: "failed"`, `error`, ID and artifact location.
+Commands return one JSON response, except `output --follow`, which streams JSON lines. `start` returns while the selected native agent runs. `stop` stops the agent, not the service. `service stop` stops both. `service status` checks the daemon. No automatic daemon startup, assignment retries or stdin session. Command failures exit nonzero. A successful `status` or `output` query exits zero even for a failed turn, retaining its `state: "failed"`, `error`, ID and artifact location.
 
 After `status` reports `finished`, continue that Codex conversation:
 
@@ -35,7 +35,19 @@ Codex defaults to **read-only**, using the official CLI and the user's existing 
 atlas-runtime start --cwd /path/to/project --sandbox workspace-write "Make the requested file change"
 ```
 
-The `--sandbox` option accepts only `read-only` and `workspace-write`. Status and output report the selected mode. A read-only denial never automatically escalates permissions. The Runtime reuses `AtlasRuntime.Agent.Codex` and its owned process-group runner; no credentials are copied, no global Codex settings change, and no API fallback. Guidance, queues, multi-agent scheduling and Atlas hookup remain outside this step.
+The `--sandbox` option accepts only `read-only` and `workspace-write` for Codex. Status and output report the selected mode. A read-only denial never automatically escalates permissions. Both standalone backends reuse `AtlasRuntime.Agent.Native` and its owned process-group runner; no credentials are copied, no global native settings change, and no API fallback. Guidance, queues, multi-agent scheduling and Atlas hookup remain outside this step.
+
+To explicitly select the installed official Claude CLI with its existing authentication:
+
+```sh
+atlas-runtime start --backend claude --cwd /path/to/project "Read the project and explain its entry points"
+```
+
+Claude supports only fresh read-only file-tool assignments. Native restricted/safe modes expose only `Read`, `Glob` and `Grep`, confine those file tools to the working directory, disable user/project customizations and MCP servers, and deny permission prompts. This is native tool-level restriction, not a claim of OS-wide sandbox confinement. No Bash, write, browser or network tool is enabled; normal provider communication and existing native authentication remain available. API-key/token environment overrides are not forwarded.
+
+Claude workspace-write, dedicated-repository permissions, repository provisioning and continuation are explicitly refused before execution. Unknown backends are refused. There is no vendor switch, quota retry or automatic fallback. Saved legacy turns without a backend remain Codex turns; new turns persist `backend`, native `session_id` and native-reported `model` when available. Claude local errors with a synthetic assistant model do not replace the native initialization model. A pre-request failure can therefore identify the configured native model without claiming that model completed an inference. Codex model remains `null` when its native stream does not report it.
+
+Claude requires native initialization identity, a successful result and clean process exit before Runtime reports completion. Native JSONL and final/error text remain inspectable through the same artifacts and output commands. Claude session persistence is disabled in this slice; even saved successful Claude turns cannot be continued. The Atlas-connected Claude adapter and broker are unchanged.
 
 For an explicitly authorized Git/PR assignment in an **independent clone**, opt into a separate, fixed permission profile:
 
@@ -86,7 +98,7 @@ atlas-runtime output --turn turn-0123456789abcdef
 
 History survives daemon restart, but `status` still starts idle and plain `continue` does not select saved history. Only explicit `continue --turn ID` selects a saved successful conversation. Older artifact folders without metadata remain readable with state `unknown`; missing assignment/timestamp/session fields are not guessed. A saved `running` turn no longer owned by this daemon is shown as `unknown` with `recorded_state: running`, not claimed to be active or successful. No automatic restart, crash recovery, retention/deletion policy or server connection is introduced.
 
-Requires the normal Elixir/OTP/Mix toolchain, Python 3 and Codex on PATH. First service start compiles Runtime and Bus into its own build directory. `ATLAS_RUNTIME_HOME=/absolute/path` selects an isolated instance; use it consistently across commands. Directory aliases are resolved before building, including macOS `/tmp` → `/private/tmp`, so Mix's relative `priv` links resolve to the actual runner.
+Requires the normal Elixir/OTP/Mix toolchain, Python 3 and the selected official CLI (`codex` or `claude`) on PATH. First service start compiles Runtime and Bus into its own build directory. `ATLAS_RUNTIME_HOME=/absolute/path` selects an isolated instance; use it consistently across commands. Directory aliases are resolved before building, including macOS `/tmp` → `/private/tmp`, so Mix's relative `priv` links resolve to the actual runner.
 
 ## Install
 
@@ -113,6 +125,9 @@ Assertions require read-only to produce an actual `Operation not permitted` shel
 Boundary: this proves native sandbox enforcement and adapter-to-native mode selection through the bridge, not model-driven `codex exec` scheduling or its internal legacy-flag-to-profile conversion. It does not test broader filesystem/network confinement or other platforms. No production policy or adapter implementation is changed.
 
 ## Verified
+
+Explicit Claude selection was exercised through an isolated public Runtime CLI with Claude Code 2.1.280. Native initialization confirmed only `Glob`, `Grep`, `Read`, no MCP servers, `dontAsk`, and model `claude-opus-5-5[1m]`. The single attempt was rejected by the existing weekly limit: `rateLimitType: seven_day`, `overageDisabledReason: out_of_credits`, zero input/output tokens. Runtime retained the model/session and exact error answer, marked the turn failed, refused continuation, and cleaned the native process group. No retry or fallback was attempted. A successful real Claude read remains unverified because of this quota limit; deterministic native-stream regressions cover successful completion, identity requirements, error precedence and private-content filtering.
+
 
 Installed CLI exercised against a separate real daemon: idempotent service start, real Codex completion reading a disposable file, concurrent-start refusal, output retrieval, explicit real Codex stop with native-process cleanup, daemon survival after agent stop, service stop/restart, and refusal without implicit startup when the service is stopped. A synthetic hanging executable also proved daemon shutdown cleans its active agent process group. All smoke daemons were stopped.
 
