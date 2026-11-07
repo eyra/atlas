@@ -6,10 +6,11 @@ defmodule AtlasRuntime.ExecutionEvents do
   @max_sequence 9_223_372_036_854_775_807
   @filename "execution-events.json"
   @question_kinds ~w(question_available answer_accepted answer_delivered answer_processed question_invalidated)
+  @peer_question_kinds ~w(peer_question_routed peer_reply_bound)
 
   def append_question(dir, store, transition) do
     duplicate = Enum.find(store["events"], fn event ->
-      event["turn_id"] == transition["turn_id"] and
+      event["kind"] in @question_kinds and event["turn_id"] == transition["turn_id"] and
         event["question_id"] == transition["question_id"] and
         event["revision"] == transition["revision"]
     end)
@@ -20,7 +21,28 @@ defmodule AtlasRuntime.ExecutionEvents do
       store
     else
       event = Map.put(transition, "sequence", store["sequence"] + 1)
-      unless valid_event?(event), do: raise(ArgumentError, "invalid question event")
+      unless transition["kind"] in @question_kinds and valid_event?(event),
+        do: raise(ArgumentError, "invalid question event")
+      store
+      |> Map.put("sequence", event["sequence"])
+      |> Map.put("events", Enum.take(store["events"] ++ [event], -@retention))
+      |> then(&persist(dir, &1))
+    end
+  end
+
+  def append_peer_question(dir, store, transition) do
+    event = Map.put(transition, "sequence", store["sequence"] + 1)
+    unless transition["kind"] in @peer_question_kinds and valid_event?(event),
+      do: raise(ArgumentError, "invalid peer question event")
+    duplicate = Enum.find(store["events"], fn previous ->
+      previous["kind"] in @peer_question_kinds and previous["turn_id"] == transition["turn_id"] and
+        previous["question_id"] == transition["question_id"] and previous["revision"] == transition["revision"]
+    end)
+    if duplicate do
+      unless Map.delete(duplicate, "sequence") == transition,
+        do: raise(ArgumentError, "conflicting peer question event revision")
+      store
+    else
       store
       |> Map.put("sequence", event["sequence"])
       |> Map.put("events", Enum.take(store["events"] ++ [event], -@retention))
@@ -210,6 +232,9 @@ defmodule AtlasRuntime.ExecutionEvents do
     handoffs = Enum.filter(events, &(&1["kind"] == "handoff_submitted"))
     unless length(Enum.uniq_by(handoffs, & &1["turn_id"])) == length(handoffs),
       do: invalid_store!()
+    peers = Enum.filter(events, &(&1["kind"] in @peer_question_kinds))
+    unless length(Enum.uniq_by(peers, &{&1["turn_id"], &1["question_id"], &1["revision"]})) == length(peers),
+      do: invalid_store!()
     store
   end
 
@@ -223,6 +248,24 @@ defmodule AtlasRuntime.ExecutionEvents do
       Regex.match?(~r/\Aturn-[0-9a-f]{16}\z/, turn) and is_binary(worker) and
       Regex.match?(~r/\A[a-z][a-z0-9_-]{0,63}\z/, worker) and
       reference == Path.join(["turns", turn, "handoff.json"]) and timestamp?(timestamp)
+  end
+
+  defp valid_event?(%{"kind" => kind, "question_id" => question, "revision" => revision,
+         "record_ref" => reference, "turn_id" => turn, "worker_id" => worker,
+         "peer_worker_id" => peer, "peer_source_turn_id" => source, "response_turn_id" => response,
+         "sequence" => sequence, "timestamp" => timestamp} = event)
+       when kind in @peer_question_kinds do
+    map_size(event) == 11 and is_integer(revision) and is_integer(sequence) and sequence > 0 and
+      sequence <= @max_sequence and is_binary(question) and
+      Regex.match?(~r/\Aquestion-[0-9a-f]{1,64}\z/, question) and
+      is_binary(turn) and Regex.match?(~r/\Aturn-[0-9a-f]{16}\z/, turn) and
+      is_binary(worker) and Regex.match?(~r/\A[a-z][a-z0-9_-]{0,63}\z/, worker) and
+      is_binary(peer) and Regex.match?(~r/\A[a-z][a-z0-9_-]{0,63}\z/, peer) and peer != worker and
+      is_binary(source) and Regex.match?(~r/\Aturn-[0-9a-f]{16}\z/, source) and source != turn and
+      reference == Path.join(["turns", turn, "peer-questions", question <> ".json"]) and timestamp?(timestamp) and
+      ((kind == "peer_question_routed" and revision == 1 and is_nil(response)) or
+       (kind == "peer_reply_bound" and revision == 2 and is_binary(response) and
+        Regex.match?(~r/\Aturn-[0-9a-f]{16}\z/, response) and response not in [turn, source]))
   end
 
   defp valid_event?(%{"kind" => kind, "question_id" => question, "revision" => revision,

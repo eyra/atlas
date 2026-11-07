@@ -5,6 +5,7 @@ defmodule AtlasRuntime.Service do
   alias AtlasRuntime.CommandAdmissions
   alias AtlasRuntime.ExecutionEvents
   alias AtlasRuntime.HandoffRecords
+  alias AtlasRuntime.PeerQuestionRecords
   alias AtlasRuntime.QuestionRecords
 
   def start(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
@@ -16,6 +17,7 @@ defmodule AtlasRuntime.Service do
       {:error, reason} -> raise("Cannot read backend policy: #{inspect(reason)}")
     end
     events = HandoffRecords.recover(dir, ExecutionEvents.open(dir))
+    events = PeerQuestionRecords.recover(dir, events)
     events = QuestionRecords.recover(dir, events)
     path = Path.join(dir, "runtime.sock")
 
@@ -73,7 +75,7 @@ defmodule AtlasRuntime.Service do
       try do
         command(request, state)
       rescue
-        error in [QuestionRecords.StorageError, CommandAdmissions.StorageError, HandoffRecords.StorageError] -> reraise error, __STACKTRACE__
+        error in [QuestionRecords.StorageError, PeerQuestionRecords.StorageError, CommandAdmissions.StorageError, HandoffRecords.StorageError] -> reraise error, __STACKTRACE__
         error -> {%{command_error: Exception.message(error)}, state, false}
       catch
         :exit, why -> {%{command_error: "Operation not confirmed: #{inspect(why)}"}, state, false}
@@ -132,6 +134,51 @@ defmodule AtlasRuntime.Service do
       end
     {record, events} = HandoffRecords.submit(state.dir, state.events, run, request["handoff"])
     {HandoffRecords.public(record), %{state | events: events}, false}
+  end
+
+  defp command(%{"command" => "peer-question"} = request, state) do
+    question_selectors!(request, [])
+    record = owned_peer_question!(state, request) || raise("No peer question recorded for this question")
+    {PeerQuestionRecords.public(record), state, false}
+  end
+
+  defp command(%{"command" => "route-peer-question"} = request, state) do
+    question_selectors!(request, ["peer_worker_id", "peer_source_turn_id"])
+    if not valid_worker_id?(request["peer_worker_id"]), do: raise("Invalid peer worker ID")
+    if not valid_id?(request["peer_source_turn_id"]), do: raise("Invalid peer source turn ID")
+    if request["peer_worker_id"] == request["worker_id"], do: raise("Peer must differ from sender")
+
+    case owned_peer_question!(state, request) do
+      nil ->
+        question = live_peer_question!(state, request)
+        source = finished_peer_turn!(state, request["peer_source_turn_id"], request["peer_worker_id"])
+        {record, events} = PeerQuestionRecords.create(state.dir, state.events, question, source)
+        {PeerQuestionRecords.routed(record), %{state | events: events}, false}
+
+      record ->
+        if record["peer_worker_id"] != request["peer_worker_id"] or
+             record["peer_source_turn_id"] != request["peer_source_turn_id"],
+          do: raise("Conflicting peer question route")
+        {PeerQuestionRecords.routed(record), state, false}
+    end
+  end
+
+  defp command(%{"command" => "bind-peer-reply"} = request, state) do
+    question_selectors!(request, ["response_turn_id"])
+    if not valid_id?(request["response_turn_id"]), do: raise("Invalid response turn ID")
+    record = owned_peer_question!(state, request) || raise("No peer question recorded for this question")
+
+    case record["response_turn_id"] do
+      nil ->
+        live_peer_question!(state, request)
+        response = peer_response_turn!(state, record, request["response_turn_id"])
+        {record, events} = PeerQuestionRecords.bind(state.dir, state.events, record, response)
+        {PeerQuestionRecords.public(record), %{state | events: events}, false}
+
+      response_turn_id ->
+        if response_turn_id != request["response_turn_id"], do: raise("Conflicting peer reply binding")
+        {PeerQuestionRecords.public(record), state, false}
+    end
   end
 
   defp command(%{"command" => "question"} = request, state) do
@@ -266,7 +313,11 @@ defmodule AtlasRuntime.Service do
   end
 
   defp handoff_run!(state, request) do
-    turn = request["turn_id"]
+    run = owned_saved_turn!(state, request["turn_id"], request["worker_id"])
+    %{"worker_id" => run["worker_id"], "turn_id" => run["id"], "repository" => run["repository"]}
+  end
+
+  defp owned_saved_turn!(state, turn, worker_id) do
     path = Path.join([state.dir, "turns", turn, "turn.json"])
     run =
       case File.read(path) do
@@ -276,15 +327,15 @@ defmodule AtlasRuntime.Service do
       end
     if not is_map(run) or run["id"] != turn or not valid_worker_id?(run["worker_id"]),
       do: raise("Invalid saved execution identity")
-    if run["worker_id"] != request["worker_id"],
-      do: raise("Turn belongs to worker #{run["worker_id"]}, not #{request["worker_id"]}")
-    %{"worker_id" => run["worker_id"], "turn_id" => turn, "repository" => run["repository"]}
+    if run["worker_id"] != worker_id,
+      do: raise("Turn belongs to worker #{run["worker_id"]}, not #{worker_id}")
+    run
   end
 
   defp question_selectors!(request, extra) do
     fields = ["command", "worker_id", "turn_id", "question_id"] ++ extra
     if Enum.sort(Map.keys(request)) != Enum.sort(fields),
-      do: raise("#{String.capitalize(request["command"])} requires exactly worker_id, turn_id, question_id#{if extra == [], do: "", else: " and answers"}")
+      do: raise("#{request["command"]} requires exactly #{Enum.join(tl(fields), ", ")}")
     if not valid_worker_id?(request["worker_id"]), do: raise("Invalid worker ID")
     if not valid_id?(request["turn_id"]), do: raise("Invalid turn ID")
     if not is_binary(request["question_id"]) or
@@ -298,6 +349,52 @@ defmodule AtlasRuntime.Service do
     if record["worker_id"] != request["worker_id"],
       do: raise("Question belongs to worker #{record["worker_id"]}, not #{request["worker_id"]}")
     record
+  end
+
+  defp owned_peer_question!(state, request) do
+    record = PeerQuestionRecords.load(state.dir, request["turn_id"], request["question_id"])
+    if record && record["worker_id"] != request["worker_id"],
+      do: raise("Peer question belongs to worker #{record["worker_id"]}, not #{request["worker_id"]}")
+    record
+  end
+
+  defp live_peer_question!(state, request) do
+    record = owned_question!(state, request)
+    worker = state.workers[request["worker_id"]] || raise("Unknown worker: #{request["worker_id"]}")
+    if not record["active"] or record["admission"] != "pending" or
+         not is_pid(worker.agent) or not Process.alive?(worker.agent) or
+         worker.run.state != "running" or worker.run[:worker_id] != request["worker_id"] or
+         worker.run[:id] != request["turn_id"],
+      do: raise("Peer question requires the current active worker turn")
+    if worker.run[:questions_enabled] != true or worker.run[:backend] != "claude",
+      do: raise("Questions are not enabled for this turn")
+    question = worker.run[:pending_question]
+    if is_nil(question) or question.id != request["question_id"] or
+         question.correlation != record["correlation"] or
+         %{"questions" => question.questions} != record["original_input"],
+      do: raise("No matching pending native question")
+    record
+  end
+
+  defp finished_peer_turn!(state, turn, worker_id) do
+    run = owned_saved_turn!(state, turn, worker_id)
+    if run["state"] != "finished", do: raise("Peer turn must be successfully finished")
+    if not is_binary(run["session_id"]) or String.trim(run["session_id"]) == "",
+      do: raise("Peer turn has no confirmed native session")
+    Map.put(run, "turn_id", turn)
+  end
+
+  defp peer_response_turn!(state, record, response_turn_id) do
+    if response_turn_id in [record["turn_id"], record["peer_source_turn_id"]],
+      do: raise("Peer response must differ from sender and source turns")
+    source = finished_peer_turn!(state, record["peer_source_turn_id"], record["peer_worker_id"])
+    response = finished_peer_turn!(state, response_turn_id, record["peer_worker_id"])
+    if not is_map(response["selection"]) or response["selection"]["reason"] != "continuation" or
+         response["source_turn_id"] != record["peer_source_turn_id"],
+      do: raise("Peer response must be an exact saved continuation of the peer source turn")
+    if Enum.any?(~w(backend session_id cwd sandbox permissions repository model), &(response[&1] != source[&1])),
+      do: raise("Peer response changed the saved source execution identity")
+    response
   end
 
   defp send_answer(agent, question_id, answers) do
@@ -507,6 +604,7 @@ defmodule AtlasRuntime.Service do
     run = if scope, do: Map.put(run, :permissions, scope), else: run
     run = if repository, do: Map.put(run, :repository, repository), else: run
     run = if admission, do: Map.put(run, :request_id, elem(admission, 0)), else: run
+    run = if source_turn_id, do: Map.put(run, :source_turn_id, source_turn_id), else: run
 
     record =
       if admission do

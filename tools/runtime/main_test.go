@@ -523,3 +523,30 @@ func TestHandoffRequiresExactTargetAndExplicitSubmission(t *testing.T) {
 		}
 	}
 }
+
+func TestPeerCorrelationRequiresExactTargetsAndNoDispatchOptions(t *testing.T) {
+	t.Setenv("ATLAS_RUNTIME_HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"peer-question", "--turn", "turn-1", "--question", "question-1"},
+		{"peer-question", "--worker", "sender", "--question", "question-1"},
+		{"peer-question", "--worker", "sender", "--turn", "turn-1"},
+		{"peer-question", "--worker", "sender", "--turn", "turn-1", "--question", "question-1", "--peer-worker", "peer"},
+		{"route-peer-question", "--worker", "sender", "--turn", "turn-1", "--question", "question-1"},
+		{"route-peer-question", "--worker", "sender", "--turn", "turn-1", "--question", "question-1", "--peer-worker", "peer"},
+		{"route-peer-question", "--worker", "sender", "--turn", "turn-1", "--question", "question-1", "--peer-worker", "UPPER", "--peer-turn", "turn-2"},
+		{"bind-peer-reply", "--worker", "sender", "--turn", "turn-1", "--question", "question-1"},
+		{"bind-peer-reply", "--worker", "sender", "--turn", "turn-1", "--question", "question-1", "--response-turn", ""},
+	} {
+		if _, err := execute(args); err == nil || strings.Contains(err.Error(), "Runtime service is stopped") {
+			t.Fatalf("incomplete peer correlation reached socket: %q, %v", args, err)
+		}
+	}
+	for _, operation := range []string{"route-peer-question", "peer-question", "bind-peer-reply"} {
+		for _, forbidden := range []string{"--assignment", "--answers", "--permissions", "--backend", "--request-id"} {
+			args := []string{operation, "--worker", "sender", "--turn", "turn-1", "--question", "question-1", forbidden, "value"}
+			if _, err := execute(args); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+				t.Fatalf("peer record command accepted dispatch option: %q, %v", args, err)
+			}
+		}
+	}
+}

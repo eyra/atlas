@@ -264,6 +264,8 @@ defmodule AtlasRuntime.NativeQuestionTest do
     {continued, state} = call(state, %{"command" => "continue", "worker_id" => "alpha", "turn_id" => run.id, "assignment" => "Choose again"})
     cleanup(state.workers["alpha"].agent)
     assert continued.questions_enabled
+    assert continued.source_turn_id == run.id
+    assert JSON.decode!(File.read!(Path.join(continued.artifacts, "turn.json")))["source_turn_id"] == run.id
     assert continued.session_id == original.session_id
     assert continued.requested_model == original.model
     assert continued.cwd == original.cwd
@@ -298,6 +300,7 @@ defmodule AtlasRuntime.NativeQuestionTest do
     {continued, state} = call(restarted, %{"command" => "continue", "turn_id" => run.id, "assignment" => "Read again"})
     cleanup(state.workers["alpha"].agent)
     refute continued.questions_enabled
+    assert continued.source_turn_id == run.id
     state = await_run(state, &(&1.state == "finished"))
     assert state.workers["alpha"].run.pending_question == nil
   end
