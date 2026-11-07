@@ -63,10 +63,15 @@ pane independently, without changing the selected reference row. Tab/Shift+Tab
 continue switching shell tabs. Single-pane and unpartitioned pages do not offer
 pane cycling; native view actions take precedence when they use either bracket.
 
-Run `atlas tui --env test` (or `--env prod`) to open Console; there is no
-`--surface` selector or legacy interface. Incompatible negotiation fails explicitly.
-To try local uncommitted client work without the launcher's automatic update,
-run `ATLAS_NO_UPDATE=1 bin/atlas tui --env test` from this checkout.
+Run `atlas tui --env test` to open Console against Atlas test; production is the
+default without `--env test` or a private `ATLAS_ENV_FILE`. There is no `--surface`
+selector or legacy interface. Incompatible negotiation fails explicitly.
+The installed `atlas` points to the main clone, even when run from a development
+checkout. On Console launch, [the launcher](bin/atlas) attempts `git pull --ff-only`
+only in the main clone on `develop`, unless `ATLAS_NO_UPDATE` is set.
+To try this checkout's Console changes against Atlas test without auto-update,
+run `ATLAS_NO_UPDATE=1 bin/atlas tui --env test` from this checkout. This uses the
+local client with the deployed test server; it does not deploy local server changes.
 
 ### Exact-turn worker conversations
 
