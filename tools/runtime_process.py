@@ -47,7 +47,7 @@ class LocalRuntime:
             raise OwnershipError('Runtime and Bus configuration must be objects')
         if settings.get('env') != self.target['environment'] or runtime.get('machine') != self.target['machine'] or link.get('machine') != self.target['machine'] or link.get('mode') != 'client':
             raise OwnershipError('Runtime configuration identity mismatch')
-        if not isinstance(runtime.get('agents'), dict) or not runtime['agents']:
+        if not isinstance(runtime.get('agents'), dict):
             raise OwnershipError('Runtime configuration needs its declared agents')
         if type(link.get('port')) is not int or not 0 < link['port'] < 65536:
             raise OwnershipError('invalid private Bus port')
