@@ -490,3 +490,36 @@ func TestRequestIDsRejectInvalidIdentitiesAndUnsupportedCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestHandoffRejectsAmbiguousOrUnboundedJSON(t *testing.T) {
+	for _, raw := range []string{
+		"", "null", "[]", "{}", `{"kind":"completion","kind":"completion"}`,
+		`{"kind":"completion","\u006bind":"completion"}`, `{"kind":`,
+		`{"kind":"completion"} {}`, "{\"result\":\"\xff\"}",
+		`{"result":"` + strings.Repeat("x", 32768) + `"}`,
+	} {
+		if _, err := parseHandoff(raw); err == nil {
+			t.Fatalf("accepted ambiguous or unbounded handoff: %.100q", raw)
+		}
+	}
+}
+
+func TestHandoffRequiresExactTargetAndExplicitSubmission(t *testing.T) {
+	t.Setenv("ATLAS_RUNTIME_HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"handoff", "--turn", "turn-1"},
+		{"handoff", "--worker", "server"},
+		{"handoff", "--worker", "server", "--turn", "turn-1", "extra"},
+		{"handoff", "--worker", "server", "--turn", "turn-1", "--handoff", `{"kind":"completion"}`},
+		{"submit-handoff", "--turn", "turn-1", "--handoff", `{"kind":"completion"}`},
+		{"submit-handoff", "--worker", "server", "--handoff", `{"kind":"completion"}`},
+		{"submit-handoff", "--worker", "server", "--turn", "turn-1"},
+		{"submit-handoff", "--worker", "server", "--turn", "turn-1", "--handoff", `{"kind":"completion"}`, "extra"},
+		{"submit-handoff", "--worker", "server", "--turn", "turn-1", "--verified"},
+		{"submit-handoff", "--worker", "server", "--turn", "turn-1", "--request-id", "new"},
+	} {
+		if _, err := execute(args); err == nil || strings.Contains(err.Error(), "Runtime service is stopped") {
+			t.Fatalf("invalid handoff arguments reached socket: %q, %v", args, err)
+		}
+	}
+}

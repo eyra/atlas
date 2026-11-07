@@ -54,6 +54,36 @@ Real isolated public-CLI proof on 2026-11-07: request `Start_e0c8f2df4a4eea72` a
 
 Focused verification passed: 103 ExUnit tests, 47 Python runner tests and the Go CLI suite. Deterministic native fixtures count actual launches/resumes across concurrent retries, conflicts, changed context, lost callers, startup failure, post-launch journal/acceptance-write failure and restart uncertainty. Managed saved-continuation metadata retains its base revision. This slice does not add automated reconciliation, cross-daemon coordination, provider fallback retries or Atlas integration.
 
+## Explicit completion and PR handoff
+
+```sh
+atlas-runtime submit-handoff --worker runtime --turn "$TURN_ID" --handoff "$HANDOFF_JSON"
+atlas-runtime handoff --worker runtime --turn "$TURN_ID"
+```
+
+The supported route is an **external coordinator submitting worker declarations** through the existing owner-only CLI/socket. Runtime does not expose that socket to native workers or expand their sandbox. A first submission requires an existing saved turn with matching worker attribution; both selectors are mandatory. There is one immutable record per turn. Identical submission repeats return the original record without another event; any changed declaration conflicts. Choose completion versus PR before submission: a completion record cannot later be upgraded in place.
+
+`HANDOFF_JSON` has exactly these required fields:
+
+- `kind`: `completion` or `pull_request`.
+- `repository_url`: GitHub HTTPS repository URL, optionally ending in `.git`, without credentials, query or fragment.
+- `branch`: nonblank text, at most 255 UTF-8 bytes.
+- `base_sha`, `head_sha`: 40 or 64 lowercase hexadecimal characters.
+- `result`: nonblank text, at most 4096 UTF-8 bytes.
+- `verification`, `limits`, `remaining_processes`: arrays of 0–16 nonblank strings, at most 1024 UTF-8 bytes per string. Empty arrays are explicit declarations, not evidence that Runtime independently checked anything.
+
+`pull_request` additionally requires `pr_url` shaped as `https://github.com/OWNER/REPO/pull/NUMBER`, matching the declared repository. `completion` forbids `pr_url`. No GitHub request verifies existence, authorship or state. Unknown fields, malformed types and client JSON with duplicate keys refuse. Declaration JSON is bounded to 32 KiB; the stored record is bounded to 64 KiB.
+
+For managed executions, submission compares repository URL, branch and base revision against each field already present in saved execution metadata. Repository identity comparison ignores owner/name case and the clone URL's `.git` suffix. Missing metadata remains declared, not inferred or independently verified. Head revision, verification evidence, limits and remaining processes remain caller declarations. Submission does not require or change terminal execution state, stop a worker, accept work, merge a PR or assign the next task.
+
+The public record contains `worker_id`, `turn_id`, `record_ref`, `submitted_at`, fixed `provenance: "coordinator_submitted_declaration"`, and `handoff`. Provenance describes the supported submission route, not authenticated native authorship or a verified-success flag. Runtime never converts result prose or `execution_finished` into a handoff.
+
+Storage uses `turns/<turn>/handoff.json` and the existing atomic-replacement/event-checkpoint conventions. One `handoff_submitted` event references the record with worker/turn attribution, timestamp and sequence; it carries no copied declaration payload. Records, references and cursor replay survive clean restart. Publication recovery precedes unrelated restart events; checkpointed records are not republished after journal pruning. Existing retention gaps still apply, while targeted inspection remains available. Corrupt authoritative storage fails closed. This is not an fsync/power-loss or distributed ownership guarantee.
+
+Real isolated public-CLI proof on 2026-11-07: native Claude turn `turn-b549ec16fbba4cdd`, session `d6641e60-129d-4519-b50e-15c562cf1008`, produced a completion declaration after creating and committing only `runtime-handoff-proof.txt`. Native tool results showed the exact 25-byte marker line, clean status, base `d10afefe469e829d2b310b64ab49c80db86c2216` and local head `02227a3c1c633e0a147f7cf80f9575b649a1c8ba`. No handoff existed automatically at execution finish. Explicit submission refused a mismatched branch, then stored the actual declaration with coordinator provenance. Inspect/repeat matched exactly; changed head and wrong worker refused. After daemon restart, inspection and repeated submission preserved one record, one handoff event, three total lifecycle/handoff events and one turn, with no restored worker. No smoke PR or fabricated PR URL was used.
+
+Focused verification passed: 106 ExUnit tests across handoff storage/service, execution events, service, question records and command/native admission; Go CLI checks passed. Owned native group/private temp and both proof daemons were absent afterward; disposable client/build/clone were removed and compact native evidence retained. No product test suite, default installation, default-daemon restart or deployment was performed.
+
 ## Durable execution discovery
 
 ```sh
@@ -62,7 +92,7 @@ atlas-runtime events --cursor "$NEXT_CURSOR" --limit 50
 atlas-runtime output --turn turn-0123456789abcdef
 ```
 
-`events` is a finite query, not a watcher. It returns immutable ordered execution and question-evidence snapshots with stable turn IDs, worker attribution for new events, native identity when known, and references usable by `output --turn` or `question` for inspection. `execution_accepted` means Runtime accepted a start or continuation; `execution_finished` means the native turn ended normally, **not that its assigned task was verified successful**. Failure and explicit stop use `execution_failed` and `execution_stopped`. Assignments, questions, answers and full logs are not copied into the event stream.
+`events` is a finite query, not a watcher. It returns immutable ordered execution, question-evidence and handoff-reference snapshots with stable turn IDs, worker attribution for new events, native identity when known, and references usable by `output --turn`, `question` or `handoff` for inspection. `execution_accepted` means Runtime accepted a start or continuation; `execution_finished` means the native turn ended normally, **not that its assigned task was verified successful**. Failure and explicit stop use `execution_failed` and `execution_stopped`. Assignments, questions, answers, handoff declarations and full logs are not copied into the event stream.
 
 The response includes `events`, `next_cursor`, `has_more`, `earliest_cursor`, `retention_gap` and `recording_started_at`. Save `next_cursor` only after processing the returned page. It advances only through returned events; an empty page preserves the supplied cursor. The initial empty query still returns a usable cursor. Replaying a retained cursor returns the same ordered prefix; newly appended events may extend a previously short page.
 

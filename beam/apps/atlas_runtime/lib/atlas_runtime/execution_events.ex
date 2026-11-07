@@ -28,6 +28,31 @@ defmodule AtlasRuntime.ExecutionEvents do
     end
   end
 
+  def append_handoff(dir, store, record) do
+    transition = %{
+      "kind" => "handoff_submitted",
+      "turn_id" => record["turn_id"],
+      "worker_id" => record["worker_id"],
+      "record_ref" => record["record_ref"],
+      "timestamp" => record["submitted_at"]
+    }
+    duplicate = Enum.find(store["events"], fn previous ->
+      previous["kind"] == "handoff_submitted" and previous["turn_id"] == record["turn_id"]
+    end)
+    if duplicate do
+      unless Map.delete(duplicate, "sequence") == transition,
+        do: raise(ArgumentError, "conflicting handoff event")
+      store
+    else
+      event = Map.put(transition, "sequence", store["sequence"] + 1)
+      unless valid_event?(event), do: raise(ArgumentError, "invalid handoff event")
+      store
+      |> Map.put("sequence", event["sequence"])
+      |> Map.put("events", Enum.take(store["events"] ++ [event], -@retention))
+      |> then(&persist(dir, &1))
+    end
+  end
+
   def open(dir) do
     path = Path.join(dir, @filename)
 
@@ -181,10 +206,24 @@ defmodule AtlasRuntime.ExecutionEvents do
       unless valid_event?(event) and event["sequence"] == expected, do: invalid_store!()
     end)
 
+
+    handoffs = Enum.filter(events, &(&1["kind"] == "handoff_submitted"))
+    unless length(Enum.uniq_by(handoffs, & &1["turn_id"])) == length(handoffs),
+      do: invalid_store!()
     store
   end
 
   defp validate!(_), do: invalid_store!()
+
+  defp valid_event?(%{"kind" => "handoff_submitted", "record_ref" => reference,
+         "turn_id" => turn, "worker_id" => worker,
+         "sequence" => sequence, "timestamp" => timestamp} = event) do
+    map_size(event) == 6 and is_integer(sequence) and sequence > 0 and
+      sequence <= @max_sequence and is_binary(turn) and
+      Regex.match?(~r/\Aturn-[0-9a-f]{16}\z/, turn) and is_binary(worker) and
+      Regex.match?(~r/\A[a-z][a-z0-9_-]{0,63}\z/, worker) and
+      reference == Path.join(["turns", turn, "handoff.json"]) and timestamp?(timestamp)
+  end
 
   defp valid_event?(%{"kind" => kind, "question_id" => question, "revision" => revision,
          "record_ref" => reference, "turn_id" => turn, "worker_id" => worker,
