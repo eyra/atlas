@@ -301,6 +301,12 @@ def write_native(stream, event):
     stream.flush()
 
 
+def claude_assistant_model_matches(configured, actual):
+    # Native init retains the context-window option; assistant records use the base model ID.
+    return isinstance(actual, str) and bool(actual) and (
+        actual == configured or configured == actual + '[1m]')
+
+
 class QuestionHost:
     """One owned native query; fixture tests do not establish provider behavior."""
 
@@ -393,7 +399,8 @@ class QuestionHost:
         elif kind == 'assistant':
             message = event.get('message')
             if (self.model is None or event.get('session_id') != self.session or
-                    not isinstance(message, dict) or message.get('model') != self.model):
+                    not isinstance(message, dict) or
+                    not claude_assistant_model_matches(self.model, message.get('model'))):
                 raise ValueError('Native question assistant identity changed')
             content = message.get('content')
             if not isinstance(content, list):
@@ -589,7 +596,7 @@ def main():
                 session_seen = True
             if event.get('type') == 'assistant':
                 actual = event.get('message', {}).get('model')
-                if actual and actual != '<synthetic>' and actual != model:
+                if actual and actual != '<synthetic>' and not claude_assistant_model_matches(model, actual):
                     raise ValueError('Claude resumed with a different model')
         if backend == 'claude' and event.get('type') == 'result' and isinstance(event.get('result'), str):
             (folder / 'answer.txt').write_text(event['result'])

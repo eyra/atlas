@@ -175,6 +175,35 @@ class QuestionHostTest(unittest.TestCase):
             host.event({'type': 'system', 'subtype': 'init', 'session_id': SESSION,
                         'model': MODEL, 'tools': TOOLS})
 
+    def test_context_modifier_keeps_exact_init_and_accepts_only_same_assistant_model(self):
+        configured = 'claude-opus-5-5[1m]'
+        for resume_model in (None, configured):
+            host = runner.QuestionHost(SESSION, 'assignment', self.sent.append, self.close,
+                                       TOOLS, resume_model=resume_model)
+            host.event({'type': 'control_response', 'response': {
+                'subtype': 'success', 'request_id': host.initialize_id, 'response': {}}})
+            host.event({'type': 'system', 'subtype': 'init', 'session_id': SESSION,
+                        'model': configured, 'tools': TOOLS})
+            with self.assertRaisesRegex(ValueError, 'identity'):
+                host.event({'type': 'system', 'subtype': 'init', 'session_id': SESSION,
+                            'model': 'claude-opus-5-5', 'tools': TOOLS})
+            for changed in ('claude-opus-5', 'claude-sonnet-5-5', 'claude-opus-5-5[2m]'):
+                event = assistant()
+                event['message']['model'] = changed
+                with self.assertRaisesRegex(ValueError, 'identity'):
+                    host.event(event)
+            event = assistant()
+            event['message']['model'] = 'claude-opus-5-5'
+            host.event(event)
+            host.event(request())
+            identifier = host.pending['id']
+            host.answer({'command': 'answer', 'question_id': identifier,
+                         'answers': {'Which value?': '436849'}})
+            host.event(processed())
+            self.assertEqual(host.model, configured)
+            self.assertEqual(self.events()[-1],
+                             {'type': 'runtime.answer_processed', 'question_id': identifier})
+
     def test_non_question_denied_and_mode_updates_refused(self):
         for tool in ('Bash', 'Read', 'Write', 'Edit'):
             event = request()
