@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import tempfile
+import uuid
 
 
 def emit(event):
@@ -146,7 +147,28 @@ def lock_repository(workspace, create):
     return lock, created
 
 
-def execute_assignment(workspace, scope, repository, created, backend, command):
+def claude_context(workspace, scope):
+    root = Path(workspace).resolve()
+    def git(*args):
+        return subprocess.run(['git', '-C', str(root), *args],
+                              capture_output=True, text=True)
+    top = git('rev-parse', '--show-toplevel')
+    identity = None
+    if top.returncode == 0:
+        branch = git('symbolic-ref', '--quiet', 'HEAD')
+        if branch.returncode not in (0, 1):
+            raise ValueError('Cannot inspect Claude repository branch')
+        head = branch.stdout.strip() if branch.returncode == 0 else git('rev-parse', 'HEAD').stdout.strip()
+        origin = git('config', '--get-all', 'remote.origin.url')
+        if not head or origin.returncode not in (0, 1):
+            raise ValueError('Cannot inspect Claude repository identity')
+        identity = {'root': top.stdout.strip(), 'branch': head, 'origin': origin.stdout.splitlines()}
+    elif top.returncode != 128 or any(os.path.lexists(path / '.git') for path in (root, *root.parents)):
+        raise ValueError('Cannot inspect Claude working directory')
+    return {'cwd': str(root), 'permissions': scope, 'git': identity}
+
+
+def execute_assignment(workspace, scope, repository, created, backend, folder, expected_context, command):
     if repository is not None:
         executable = shutil.which('codex') if backend == 'claude' else command[0]
         if executable is None:
@@ -155,6 +177,11 @@ def execute_assignment(workspace, scope, repository, created, backend, command):
         emit({'type': 'runtime.repository_prepared', 'repository': prepared})
     if scope is not None and scope != permission_scope(workspace):
         raise ValueError('Dedicated repository permission scope changed')
+    if backend == 'claude':
+        context = claude_context(workspace, scope)
+        if expected_context is not None and context != expected_context:
+            raise ValueError('Saved Claude working directory, repository identity or permission scope changed')
+        (Path(folder) / 'claude-context.json').write_text(json.dumps(context))
     os.execv(command[0], command)
 
 
@@ -242,23 +269,28 @@ def main():
     if len(sys.argv) == 5 and sys.argv[1] == '--repository-request':
         print(json.dumps(repository_request(*sys.argv[2:])))
         return
-    if len(sys.argv) > 7 and sys.argv[1] == '--execute-assignment':
+    if len(sys.argv) > 9 and sys.argv[1] == '--execute-assignment':
         execute_assignment(sys.argv[2], json.loads(sys.argv[3]), json.loads(sys.argv[4]),
-                           json.loads(sys.argv[5]), sys.argv[6], sys.argv[7:])
+                           json.loads(sys.argv[5]), sys.argv[6], sys.argv[7],
+                           json.loads(sys.argv[8]), sys.argv[9:])
         return
     executable, workspace, folder, goal, sandbox, session, *extra = sys.argv[1:]
     scope = json.loads(extra[0]) if extra else None
     repository = json.loads(extra[1]) if len(extra) >= 2 else None
     backend = extra[2] if len(extra) >= 3 else 'codex'
     model = json.loads(extra[3]) if len(extra) >= 4 else None
+    expected_context = json.loads(extra[4]) if len(extra) >= 5 else None
     if model is not None and (not isinstance(model, str) or
                               not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,199}', model)):
         raise ValueError('Model must be a nonempty identifier of at most 200 characters')
     if backend not in ('codex', 'claude'):
         raise ValueError('Backend must be codex or claude')
-    if backend == 'claude' and (session or (scope is None and sandbox != 'read-only')):
-        raise ValueError('Claude requires fresh read-only or dedicated-repository execution; no continuation')
-    if len(extra) > 4 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
+    if backend == 'claude' and scope is None and sandbox != 'read-only':
+        raise ValueError('Claude requires read-only or dedicated-repository execution')
+    if backend == 'claude' and session:
+        if str(uuid.UUID(session)) != session or model is None or not isinstance(expected_context, dict):
+            raise ValueError('Claude resume requires a confirmed UUID, model and saved execution context')
+    if len(extra) > 5 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
         raise ValueError('Sandbox must be read-only or workspace-write')
     if repository is not None and (scope != dedicated_scope(Path(workspace)) or
                                    bool(session) != ('base_sha' in repository)):
@@ -277,7 +309,7 @@ def main():
                    '--restricted', '--safe-mode', '--strict-mcp-config', '--no-chrome',
                    '--tools', tools, '--allowedTools', tools,
                    '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
-                   '--no-session-persistence', *model_arguments, '--', goal]
+                   *(['--resume', session] if session else []), *model_arguments, '--', goal]
     else:
         command = [executable, 'exec', *permissions, '--disable', 'hooks',
                    '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
@@ -292,6 +324,15 @@ def main():
 
     def forward(event):
         nonlocal session_seen, native_session
+        if backend == 'claude' and session:
+            if event.get('type') == 'system' and event.get('subtype') == 'init':
+                if event.get('session_id') != session or event.get('model') != model:
+                    raise ValueError('Claude did not confirm the requested session and model')
+                session_seen = True
+            if event.get('type') == 'assistant':
+                actual = event.get('message', {}).get('model')
+                if actual and actual != '<synthetic>' and actual != model:
+                    raise ValueError('Claude resumed with a different model')
         if backend == 'claude' and event.get('type') == 'result' and isinstance(event.get('result'), str):
             (folder / 'answer.txt').write_text(event['result'])
         if event.get('type') == 'runtime.repository_prepared':
@@ -308,6 +349,7 @@ def main():
 
     process = None
     lock = None
+    created = False
     native_temporary = None
     environment = None
     selector = selectors.DefaultSelector()
@@ -330,9 +372,10 @@ def main():
                     command[1:1] = ['--settings', json.dumps(
                         claude_repository_settings(scope, native_temporary))]
                     environment = dict(os.environ, CLAUDE_CODE_TMPDIR=native_temporary)
+            if scope is not None or backend == 'claude':
                 command = [sys.executable, str(Path(__file__).resolve()), '--execute-assignment',
                            workspace, json.dumps(scope), json.dumps(repository), json.dumps(created),
-                           backend, *command]
+                           backend, str(folder), json.dumps(expected_context), *command]
             started_at = datetime.now(timezone.utc)
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=errors, start_new_session=True,
@@ -382,7 +425,7 @@ def main():
                     # A finished leader can leave descendants with redirected output.
                     signal_group(process, signal.SIGKILL)
                     if session and not session_seen and not stopped:
-                        raise ValueError('Codex resume ended without confirming its session')
+                        raise ValueError(f'{backend.capitalize()} resume ended without confirming its session')
                     if backend == 'codex' and native_session and not stopped:
                         actual_model = codex_model(native_session, workspace, started_at)
                         if actual_model:

@@ -179,6 +179,33 @@ defmodule AtlasRuntime.NativeClaudeTest do
     end
   end
 
+  test "Claude resume requires the exact native session and model", %{tmp_dir: dir} do
+    session = "a1a1b578-c3b5-7972-9664-1d250bf64cdf"
+    init = Map.put(@init, "session_id", session)
+    {:ok, first} = launch(dir, [init, @result])
+    first_ref = Process.monitor(first)
+    assert_receive {:DOWN, ^first_ref, :process, ^first, :normal}, 5_000
+    context = Path.join(dir, "turns/claude-turn/claude-context.json") |> File.read!() |> JSON.decode!()
+    settings = %{"session_id" => session, "model" => @init["model"], "resume_context" => context}
+
+    {:ok, resumed} = launch(dir, [init, @result], settings)
+    resumed_ref = Process.monitor(resumed)
+    assert_receive {:agent, ^resumed, {:session, ^session}}, 5_000
+    assert_receive {:DOWN, ^resumed_ref, :process, ^resumed, :normal}, 5_000
+
+    for events <- [
+          [Map.put(init, "session_id", "different-session"), @result],
+          [Map.put(init, "model", "different-model"), @result],
+          [@result],
+          [%{"type" => "error", "error" => "Session not found"}]
+        ] do
+      {:ok, failed} = launch(dir, events, settings)
+      failed_ref = Process.monitor(failed)
+      assert_receive {:DOWN, ^failed_ref, :process, ^failed, {:claude_failed, 1, _}}, 5_000
+      refute_receive {:agent, ^failed, {:ended, _}}
+    end
+  end
+
   test "unsupported permissions, unscoped provisioning, resume and unknown vendors never launch", %{
     tmp_dir: dir
   } do
