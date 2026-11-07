@@ -57,9 +57,12 @@ Focused verification passed: 103 ExUnit tests, 47 Python runner tests and the Go
 ## Explicit completion and PR handoff
 
 ```sh
+atlas-runtime output --turn "$TURN_ID"
 atlas-runtime submit-handoff --worker runtime --turn "$TURN_ID" --handoff "$HANDOFF_JSON"
 atlas-runtime handoff --worker runtime --turn "$TURN_ID"
 ```
+
+Do not build `HANDOFF_JSON` from `status`: its `result` is a summary cut to 2,000 characters, so a longer declaration may be truncated there. Take the full native final answer from the `answer` field of `output --turn`, then parse and validate the actual declaration before submitting it. `output` only reads the answer; it never creates a handoff.
 
 The supported route is an **external coordinator submitting worker declarations** through the existing owner-only CLI/socket. Runtime does not expose that socket to native workers or expand their sandbox. A first submission requires an existing saved turn with matching worker attribution; both selectors are mandatory. There is one immutable record per turn. Identical submission repeats return the original record without another event; any changed declaration conflicts. Choose completion versus PR before submission: a completion record cannot later be upgraded in place.
 
