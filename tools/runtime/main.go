@@ -206,11 +206,24 @@ func execute(args []string) (map[string]any, error) {
 		flags := flag.NewFlagSet("start", flag.ContinueOnError)
 		cwd := flags.String("cwd", "", "existing working directory")
 		sandbox := flags.String("sandbox", "read-only", "read-only or workspace-write")
+		permissions := flags.String("permissions", "", "explicit dedicated-repository Git/GitHub scope")
 		if err = flags.Parse(args[1:]); err != nil {
 			return nil, err
 		}
 		if *sandbox != "read-only" && *sandbox != "workspace-write" {
 			return nil, errors.New("sandbox must be read-only or workspace-write")
+		}
+		if *permissions != "" && *permissions != "dedicated-repository" {
+			return nil, errors.New("unknown permission profile")
+		}
+		conflict := false
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name == "sandbox" && *permissions != "" {
+				conflict = true
+			}
+		})
+		if conflict {
+			return nil, errors.New("permissions cannot be combined with sandbox")
 		}
 		if *cwd == "" || flags.NArg() != 1 || strings.TrimSpace(flags.Arg(0)) == "" {
 			return nil, errors.New("use start --cwd PATH \"assignment\"")
@@ -228,7 +241,11 @@ func execute(args []string) (map[string]any, error) {
 		}
 		command["cwd"] = path
 		command["assignment"] = flags.Arg(0)
-		command["sandbox"] = *sandbox
+		if *permissions == "" {
+			command["sandbox"] = *sandbox
+		} else {
+			command["permissions"] = *permissions
+		}
 	case "continue":
 		if len(args) == 2 && strings.TrimSpace(args[1]) != "" {
 			command["assignment"] = args[1]
@@ -358,7 +375,7 @@ func followOutput(out io.Writer) error {
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--sandbox read-only|workspace-write] \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nCodex uses its existing login. Sandbox defaults to read-only. One agent at a time.")
+		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nCodex uses its existing login. Sandbox defaults to read-only. Dedicated-repository explicitly permits isolated Git writes and GitHub-only networking. One agent at a time.")
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "output" && os.Args[2] == "--follow" {

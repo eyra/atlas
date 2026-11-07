@@ -131,5 +131,58 @@ class CleanupTest(unittest.TestCase):
                     stream.close()
 
 
+class DedicatedRepositoryTest(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory(prefix='runtime-repository-')
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name).resolve()
+        self.repo = self.root / 'repo'
+        subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
+        subprocess.run(['git', '-C', str(self.repo), '-c', 'user.name=Test',
+                        '-c', 'user.email=test@example.invalid', 'commit',
+                        '--allow-empty', '-qm', 'initial'], check=True)
+
+    def test_only_independent_canonical_repository_root_is_accepted(self):
+        scope = runner.permission_scope(str(self.repo))
+        self.assertEqual(scope['root'], str(self.repo))
+        self.assertEqual(scope['git_dir'], str(self.repo / '.git'))
+        alias = self.root / 'alias'
+        alias.symlink_to(self.repo, target_is_directory=True)
+        child = self.repo / 'child'
+        child.mkdir()
+        worktree = self.root / 'worktree'
+        subprocess.run(['git', '-C', str(self.repo), 'worktree', 'add', '-q',
+                        '-b', 'other', str(worktree)], check=True)
+        for path in (alias, child, worktree, self.repo):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                runner.permission_scope(str(path))
+
+    def test_external_and_shared_metadata_are_rejected(self):
+        metadata = self.repo / '.git'
+        alternate = metadata / 'objects/info/alternates'
+        alternate.write_text(str(self.root / 'objects') + '\n')
+        with self.assertRaises(ValueError):
+            runner.permission_scope(str(self.repo))
+        alternate.unlink()
+        linked = metadata / 'linked'
+        linked.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            runner.permission_scope(str(self.repo))
+        linked.unlink()
+        os.link(metadata / 'HEAD', self.root / 'shared-head')
+        with self.assertRaises(ValueError):
+            runner.permission_scope(str(self.repo))
+
+    def test_project_config_cannot_override_permission_profile(self):
+        for directory in (self.repo, self.root):
+            config = directory / '.codex'
+            config.mkdir()
+            (config / 'config.toml').write_text('sandbox_mode = "read-only"\n')
+            with self.assertRaises(ValueError):
+                runner.permission_scope(str(self.repo))
+            (config / 'config.toml').unlink()
+            config.rmdir()
+
+
 if __name__ == '__main__':
     unittest.main()

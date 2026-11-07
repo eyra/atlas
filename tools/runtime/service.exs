@@ -123,17 +123,25 @@ defmodule AtlasRuntime.Service do
   defp command(%{"command" => "start", "cwd" => cwd, "assignment" => assignment} = request, state)
        when is_binary(cwd) and is_binary(assignment) do
     if state.agent, do: raise("An agent is already active; use status or stop")
-    sandbox = Map.get(request, "sandbox", "read-only")
-
-    if sandbox not in ["read-only", "workspace-write"],
-      do: raise("Sandbox must be read-only or workspace-write")
-    start_turn(assignment, cwd, sandbox, nil, state)
+    {sandbox, scope} =
+      case Map.get(request, "permissions") do
+        nil ->
+          sandbox = Map.get(request, "sandbox", "read-only")
+          if sandbox not in ["read-only", "workspace-write"],
+            do: raise("Sandbox must be read-only or workspace-write")
+          {sandbox, nil}
+        "dedicated-repository" ->
+          if Map.has_key?(request, "sandbox"), do: raise("Permissions cannot be combined with sandbox")
+          {nil, Codex.permission_scope(cwd)}
+        _ -> raise("Unknown permission profile")
+      end
+    start_turn(assignment, cwd, sandbox, scope, nil, state)
   end
 
   defp command(%{"command" => "continue", "assignment" => assignment} = request, state)
        when is_binary(assignment) do
     if Map.keys(request) -- ["command", "assignment", "turn_id"] != [],
-      do: raise("Continue accepts only an assignment and optional turn ID; working directory and sandbox cannot change")
+      do: raise("Continue accepts only an assignment and optional turn ID; working directory and permissions cannot change")
     if state.agent, do: raise("An agent is already active; wait for completion or stop it")
     run =
       if Map.has_key?(request, "turn_id"),
@@ -144,17 +152,21 @@ defmodule AtlasRuntime.Service do
     session = run["session_id"]
     cwd = run["cwd"]
     sandbox = run["sandbox"]
+    scope = run["permissions"]
     if not is_binary(session) or String.trim(session) == "",
       do: raise("The selected turn has no confirmed Codex session")
     if not is_binary(cwd) or Path.type(cwd) != :absolute or
-         sandbox not in ["read-only", "workspace-write"],
-      do: raise("The selected turn has no valid saved working directory and sandbox")
-    start_turn(assignment, cwd, sandbox, session, state)
+         not ((is_nil(scope) and sandbox in ["read-only", "workspace-write"]) or
+           (is_map(scope) and is_nil(sandbox))),
+      do: raise("The selected turn has no valid saved working directory and permissions")
+    if scope && scope != Codex.permission_scope(cwd),
+      do: raise("The selected turn's permission scope changed")
+    start_turn(assignment, cwd, sandbox, scope, session, state)
   end
 
   defp command(_, _), do: raise("Unknown or malformed command")
 
-  defp start_turn(assignment, cwd, sandbox, session, state) do
+  defp start_turn(assignment, cwd, sandbox, scope, session, state) do
 
     if not File.dir?(cwd) or String.trim(assignment) == "",
       do: raise("An existing working directory and nonempty assignment are required")
@@ -168,6 +180,7 @@ defmodule AtlasRuntime.Service do
       "workspace" => Path.expand(cwd),
       "goal" => assignment,
       "sandbox" => sandbox,
+      "permissions" => scope,
       "session_id" => session
     }
 
@@ -183,6 +196,7 @@ defmodule AtlasRuntime.Service do
           session_id: session,
           artifacts: Path.join(turns, key)
         }
+        run = if scope, do: Map.put(run, :permissions, scope), else: run
 
         next = %{state | agent: pid, monitor: Process.monitor(pid), run: run}
         {run, next, false}

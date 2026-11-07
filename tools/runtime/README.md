@@ -35,7 +35,23 @@ Codex defaults to **read-only**, using the official CLI and the user's existing 
 atlas-runtime start --cwd /path/to/project --sandbox workspace-write "Make the requested file change"
 ```
 
-Only `read-only` and `workspace-write` are accepted. Status and output report the selected mode. A read-only denial never automatically escalates permissions. The Runtime reuses `AtlasRuntime.Agent.Codex` and its owned process-group runner; no credentials are copied, no global Codex settings change, and no API fallback. Guidance, queues, multi-agent scheduling and Atlas hookup remain outside this step.
+The `--sandbox` option accepts only `read-only` and `workspace-write`. Status and output report the selected mode. A read-only denial never automatically escalates permissions. The Runtime reuses `AtlasRuntime.Agent.Codex` and its owned process-group runner; no credentials are copied, no global Codex settings change, and no API fallback. Guidance, queues, multi-agent scheduling and Atlas hookup remain outside this step.
+
+For an explicitly authorized Git/PR assignment in an **independent clone**, opt into a separate, fixed permission profile:
+
+```sh
+atlas-runtime start --cwd /canonical/path/to/independent-clone --permissions dedicated-repository "Complete the assigned change and create its PR"
+```
+
+This cannot be combined with `--sandbox`. It permits writes only beneath the canonical repository root, including its own `.git`, while retaining read-only `.agents`, `.codex` and `.aws` paths. Outside writes, including system temporary directories and home caches, remain denied; tools needing writable caches must use repository-local paths. Existing read access is unchanged. Command networking uses Codex's enforced proxy and allows only `github.com` and `api.github.com`; no unrestricted network fallback is provided.
+
+Validation refuses linked worktrees, non-root/aliased paths, external/shared Git metadata, object alternates, metadata symlinks and shared hardlinks. Project/ancestor and system Codex configuration files are refused because legacy sandbox settings can override a native profile; the ignored user config is exempt. Use an independent remote clone, not a local clone with shared objects. Validation runs before launch and again before native execution.
+
+The status/history `permissions` object records profile name/version, canonical root, Git directory and exact allowed network hosts; `sandbox` is `null` for this opt-in. Both ordinary and saved-turn continuation retain and revalidate that scope. There is no permission override on continuation and no fallback to a legacy mode. Native execution retains ignored user config/execpolicy rules, disabled hooks, no approvals, exact session confirmation and owned-process cleanup. The native profile path does not pass the conflicting `--sandbox` flag.
+
+Use HTTPS Git transport with the existing GitHub CLI authentication when the stored origin uses SSH. For example, `git -c credential.helper= -c 'credential.helper=!gh auth git-credential' -c remote.origin.url=https://github.com/eyra/atlas.git fetch origin develop`. Apply the same per-command URL/helper settings to push; do not change global Git configuration or copy credentials. `gh pr create --repo eyra/atlas ...` uses the same allowed GitHub API host. Domain approval does not restrict access to one GitHub repository: the authenticated account's GitHub rights still apply.
+
+Verified on macOS with Codex 0.166.0. Other platforms/versions are not certified. Native network denial can terminate the entire shell command; it is not necessarily a catchable HTTP error inside a script.
 
 The client talks to an owner-only Unix socket under `~/.local/state/atlas-runtime/`. `service.log` contains daemon diagnostics. Per-turn artifacts retain full native JSONL, stderr, final answer and process details. `output` returns the final answer and a bounded 64 KiB native event tail. Restart resets the in-memory current-turn view to idle; retained artifacts do not trigger restoration or re-execution.
 
@@ -113,5 +129,7 @@ Independent saved-resume verification passed: real Codex workspace-write after r
 2026-11-06: fixed a macOS cleanup exit race. Signalling an owned group whose last member is exiting/unreaped can return EPERM before a nonblocking poll can reap the leader. The runner now waits up to its existing three-second cleanup bound for that owned leader and retries the same group signal once, preserving descendant cleanup. A live leader beyond the bound or a second permission denial still fails; permission errors are not ignored. This preserves the original protocol/session failure rather than replacing it with cleanup EPERM. Focused checks from `beam/apps/atlas_runtime`: `python3 -B test/codex_runner_test.py -v` (3 real-process regressions) and `mix test test/codex_test.exs` (9 adapter tests), all passed. Direct runner smoke confirmed clean normal completion and explicit cancellation, with recorded native/sleep PIDs absent and empty helper stderr.
 
 2026-11-06: added two cleanup safety-boundary checks without changing production code. With owned real processes and explicitly injected `killpg` permission failures, a live leader produces a bounded visible failure rather than hanging, and persistent denial still propagates after the exited leader is reaped. Existing exited-leader/live-descendant and original-session-error coverage is reused, not duplicated. `python3 -B test/codex_runner_test.py -v` now passes all 5 checks. These injected-denial results establish error propagation, not native foreign-user permission behavior or cross-platform proof.
+
+2026-11-07: added explicit persisted dedicated-repository permissions. Disposable native Runtime proof created a branch/commit, denied outside/protected writes, fetched authenticated GitHub develop, accessed the repository API, and denied a nonapproved domain. Saved-turn continuation after daemon restart retained the same native session and exact scope; altered saved scope and worktree admission were refused. Eight Python regressions, ten Codex adapter tests, Go client tests and both model-free legacy sandbox checks passed. Default installed daemon and binary were not changed.
 
 <sub>Written by an AI agent (omp · openai-codex/gpt-6-astra).</sub>
