@@ -9,10 +9,16 @@ if Enum.any?([:atlas_state, :atlas_flow, :atlas_control], &(&1 in started)),
 defmodule AtlasRuntime.Service do
   use GenServer
   alias AtlasRuntime.Agent.Native
+  alias AtlasRuntime.BackendPolicy
 
   def start(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
 
   def init(dir) do
+    policy = case File.read(Path.join(dir, "backends.json")) do
+      {:ok, bytes} -> BackendPolicy.validate!(JSON.decode!(bytes))
+      {:error, :enoent} -> BackendPolicy.empty()
+      {:error, reason} -> raise("Cannot read backend policy: #{inspect(reason)}")
+    end
     path = Path.join(dir, "runtime.sock")
 
     {:ok, listener} =
@@ -28,7 +34,7 @@ defmodule AtlasRuntime.Service do
     File.chmod!(path, 0o600)
     System.at_exit(fn _ -> File.rm(path) end)
     spawn_link(fn -> accept(listener) end)
-    {:ok, %{dir: dir, agent: nil, monitor: nil, stopping: false, run: %{state: "idle"}}}
+    {:ok, %{dir: dir, policy: policy, agent: nil, monitor: nil, stopping: false, run: %{state: "idle"}}}
   end
 
   defp accept(listener) do
@@ -120,17 +126,30 @@ defmodule AtlasRuntime.Service do
     {Map.merge(state.run, turn_output(state.run[:artifacts])), state, false}
   end
 
+  defp command(%{"command" => "preferences"} = request, state) do
+    now = System.system_time(:second)
+    policy = case request do
+      %{"preferred" => preferred, "fallback" => fallback} when map_size(request) == 3 ->
+        BackendPolicy.configure(state.policy, preferred, fallback)
+      %{"reenable" => backend} when map_size(request) == 2 ->
+        BackendPolicy.reenable(state.policy, backend, now)
+      _ when map_size(request) == 1 -> state.policy
+      _ -> raise("Use preferences, a preferred/fallback pair, or reenable; modes cannot mix")
+    end
+    if policy != state.policy, do: persist_policy(state.dir, policy)
+    {BackendPolicy.view(policy, now), %{state | policy: policy}, false}
+  end
+
   defp command(%{"command" => "start", "repository" => url, "branch" => branch,
                  "permissions" => "dedicated-repository", "assignment" => assignment} = request, state)
        when is_binary(url) and is_binary(branch) and is_binary(assignment) do
     if state.agent, do: raise("An agent is already active; use status or stop")
-    if Map.get(request, "backend", "codex") != "codex",
-      do: raise("Repository provisioning supports only the codex backend")
+    selection = select_backend(request, state)
     if Map.keys(request) -- ["command", "repository", "branch", "permissions", "assignment", "backend"] != [],
       do: raise("Repository provisioning cannot be combined with cwd or sandbox")
     prepared = Native.repository_request(state.dir, url, branch)
     scope = prepared["permissions"]
-    start_turn(assignment, scope["root"], nil, scope, nil, state, prepared["repository"])
+    start_turn(assignment, scope["root"], nil, scope, nil, state, prepared["repository"], selection)
   end
 
   defp command(%{"command" => "start", "cwd" => cwd, "assignment" => assignment} = request, state)
@@ -138,11 +157,7 @@ defmodule AtlasRuntime.Service do
     if state.agent, do: raise("An agent is already active; use status or stop")
     if Map.has_key?(request, "repository") or Map.has_key?(request, "branch"),
       do: raise("Repository provisioning requires a URL, branch and dedicated-repository permissions")
-    backend = Map.get(request, "backend", "codex")
-    if backend not in ["codex", "claude"], do: raise("Backend must be codex or claude")
-    if backend == "claude" and
-         (Map.get(request, "sandbox", "read-only") != "read-only" or not is_nil(request["permissions"])),
-      do: raise("Claude supports only read-only assignments; write and dedicated-repository permissions are unsupported")
+    selection = select_backend(request, state)
     {sandbox, scope} =
       case Map.get(request, "permissions") do
         nil ->
@@ -155,7 +170,7 @@ defmodule AtlasRuntime.Service do
           {nil, Native.permission_scope(cwd)}
         _ -> raise("Unknown permission profile")
       end
-    start_turn(assignment, cwd, sandbox, scope, nil, state, nil, backend)
+    start_turn(assignment, cwd, sandbox, scope, nil, state, nil, selection)
   end
 
   defp command(%{"command" => "continue", "assignment" => assignment} = request, state)
@@ -185,13 +200,22 @@ defmodule AtlasRuntime.Service do
       do: raise("The selected turn has no valid saved working directory and permissions")
     if scope && scope != Native.permission_scope(cwd),
       do: raise("The selected turn's permission scope changed")
-    start_turn(assignment, cwd, sandbox, scope, session, state, run["repository"])
+    target = %{"backend" => backend, "model" => run["model"] || run["requested_model"]}
+    selection = %{"requested" => target, "selected" => target, "reason" => "continuation"}
+    start_turn(assignment, cwd, sandbox, scope, session, state, run["repository"], selection)
   end
 
   defp command(_, _), do: raise("Unknown or malformed command")
 
-  defp start_turn(assignment, cwd, sandbox, scope, session, state, repository \\ nil, backend \\ "codex") do
+  defp select_backend(request, state) do
+    if Map.has_key?(request, "backend") and is_nil(request["backend"]),
+      do: raise("Backend must be codex or claude")
+    BackendPolicy.select(state.policy, request["backend"], request, System.system_time(:second))
+  end
 
+  defp start_turn(assignment, cwd, sandbox, scope, session, state, repository, selection) do
+    backend = selection["selected"]["backend"]
+    model = selection["selected"]["model"]
     if (not File.dir?(cwd) and is_nil(repository)) or String.trim(assignment) == "",
       do: raise("An existing working directory and nonempty assignment are required")
 
@@ -202,6 +226,7 @@ defmodule AtlasRuntime.Service do
     settings = %{
       "command" => executable,
       "backend" => backend,
+      "model" => model,
       "workspace" => Path.expand(cwd),
       "goal" => assignment,
       "sandbox" => sandbox,
@@ -216,6 +241,8 @@ defmodule AtlasRuntime.Service do
           id: key,
           backend: backend,
           model: nil,
+          requested_model: model,
+          selection: selection,
           started_at: DateTime.to_iso8601(DateTime.utc_now()),
           state: "running",
           cwd: Path.expand(cwd),
@@ -249,6 +276,15 @@ defmodule AtlasRuntime.Service do
     run = Map.put(state.run, :repository, repository)
     persist(run)
     {:noreply, %{state | run: run}}
+  end
+
+  def handle_info({:agent, pid, {:quota, evidence}},
+                  %{agent: pid, run: %{backend: "claude"}} = state) do
+    policy = BackendPolicy.record_quota(state.policy, evidence, state.run.id, System.system_time(:second))
+    if policy != state.policy, do: persist_policy(state.dir, policy)
+    run = Map.put(state.run, :quota, policy["claude_quota"])
+    persist(run)
+    {:noreply, %{state | policy: policy, run: run}}
   end
 
   def handle_info({:agent, pid, {:identity, backend, model}},
@@ -301,6 +337,12 @@ defmodule AtlasRuntime.Service do
   end
 
   def handle_info(_, state), do: {:noreply, state}
+
+  defp persist_policy(dir, policy) do
+    path = Path.join(dir, "backends.json")
+    File.write!(path <> ".tmp", JSON.encode!(policy))
+    File.rename!(path <> ".tmp", path)
+  end
 
   defp persist(run) do
     path = Path.join(run.artifacts, "turn.json")

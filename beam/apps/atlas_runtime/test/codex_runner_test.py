@@ -1,7 +1,9 @@
 """Owned-process cleanup regressions; injected permission errors are labelled."""
 import errno
+from datetime import datetime, timezone
 import fcntl
 import importlib.util
+import json
 import os
 from pathlib import Path
 import signal
@@ -17,6 +19,139 @@ HELPER = Path(__file__).resolve().parents[1] / 'priv' / 'native_runner.py'
 spec = importlib.util.spec_from_file_location('native_runner', HELPER)
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+
+
+class NativeModelTest(unittest.TestCase):
+    session = '01a1b578-c3b5-7972-9664-1d250bf64cdf'
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory(prefix='runtime-model-')
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name).resolve()
+        self.home = self.root / 'codex'
+        self.artifact = (self.home / 'sessions/2026/11/07' /
+                         f'rollout-2026-11-07T11-05-53-{self.session}.jsonl')
+        self.artifact.parent.mkdir(parents=True)
+        self.started = datetime(2026, 11, 7, 10, 5, 54, tzinfo=timezone.utc)
+        self.environment = patch.dict(os.environ, CODEX_HOME=str(self.home))
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
+    def records(self, *contexts, session=None):
+        records = [{'type': 'session_meta', 'payload': {'id': session or self.session}}]
+        records.extend({'type': 'turn_context', 'timestamp': timestamp,
+                        'payload': {'cwd': cwd, 'model': model}}
+                       for timestamp, cwd, model in contexts)
+        self.artifact.write_text(''.join(json.dumps(record) + '\n' for record in records))
+
+    def model(self):
+        return runner.codex_model(self.session, str(self.root), self.started)
+
+    def test_native_turn_context_not_requested_model_confirms_identity(self):
+        # Shape and model from native Codex 0.166.0 rollout, with fixture-only cwd.
+        self.records(('2026-11-07T10:05:55.213Z', str(self.root), 'gpt-6.1-sol'))
+        self.assertEqual(self.model(), 'gpt-6.1-sol')
+
+    def test_resume_ignores_previous_turn_and_other_workspaces(self):
+        self.records(
+            ('2026-11-07T10:05:53.848Z', str(self.root), 'old-model'),
+            ('2026-11-07T10:05:55.213Z', '/other', 'foreign-model'))
+        self.assertIsNone(self.model())
+        self.records(
+            ('2026-11-07T10:05:53.848Z', str(self.root), 'old-model'),
+            ('2026-11-07T10:05:55.213Z', str(self.root), 'native-current'))
+        self.assertEqual(self.model(), 'native-current')
+
+    def test_missing_unconfirmed_and_malformed_artifacts_leave_identity_unknown(self):
+        self.assertIsNone(self.model())
+        self.records(('2026-11-07T10:05:55.213Z', str(self.root), 'model'),
+                     session='different-session')
+        self.assertIsNone(self.model())
+        for timestamp, model in [('bad-date', 'model'), ('2026-11-07T10:05:55', 'model'),
+                                 ('2026-11-07T10:05:55Z', None),
+                                 ('2026-11-07T10:05:55Z', '<synthetic>')]:
+            self.records((timestamp, str(self.root), model))
+            self.assertIsNone(self.model())
+        self.artifact.write_text('{truncated')
+        self.assertIsNone(self.model())
+        self.assertIsNone(runner.codex_model('../../*', str(self.root), self.started))
+
+    def launch(self, extra, session='', artifact=False):
+        native = self.root / 'native'
+        native.write_text(
+            f'#!{sys.executable}\n'
+            'import json, sys\nfrom pathlib import Path\n'
+            'from datetime import datetime, timezone\n'
+            f'Path({str(self.root / "argv.json")!r}).write_text(json.dumps(sys.argv[1:]))\n' +
+            (f'with Path({str(self.artifact)!r}).open("a") as output:\n'
+             '    output.write(json.dumps({"type": "turn_context", '
+             '"timestamp": datetime.now(timezone.utc).isoformat(), '
+             f'"payload": {{"cwd": {str(self.root)!r}, "model": "native-confirmed"}}}}) + "\\n")\n'
+             if artifact else '') +
+            f'print(json.dumps({{"type": "thread.started", "thread_id": {self.session!r}}}), flush=True)\n'
+            'print(\'{"type":"turn.completed"}\', flush=True)\n')
+        native.chmod(0o700)
+        process = subprocess.Popen(
+            [sys.executable, str(HELPER), str(native), str(self.root), str(self.root),
+             '--prompt stays one argument', 'read-only', session, *extra],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            process.wait(timeout=5)  # Keep control stdin open; EOF would cancel the turn.
+            output, error = process.communicate()
+            return process.returncode, [json.loads(line) for line in output.splitlines()], error
+        finally:
+            if process.poll() is None:
+                process.stdin.close()
+                process.wait(timeout=5)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+
+    def test_official_model_flag_preserves_argv_and_resume(self):
+        for backend, session, model in [('claude', '', 'claude-opus-5-5[1m]'),
+                                        ('codex', '', 'gpt-6.1-sol'),
+                                        ('codex', self.session, 'gpt-6.1-sol')]:
+            with self.subTest(backend=backend, session=session):
+                code, events, error = self.launch(['null', 'null', backend, json.dumps(model)], session)
+                self.assertEqual(code, 0, error)
+                argv = json.loads((self.root / 'argv.json').read_text())
+                self.assertEqual(argv[argv.index('--model') + 1], model)
+                self.assertEqual(argv[-1], '--prompt stays one argument')
+                self.assertEqual(argv[argv.index('--') + 1:],
+                                 [session, '--prompt stays one argument'] if session else
+                                 ['--prompt stays one argument'])
+                self.assertFalse(any(event['type'] == 'runtime.identity' for event in events))
+                if session:
+                    self.assertLess(argv.index('resume'), argv.index('--model'))
+                    self.assertNotIn('--last', argv)
+
+    def test_legacy_runner_protocol_and_null_model_keep_native_defaults(self):
+        for extra in ([], ['null'], ['null', 'null'], ['null', 'null', 'codex'],
+                      ['null', 'null', 'codex', 'null']):
+            with self.subTest(extra=extra):
+                code, _, error = self.launch(extra)
+                self.assertEqual(code, 0, error)
+                argv = json.loads((self.root / 'argv.json').read_text())
+                self.assertEqual(argv[0], 'exec')
+                self.assertNotIn('--model', argv)
+
+    def test_invalid_models_never_launch_native_process(self):
+        for model in ('', '--dangerously-skip-permissions', 'opus --tools Bash', 'opus\nx',
+                      'opus;touch /tmp/injected', 'x' * 201, 1, ['opus']):
+            with self.subTest(model=model):
+                code, events, error = self.launch(['null', 'null', 'codex', json.dumps(model)])
+                self.assertEqual(code, 1)
+                self.assertIn('Model must be', error)
+                self.assertEqual(events, [])
+                self.assertFalse((self.root / 'argv.json').exists())
+
+    def test_current_native_artifact_emits_identity_before_process_end_on_resume(self):
+        self.records(('2026-11-07T10:05:53.848Z', str(self.root), 'stale-model'))
+        code, events, error = self.launch(
+            ['null', 'null', 'codex', '"requested-model"'], self.session, artifact=True)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(events[-2],
+                         {'type': 'runtime.identity', 'backend': 'codex', 'model': 'native-confirmed'})
+        self.assertEqual(events[-1]['type'], 'runtime.process_ended')
 
 
 @unittest.skipUnless(os.name == 'posix', 'Runner process groups require POSIX')

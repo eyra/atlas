@@ -51,6 +51,11 @@ defmodule AtlasRuntime.Agent.Native do
     scope = settings["permissions"]
     repository = settings["repository"]
     backend = Map.get(settings, "backend", "codex")
+    model = settings["model"]
+
+    valid_model =
+      is_nil(model) ||
+        (is_binary(model) && Regex.match?(~r/\A[A-Za-z0-9][A-Za-z0-9._:\/\[\]-]{0,199}\z/, model))
 
     supported =
       backend == "codex" ||
@@ -65,6 +70,7 @@ defmodule AtlasRuntime.Agent.Native do
          (File.dir?(workspace) || is_map(repository)) &&
          (is_nil(repository) || (is_map(repository) && is_map(scope))) &&
          is_binary(goal) && String.trim(goal) != "" && valid_permissions && supported &&
+         valid_model &&
          (is_nil(session) || (is_binary(session) && session != "")) do
       File.mkdir_p!(folder)
       helper = Path.join(:code.priv_dir(:atlas_runtime), "native_runner.py")
@@ -89,7 +95,8 @@ defmodule AtlasRuntime.Agent.Native do
              session || "",
              JSON.encode!(scope),
              JSON.encode!(repository),
-             backend
+             backend,
+             JSON.encode!(model)
            ]},
           {:env, unset}
         ])
@@ -102,6 +109,7 @@ defmodule AtlasRuntime.Agent.Native do
          backend: backend,
          model: nil,
          session: nil,
+         quota_seen: false,
          monitor: monitor,
          port: port,
          partial: "",
@@ -170,6 +178,33 @@ defmodule AtlasRuntime.Agent.Native do
   defp consume(%{"type" => "runtime.repository_prepared", "repository" => repository}, state) do
     send(state.owner, {:agent, self(), {:repository, repository}})
     state
+  end
+
+  defp consume(
+         %{"type" => "runtime.identity", "backend" => "codex", "model" => model},
+         %{backend: "codex"} = state
+       ),
+       do: identify(state, model)
+
+  defp consume(
+         %{
+           "type" => "runtime.event",
+           "event" => %{
+             "type" => "rate_limit_event",
+             "rate_limit_info" => %{"status" => "rejected", "rateLimitType" => "seven_day"} = info
+           }
+         },
+         %{backend: "claude"} = state
+       ) do
+    unavailable = info["isUsingOverage"] != true and info["overageStatus"] != "allowed"
+
+    if unavailable and not state.quota_seen do
+      reset = info["resetsAt"]
+      reset = if is_number(reset) and reset > 0, do: reset, else: nil
+      send(state.owner, {:agent, self(), {:quota, Map.put(info, "resetsAt", reset)}})
+    end
+
+    %{state | quota_seen: state.quota_seen or unavailable}
   end
 
   defp consume(

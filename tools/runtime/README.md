@@ -1,6 +1,6 @@
 # Runtime service and CLI
 
-One Go command-line client, a separate Elixir Runtime daemon, and one native agent at a time. Codex remains the default; Claude requires explicit selection. No Atlas server connection or orchestration. Runtime and Bus are the only Atlas applications started; State, Flow, Control and Rela are not started.
+One Go command-line client, a separate Elixir Runtime daemon, and one native agent at a time. Codex remains the default without configured preferences; Claude requires explicit selection or an explicit preference. No Atlas server connection or orchestration. Runtime and Bus are the only Atlas applications started; State, Flow, Control and Rela are not started.
 
 ```sh
 atlas-runtime service start
@@ -45,9 +45,30 @@ atlas-runtime start --backend claude --cwd /path/to/project "Read the project an
 
 Claude supports only fresh read-only file-tool assignments. Native restricted/safe modes expose only `Read`, `Glob` and `Grep`, confine those file tools to the working directory, disable user/project customizations and MCP servers, and deny permission prompts. This is native tool-level restriction, not a claim of OS-wide sandbox confinement. No Bash, write, browser or network tool is enabled; normal provider communication and existing native authentication remain available. API-key/token environment overrides are not forwarded.
 
-Claude workspace-write, dedicated-repository permissions, repository provisioning and continuation are explicitly refused before execution. Unknown backends are refused. There is no vendor switch, quota retry or automatic fallback. Saved legacy turns without a backend remain Codex turns; new turns persist `backend`, native `session_id` and native-reported `model` when available. Claude local errors with a synthetic assistant model do not replace the native initialization model. A pre-request failure can therefore identify the configured native model without claiming that model completed an inference. Codex model remains `null` when its native stream does not report it.
+Claude workspace-write, dedicated-repository permissions, repository provisioning and continuation are explicitly refused before execution. Unknown backends are refused. Started turns never switch vendors or retry automatically. Saved legacy turns without a backend remain Codex turns; new turns persist `backend`, native `session_id` and native-confirmed `model` when available. Claude local errors with a synthetic assistant model do not replace the native initialization model. A pre-request failure can therefore identify the configured native model without claiming that model completed an inference. Codex model identity comes from this invocation's native session `turn_context`, matched by session ID, working directory and timestamp; unavailable evidence remains `null`, never copied from the requested model.
 
 Claude requires native initialization identity, a successful result and clean process exit before Runtime reports completion. Native JSONL and final/error text remain inspectable through the same artifacts and output commands. Claude session persistence is disabled in this slice; even saved successful Claude turns cannot be continued. The Atlas-connected Claude adapter and broker are unchanged.
+
+## Local backend preference
+
+Configure the supported Claude-then-Codex pair for future assignments, optionally selecting native models:
+
+```sh
+atlas-runtime preferences --preferred claude --preferred-model 'claude-opus-5-5[1m]' --fallback codex --fallback-model gpt-6.1-sol
+atlas-runtime preferences
+atlas-runtime start --cwd /path/to/project "Read the project"
+atlas-runtime preferences --reenable claude
+```
+
+Omit either model flag to use that CLI's native default. Model availability remains the native provider's decision; an unavailable model fails without retry. `preferences` reports configuration, retained quota evidence and current `claude_eligible`. Configuration and evidence persist atomically in `backends.json` beneath the selected Runtime home and survive daemon restarts. Invalid persisted policy fails visibly instead of silently selecting another backend.
+
+Only a structured native Claude `rate_limit_event` with rejected `seven_day`, no active overage and no allowed overage can make Claude ineligible. The quota record retains native evidence, source turn ID, observation time and explicit re-enablement time. Generic authentication/network/provider errors, text mentioning limits and other quota windows do not change eligibility. A positive numeric native `resetsAt` restores eligibility at that Unix timestamp; missing/invalid reset evidence remains `null` and requires explicit re-enablement. Localized text such as “1pm” is never parsed. Re-enablement retains evidence; a later confirmed weekly rejection disables eligibility again.
+
+An eligible preference selects Claude. Confirmed weekly unavailability selects Codex only for a subsequent explicit `start`; the failed Claude turn remains failed and is never replayed. `start --backend claude` or `--backend codex` bypasses eligibility selection, using the configured model for that backend when present, and never falls back. An incapable selected backend is refused before execution, without weakening permissions or marking capability errors as quota. For example, an eligible Claude preference cannot accept a workspace-write assignment; explicitly select Codex instead.
+
+Turn metadata separates `requested_model` from native-confirmed `model`. `selection` records `requested`, `selected`, `reason` (`default`, `preferred`, `explicit`, `confirmed_weekly_quota` or `continuation`) and the source quota record when applicable. Continuation retains its saved provider and confirmed/requested model regardless of changed preferences or quota eligibility. Claude continuation remains unsupported. No scheduler, queue, automatic assignment, write-capable Claude mode or generic provider registry is introduced.
+
+## Dedicated repository permissions
 
 For an explicitly authorized Git/PR assignment in an **independent clone**, opt into a separate, fixed permission profile:
 
@@ -127,6 +148,8 @@ Boundary: this proves native sandbox enforcement and adapter-to-native mode sele
 ## Verified
 
 Explicit Claude selection was exercised through an isolated public Runtime CLI with Claude Code 2.1.280. Native initialization confirmed only `Glob`, `Grep`, `Read`, no MCP servers, `dontAsk`, and model `claude-opus-5-5[1m]`. The single attempt was rejected by the existing weekly limit: `rateLimitType: seven_day`, `overageDisabledReason: out_of_credits`, zero input/output tokens. Runtime retained the model/session and exact error answer, marked the turn failed, refused continuation, and cleaned the native process group. No retry or fallback was attempted. A successful real Claude read remains unverified because of this quota limit; deterministic native-stream regressions cover successful completion, identity requirements, error precedence and private-content filtering.
+
+Preference/fallback verification used clearly labelled synthetic replay of that exact previously observed weekly-quota event, not another Claude provider call. After an isolated daemon restart, a new public CLI assignment selected real Codex `gpt-6.1-sol`, returned `FALLBACK_OK`, and recorded native-confirmed model identity plus the quota selection reason. After explicit Claude re-enablement, Codex continuation kept the same session/model and returned `CONTINUATION_OK`. Public CLI/daemon checks also proved re-enablement persistence, generic-error non-poisoning, explicit backend override and incapable-backend refusal. Successful real Claude completion remains unverified; no additional Claude quota was consumed.
 
 
 Installed CLI exercised against a separate real daemon: idempotent service start, real Codex completion reading a disposable file, concurrent-start refusal, output retrieval, explicit real Codex stop with native-process cleanup, daemon survival after agent stop, service stop/restart, and refusal without implicit startup when the service is stopped. A synthetic hanging executable also proved daemon shutdown cleans its active agent process group. All smoke daemons were stopped.

@@ -176,7 +176,7 @@ func service(dir, action string) (map[string]any, error) {
 
 func execute(args []string) (map[string]any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("use service start|status|stop, start --cwd PATH ASSIGNMENT, continue ASSIGNMENT, status, output, or stop")
+		return nil, errors.New("use service start|status|stop, start --cwd PATH ASSIGNMENT, continue ASSIGNMENT, preferences, status, output, or stop")
 	}
 	dir, err := home()
 	if err != nil {
@@ -209,14 +209,22 @@ func execute(args []string) (map[string]any, error) {
 		permissions := flags.String("permissions", "", "explicit dedicated-repository Git/GitHub scope")
 		repository := flags.String("repo", "", "GitHub HTTPS repository to provision")
 		branch := flags.String("branch", "", "new task branch based on freshly fetched develop")
-		backend := flags.String("backend", "codex", "codex or explicit read-only claude")
+		backend := flags.String("backend", "", "explicit codex or read-only claude; omitted uses preferences")
 		if err = flags.Parse(args[1:]); err != nil {
 			return nil, err
 		}
-		if *backend != "codex" && *backend != "claude" {
-			return nil, errors.New("backend must be codex or claude")
+		backendSet := false
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name == "backend" {
+				backendSet = true
+			}
+		})
+		if backendSet {
+			if *backend != "codex" && *backend != "claude" {
+				return nil, errors.New("backend must be codex or claude")
+			}
+			command["backend"] = *backend
 		}
-		command["backend"] = *backend
 		if *sandbox != "read-only" && *sandbox != "workspace-write" {
 			return nil, errors.New("sandbox must be read-only or workspace-write")
 		}
@@ -265,6 +273,51 @@ func execute(args []string) (map[string]any, error) {
 			command["sandbox"] = *sandbox
 		} else {
 			command["permissions"] = *permissions
+		}
+	case "preferences":
+		flags := flag.NewFlagSet("preferences", flag.ContinueOnError)
+		preferred := flags.String("preferred", "", "preferred backend: claude")
+		fallback := flags.String("fallback", "", "fallback backend: codex")
+		preferredModel := flags.String("preferred-model", "", "optional Claude model")
+		fallbackModel := flags.String("fallback-model", "", "optional Codex model")
+		reenable := flags.String("reenable", "", "reenable backend: claude")
+		if err = flags.Parse(args[1:]); err != nil {
+			return nil, err
+		}
+		if flags.NArg() != 0 {
+			return nil, errors.New("preferences does not accept positional arguments")
+		}
+		supplied := map[string]bool{}
+		flags.Visit(func(f *flag.Flag) { supplied[f.Name] = true })
+		if supplied["reenable"] {
+			if len(supplied) != 1 || *reenable != "claude" {
+				return nil, errors.New("use preferences --reenable claude without other flags")
+			}
+			command["reenable"] = *reenable
+		} else if len(supplied) != 0 {
+			if *preferred != "claude" || *fallback != "codex" {
+				return nil, errors.New("use preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]")
+			}
+			for _, selection := range []struct {
+				name  string
+				model string
+			}{
+				{"preferred", *preferredModel},
+				{"fallback", *fallbackModel},
+			} {
+				var model any
+				if supplied[selection.name+"-model"] {
+					if strings.TrimSpace(selection.model) == "" {
+						return nil, errors.New("explicit preference models must be nonempty")
+					}
+					model = selection.model
+				}
+				backend := *preferred
+				if selection.name == "fallback" {
+					backend = *fallback
+				}
+				command[selection.name] = map[string]any{"backend": backend, "model": model}
+			}
 		}
 	case "continue":
 		if len(args) == 2 && strings.TrimSpace(args[1]) != "" {
@@ -395,7 +448,7 @@ func followOutput(out io.Writer) error {
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nCodex is the default; Claude requires explicit --backend claude and supports fresh read-only file-tool assignments only. Both use their official CLI login. Claude write permissions, provisioning and continuation are refused. One agent at a time.")
+		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude supports fresh read-only file-tool assignments only. Both use their official CLI login. Claude write permissions, provisioning and continuation are refused. One agent at a time.")
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "output" && os.Args[2] == "--follow" {

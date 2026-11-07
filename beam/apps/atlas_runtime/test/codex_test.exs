@@ -33,6 +33,51 @@ defmodule AtlasRuntime.CodexTest do
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
   end
 
+  test "runner-confirmed Codex identity reaches owner once" do
+    port = make_ref()
+    owner = self()
+    state = %{port: port, partial: "", owner: owner, backend: "codex", model: nil}
+
+    event =
+      JSON.encode!(%{
+        "type" => "runtime.identity",
+        "backend" => "codex",
+        "model" => "gpt-6.1-sol"
+      })
+
+    message = {port, {:data, {:eol, event}}}
+    assert {:noreply, updated} = Native.handle_info(message, state)
+    assert updated.model == "gpt-6.1-sol"
+    assert_receive {:agent, ^owner, {:identity, "codex", "gpt-6.1-sol"}}
+    assert {:noreply, ^updated} = Native.handle_info(message, updated)
+    refute_received {:agent, ^owner, {:identity, _, _}}
+  end
+
+  test "requested Codex model and Claude quota-shaped events cannot fabricate evidence", %{
+    tmp_dir: dir
+  } do
+    {:ok, pid} =
+      launch(
+        dir,
+        ~S"""
+        printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1794052800}}'
+        printf '%s\n' '{"type":"turn.completed"}'
+        """,
+        nil,
+        %{"model" => "requested-model"}
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:agent, ^pid, {:ended, _}}, 5_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
+    refute_received {:agent, ^pid, {:identity, _, _}}
+    refute_received {:agent, ^pid, {:quota, _}}
+    process = JSON.decode!(File.read!(Path.join(dir, "turns/TU-CODEX-1/process.json")))
+
+    assert Enum.chunk_every(process["command"], 2, 1, :discard)
+           |> Enum.member?(["--model", "requested-model"])
+  end
+
   test "normal completion terminates descendants with redirected output", %{tmp_dir: dir} do
     {:ok, pid} =
       launch(dir, ~S"""
