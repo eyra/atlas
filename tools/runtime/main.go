@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 // Set at installation with -ldflags '-X main.repoRoot=...'.
@@ -198,6 +199,41 @@ func turnFlag(flags *flag.FlagSet, command map[string]any) {
 	})
 }
 
+func parseAnswers(raw string) (map[string]string, error) {
+	const invalid = "answers must be a JSON object of 1..4 unique nonempty question/string pairs (4096 bytes each, 16384 bytes total)"
+	if len(raw) > 16384 || !utf8.ValidString(raw) {
+		return nil, errors.New(invalid)
+	}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, errors.New(invalid)
+	}
+	answers := make(map[string]string, 4)
+	for decoder.More() {
+		token, err = decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok || strings.TrimSpace(key) == "" || len(key) > 4096 || len(answers) == 4 {
+			return nil, errors.New(invalid)
+		}
+		if _, duplicate := answers[key]; duplicate {
+			return nil, errors.New(invalid)
+		}
+		var value string
+		if err = decoder.Decode(&value); err != nil || strings.TrimSpace(value) == "" || len(value) > 4096 {
+			return nil, errors.New(invalid)
+		}
+		answers[key] = value
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') || len(answers) == 0 {
+		return nil, errors.New(invalid)
+	}
+	if _, err = decoder.Token(); err != io.EOF {
+		return nil, errors.New(invalid)
+	}
+	return answers, nil
+}
+
 func parseOutput(args []string) (map[string]any, bool, error) {
 	command := map[string]any{"command": "output"}
 	flags := flag.NewFlagSet("output", flag.ContinueOnError)
@@ -222,7 +258,7 @@ func execute(args []string) (map[string]any, error) {
 
 func executeTo(args []string, out io.Writer) (map[string]any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("use service start|status|stop, start [--worker NAME] --cwd PATH ASSIGNMENT, continue [--worker NAME] [--turn TURN_ID] ASSIGNMENT, preferences, status [--worker NAME], turns, events [--cursor CURSOR] [--limit N], output [--worker NAME] [--follow | --turn TURN_ID], or stop [--worker NAME]")
+		return nil, errors.New("use service start|status|stop, start [--worker NAME] [--questions] --cwd PATH ASSIGNMENT, continue [--worker NAME] [--turn TURN_ID] ASSIGNMENT, answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT, preferences, status [--worker NAME], turns, events [--cursor CURSOR] [--limit N], output [--worker NAME] [--follow | --turn TURN_ID], or stop [--worker NAME]")
 	}
 	dir, err := home()
 	if err != nil {
@@ -257,6 +293,7 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 		repository := flags.String("repo", "", "GitHub HTTPS repository to provision")
 		branch := flags.String("branch", "", "new task branch based on freshly fetched develop")
 		backend := flags.String("backend", "", "explicit codex or claude; omitted uses preferences")
+		questions := flags.Bool("questions", false, "opt in to Claude's restricted host-question path")
 		if err = flags.Parse(args[1:]); err != nil {
 			return nil, err
 		}
@@ -265,12 +302,18 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 			if f.Name == "backend" {
 				backendSet = true
 			}
+			if f.Name == "questions" {
+				command["questions_enabled"] = *questions
+			}
 		})
 		if backendSet {
 			if *backend != "codex" && *backend != "claude" {
 				return nil, errors.New("backend must be codex or claude")
 			}
 			command["backend"] = *backend
+		}
+		if *questions && *backend == "codex" {
+			return nil, errors.New("questions are supported only by Claude")
 		}
 		if *sandbox != "read-only" && *sandbox != "workspace-write" {
 			return nil, errors.New("sandbox must be read-only or workspace-write")
@@ -377,6 +420,25 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 			return nil, errors.New("use continue [--worker NAME] [--turn TURN_ID] \"assignment\"; working directory and sandbox cannot change")
 		}
 		command["assignment"] = flags.Arg(0)
+	case "answer":
+		flags := flag.NewFlagSet("answer", flag.ContinueOnError)
+		workerFlag(flags, command)
+		turnFlag(flags, command)
+		question := flags.String("question", "", "opaque current pending question ID")
+		raw := flags.String("answers", "", "JSON object mapping exact question texts to answers")
+		if err = flags.Parse(args[1:]); err != nil {
+			return nil, err
+		}
+		if flags.NArg() != 0 || command["worker_id"] == nil || command["turn_id"] == nil ||
+			strings.TrimSpace(*question) == "" || len(*question) > 128 {
+			return nil, errors.New("use answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT")
+		}
+		answers, parseErr := parseAnswers(*raw)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		command["question_id"] = *question
+		command["answers"] = answers
 	case "events":
 		flags := flag.NewFlagSet("events", flag.ContinueOnError)
 		cursor := flags.String("cursor", "", "opaque cursor from an earlier events page")
@@ -561,6 +623,7 @@ func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start [--worker NAME] --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start [--worker NAME] --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH [--backend codex|claude] --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--worker NAME] [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|stop [--worker NAME]\natlas-runtime turns\natlas-runtime output [--worker NAME] [--follow | --turn TURN_ID]\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude defaults to read-only; explicit dedicated-repository uses native sandboxed Bash in an independent repository outside system temp roots. Both use their official CLI login. Managed provisioning requires the installed Codex sandbox for Git preparation, including for Claude. Claude workspace-write is refused. Continue requires a successful saved native session and retains its worker, backend, model and scope. One active execution per worker. NAME must match ^[a-z][a-z0-9_-]{0,63}$. Omitted --worker selects the sole registered worker, or default when none exist; multiple workers require an explicit name. --turn selects its recorded worker; an explicit --worker must match. Flags precede assignment text; use -- before an assignment starting with a dash. Follow pins the selected worker and turn. Turns and events include all workers. Service status lists worker states; service stop stops all workers.")
 		fmt.Println("atlas-runtime events [--cursor CURSOR] [--limit N]\nEvents returns one finite page of durable execution events, not native output or task-success claims. Limit defaults to 50 (1..100); follow is not supported.")
+		fmt.Println("Claude question opt-in: add --questions to start; continuation retains the saved capability.\natlas-runtime answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT\nAnswers map exact pending question texts to strings. Delivery is not native processing or verified task success. Codex does not support questions.")
 		return
 	}
 	result, err := executeTo(os.Args[1:], os.Stdout)

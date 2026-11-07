@@ -421,3 +421,49 @@ func TestFollowPinsWorkerAndRefusesTurnChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestAnswersRejectAmbiguousOrUnboundedInput(t *testing.T) {
+	for _, raw := range []string{
+		`null`, `[]`, `{}`, `{"q":null}`, `{"q":1}`, `{"q":[]}`, `{"q":{}}`,
+		`{"q":""}`, `{"q":" "}`, `{" ":"answer"}`, `{"q":"a","q":"b"}`,
+		`{"q":"a","\u0071":"b"}`, `{"q":"a"} {"q":"b"}`, `{"q":"a",}`,
+		`{"a":"1","b":"2","c":"3","d":"4","e":"5"}`,
+		`{"q":"` + strings.Repeat("x", 4097) + `"}`,
+		`{"` + strings.Repeat("x", 4097) + `":"answer"}`,
+		`{"q":"` + strings.Repeat("é", 2049) + `"}`,
+		`{"q":"answer"}` + strings.Repeat(" ", 16384),
+		"{\"q\":\"\xff\"}",
+	} {
+		if _, err := parseAnswers(raw); err == nil {
+			t.Fatalf("invalid answer input accepted: %.80q", raw)
+		}
+	}
+	answers, err := parseAnswers(`{"Which number?":"436849","Which text?":"quote \" and newline\n"}`)
+	if err != nil || len(answers) != 2 || answers["Which number?"] != "436849" ||
+		answers["Which text?"] != "quote \" and newline\n" {
+		t.Fatalf("answer text changed: %#v, %v", answers, err)
+	}
+	long := strings.Repeat("x", 4096)
+	answers, err = parseAnswers(`{"` + long + `":"` + long + `"}`)
+	if err != nil || answers[long] != long {
+		t.Fatalf("valid byte boundary refused: %v", err)
+	}
+}
+
+func TestAnswerRequiresEveryTargetAndRejectsCapabilityChanges(t *testing.T) {
+	t.Setenv("ATLAS_RUNTIME_HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"answer", "--turn", "turn-1", "--question", "question-1", "--answers", `{"q":"a"}`},
+		{"answer", "--worker", "server", "--question", "question-1", "--answers", `{"q":"a"}`},
+		{"answer", "--worker", "server", "--turn", "turn-1", "--answers", `{"q":"a"}`},
+		{"answer", "--worker", "server", "--turn", "turn-1", "--question", "question-1"},
+		{"answer", "--worker", "server", "--turn", "turn-1", "--question", "question-1", "--answers", `{"q":"a"}`, "extra"},
+		{"answer", "--worker", "server", "--turn", "turn-1", "--question", "question-1", "--answers", `{"q":"a"}`, "--permissions", "dedicated-repository"},
+		{"continue", "--questions", "next"},
+		{"start", "--backend", "codex", "--questions", "--cwd", ".", "next"},
+	} {
+		if _, err := execute(args); err == nil || strings.Contains(err.Error(), "Runtime service is stopped") {
+			t.Fatalf("invalid answer/capability arguments reached socket: %q, %v", args, err)
+		}
+	}
+}

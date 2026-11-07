@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import selectors
 import signal
 import shutil
@@ -262,6 +263,240 @@ def codex_model(session, workspace, started_at):
     return model
 
 
+def json_record(line, limit):
+    if len(line) > limit:
+        raise ValueError('Native protocol record exceeds its size limit')
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Duplicate JSON key')
+            result[key] = value
+        return result
+    value = json.loads(line, object_pairs_hook=unique)
+    if not isinstance(value, dict):
+        raise ValueError('Native protocol record must be an object')
+    return value
+
+
+def write_native(stream, event):
+    data = (json.dumps(event) + '\n').encode()
+    if len(data) > 1048576:
+        raise ValueError('Native input exceeds 1 MiB')
+    remaining = memoryview(data)
+    deadline = time.monotonic() + 3
+    while remaining:
+        timeout = deadline - time.monotonic()
+        if timeout <= 0 or not select.select([], [stream], [], timeout)[1]:
+            raise ValueError('Native input transport stalled')
+        try:
+            written = os.write(stream.fileno(), remaining)
+        except BlockingIOError:
+            continue
+        except OSError as error:
+            raise ValueError('Native input transport closed') from error
+        if not written:
+            raise ValueError('Native input transport closed')
+        remaining = remaining[written:]
+    stream.flush()
+
+
+class QuestionHost:
+    """One owned native query; fixture tests do not establish provider behavior."""
+
+    def __init__(self, session, goal, send, close, tools, resume_model=None):
+        self.session, self.goal = session, goal
+        self.send, self.close, self.tools = send, close, set(tools)
+        self.resume_model = resume_model
+        self.model = None
+        self.initialize_id = 'initialize-' + uuid.uuid4().hex
+        self.initialized = False
+        self.candidate = self.pending = self.inflight = None
+        self.last_tool = None
+        self.finished = False
+
+    def start(self):
+        self.send({'type': 'control_request', 'request_id': self.initialize_id,
+                   'request': {'subtype': 'initialize'}})
+
+    @staticmethod
+    def question_input(value):
+        if (not isinstance(value, dict) or set(value) != {'questions'} or
+                len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()) > 32768):
+            raise ValueError('Invalid native question input')
+        questions = value['questions']
+        if not isinstance(questions, list) or not 1 <= len(questions) <= 4:
+            raise ValueError('Invalid native question count')
+        seen = set()
+        for question in questions:
+            if (not isinstance(question, dict) or
+                    set(question) != {'question', 'header', 'options', 'multiSelect'}):
+                raise ValueError('Invalid native question fields')
+            text = question['question']
+            if (not isinstance(text, str) or not text.strip() or len(text.encode()) > 4096 or text in seen or
+                    not isinstance(question['header'], str) or
+                    not isinstance(question['multiSelect'], bool)):
+                raise ValueError('Invalid native question')
+            seen.add(text)
+            options = question['options']
+            if not isinstance(options, list) or not 2 <= len(options) <= 4:
+                raise ValueError('Invalid native question options')
+            for option in options:
+                if (not isinstance(option, dict) or set(option) != {'label', 'description'} or
+                        any(not isinstance(option[key], str) for key in option) or
+                        not option['label'].strip()):
+                    raise ValueError('Invalid native question option')
+        return questions
+
+    def reject_request(self, event, message, deny=False):
+        identifier = event.get('request_id')
+        if isinstance(identifier, str) and identifier and len(identifier) <= 256:
+            response = {'subtype': 'success' if deny else 'error', 'request_id': identifier}
+            if deny:
+                response['response'] = {'behavior': 'deny', 'message': message}
+            else:
+                response['error'] = message
+            self.send({'type': 'control_response', 'response': response})
+
+    def event(self, event):
+        kind = event.get('type')
+        if self.finished:
+            raise ValueError('Native event after terminal result')
+        if 'session_id' in event and event['session_id'] != self.session:
+            raise ValueError('Native question session changed')
+        if event.get('parent_tool_use_id') is not None:
+            raise ValueError('Subagent question transport is not supported')
+        if kind == 'control_response':
+            response = event.get('response')
+            if (self.initialized or not isinstance(response, dict) or
+                    response.get('request_id') != self.initialize_id or
+                    response.get('subtype') != 'success' or
+                    not isinstance(response.get('response'), dict) or
+                    response['response'].get('current_permission_mode', 'default') not in ('default', 'manual')):
+                raise ValueError('Unexpected native initialization response')
+            self.initialized = True
+            self.send({'type': 'user', 'session_id': self.session, 'parent_tool_use_id': None,
+                       'message': {'role': 'user', 'content': self.goal}})
+            return
+        if kind == 'system' and event.get('subtype') == 'init':
+            actual = event.get('model')
+            tools = event.get('tools')
+            if (not self.initialized or event.get('session_id') != self.session or
+                    not isinstance(actual, str) or not actual or actual == '<synthetic>' or
+                    (self.resume_model is not None and actual != self.resume_model) or
+                    (self.model is not None and actual != self.model) or
+                    event.get('permissionMode', 'default') not in ('default', 'manual') or
+                    not isinstance(tools, list) or any(not isinstance(tool, str) for tool in tools) or
+                    set(tools) != self.tools):
+                raise ValueError('Native question initialization identity changed')
+            self.model = actual
+        elif kind == 'assistant':
+            message = event.get('message')
+            if (self.model is None or event.get('session_id') != self.session or
+                    not isinstance(message, dict) or message.get('model') != self.model):
+                raise ValueError('Native question assistant identity changed')
+            content = message.get('content')
+            if not isinstance(content, list):
+                raise ValueError('Invalid native assistant content')
+            for block in content:
+                if not isinstance(block, dict):
+                    raise ValueError('Invalid native assistant block')
+                if block.get('type') == 'tool_use' and block.get('name') == 'AskUserQuestion':
+                    tool = block.get('id')
+                    if (self.candidate or self.pending or self.inflight or
+                            not isinstance(tool, str) or not tool or len(tool) > 256 or
+                            tool == self.last_tool or
+                            block.get('caller', {'type': 'direct'}) != {'type': 'direct'}):
+                        raise ValueError('Ambiguous native question tool use')
+                    self.question_input(block.get('input'))
+                    self.candidate = {'tool': tool, 'input': block['input']}
+        elif kind == 'control_request':
+            request = event.get('request')
+            if not isinstance(request, dict) or request.get('subtype') != 'can_use_tool':
+                self.reject_request(event, 'Runtime does not permit native control changes')
+                raise ValueError('Unsupported native control request')
+            identifier = event.get('request_id')
+            if (not isinstance(identifier, str) or not identifier or len(identifier) > 256 or
+                    not isinstance(request.get('tool_name'), str) or not request['tool_name'] or
+                    not isinstance(request.get('tool_use_id'), str) or not request['tool_use_id'] or
+                    not isinstance(request.get('input'), dict)):
+                self.reject_request(event, 'Runtime refused a malformed native request', deny=True)
+                raise ValueError('Malformed native permission request')
+            if request.get('tool_name') != 'AskUserQuestion':
+                self.reject_request(event, 'Runtime does not approve non-question tools', deny=True)
+                return
+            try:
+                if (set(request) - {'subtype', 'tool_name', 'display_name', 'input',
+                                    'tool_use_id', 'requires_user_interaction'} or
+                        request.get('requires_user_interaction') is not True or
+                        self.model is None or self.pending or self.inflight or not self.candidate or
+                        request.get('tool_use_id') != self.candidate['tool'] or
+                        request.get('input') != self.candidate['input']):
+                    raise ValueError('Uncorrelated native question request')
+                questions = self.question_input(request.get('input'))
+            except ValueError:
+                self.reject_request(event, 'Runtime refused an invalid native question', deny=True)
+                raise
+            self.pending = {**self.candidate, 'request': identifier,
+                            'id': 'question-' + uuid.uuid4().hex}
+            self.candidate = None
+            emit({'type': 'runtime.question',
+                  'question': {'id': self.pending['id'], 'questions': questions}})
+        elif kind == 'user':
+            message = event.get('message')
+            if not isinstance(message, dict) or not isinstance(message.get('content'), list):
+                raise ValueError('Invalid native tool result')
+            for block in message['content']:
+                if not isinstance(block, dict):
+                    raise ValueError('Invalid native tool result block')
+                if (block.get('type') == 'tool_result' and self.inflight and
+                        block.get('tool_use_id') == self.inflight['tool']):
+                    if (event.get('session_id') != self.session or
+                            block.get('is_error', False) is not False):
+                        raise ValueError('Native question processing failed')
+                    emit({'type': 'runtime.answer_processed', 'question_id': self.inflight['id']})
+                    self.last_tool = self.inflight['tool']
+                    self.inflight = None
+        elif kind == 'control_cancel_request':
+            raise ValueError('Native cancelled its pending control request')
+        elif kind == 'result':
+            self.close()
+            self.finished = True
+            if (self.model is None or event.get('session_id') != self.session or
+                    self.candidate or self.pending or self.inflight):
+                raise ValueError('Native result ended without processing its question')
+        elif isinstance(kind, str) and kind.startswith('control_'):
+            raise ValueError('Unsupported native control message')
+
+    def answer(self, command):
+        identifier, answers = command.get('question_id'), command.get('answers')
+        if (set(command) != {'command', 'question_id', 'answers'} or
+                command.get('command') != 'answer' or not isinstance(identifier, str) or
+                not identifier or len(identifier) > 256):
+            raise ValueError('Malformed Runtime answer command')
+        if (self.finished or not self.pending or identifier != self.pending['id'] or
+                not isinstance(answers, dict) or
+                set(answers) != {q['question'] for q in self.pending['input']['questions']} or
+                any(not isinstance(value, str) or not value.strip() or len(value.encode()) > 4096
+                    for value in answers.values()) or
+                len(json.dumps(answers, ensure_ascii=False, separators=(',', ':')).encode()) > 16384):
+            emit({'type': 'runtime.answer_rejected', 'question_id': identifier,
+                  'error': 'Answer does not match the pending native question'})
+            return
+        pending = self.pending
+        self.send({'type': 'control_response', 'response': {
+            'subtype': 'success', 'request_id': pending['request'],
+            'response': {'behavior': 'allow', 'updatedInput': {
+                **pending['input'], 'answers': answers}}}})
+        self.inflight, self.pending = pending, None
+        emit({'type': 'runtime.answer_delivered', 'question_id': identifier})
+
+    def cancel(self):
+        self.candidate = self.pending = self.inflight = None
+        self.finished = True
+        self.close()
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == '--workspace-path':
         print(json.dumps(str(Path(sys.argv[2]).resolve())))
@@ -283,6 +518,9 @@ def main():
     backend = extra[2] if len(extra) >= 3 else 'codex'
     model = json.loads(extra[3]) if len(extra) >= 4 else None
     expected_context = json.loads(extra[4]) if len(extra) >= 5 else None
+    questions_enabled = json.loads(extra[5]) if len(extra) >= 6 else False
+    if type(questions_enabled) is not bool or (questions_enabled and backend != 'claude'):
+        raise ValueError('Questions require a boolean opt-in and the Claude backend')
     if model is not None and (not isinstance(model, str) or
                               not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/\[\]-]{0,199}', model)):
         raise ValueError('Model must be a nonempty identifier of at most 200 characters')
@@ -293,7 +531,7 @@ def main():
     if backend == 'claude' and session:
         if str(uuid.UUID(session)) != session or model is None or not isinstance(expected_context, dict):
             raise ValueError('Claude resume requires a confirmed UUID, model and saved execution context')
-    if len(extra) > 5 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
+    if len(extra) > 6 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
         raise ValueError('Sandbox must be read-only or workspace-write')
     if repository is not None and (scope != dedicated_scope(Path(workspace)) or
                                    bool(session) != ('base_sha' in repository)):
@@ -306,13 +544,21 @@ def main():
         permissions = ['--sandbox', sandbox]
     folder = Path(folder)
     model_arguments = ['--model', model] if model is not None else []
+    question_session = session or str(uuid.uuid4()) if questions_enabled else None
     if backend == 'claude':
         tools = 'Bash,Read,Glob,Grep' if scope is not None else 'Read,Glob,Grep'
         command = [executable, '--print', '--output-format', 'stream-json', '--verbose',
                    '--restricted', '--safe-mode', '--strict-mcp-config', '--no-chrome',
-                   '--tools', tools, '--allowedTools', tools,
-                   '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
-                   *(['--resume', session] if session else []), *model_arguments, '--', goal]
+                   '--tools', tools + (',AskUserQuestion' if questions_enabled else ''),
+                   '--allowedTools', tools]
+        if questions_enabled:
+            command += ['--input-format', 'stream-json', '--permission-mode', 'manual',
+                        '--permission-prompts', 'host', '--permission-prompt-tool', 'stdio',
+                        *(['--resume', session] if session else ['--session-id', question_session]),
+                        *model_arguments]
+        else:
+            command += ['--permission-mode', 'dontAsk', '--permission-prompts', 'none',
+                        *(['--resume', session] if session else []), *model_arguments, '--', goal]
     else:
         command = [executable, 'exec', *permissions, '--disable', 'hooks',
                    '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
@@ -327,6 +573,15 @@ def main():
 
     def forward(event):
         nonlocal session_seen, native_session
+        nonlocal deadline
+        if stopped:
+            return
+        if host is not None and event.get('type') != 'runtime.repository_prepared':
+            host.event(event)
+            if host.finished:
+                deadline = time.monotonic() + 3
+            if event.get('type') == 'control_response':
+                return
         if backend == 'claude' and session:
             if event.get('type') == 'system' and event.get('subtype') == 'init':
                 if event.get('session_id') != session or event.get('model') != model:
@@ -351,6 +606,8 @@ def main():
         emit({'type': 'runtime.event', 'event': event})
 
     process = None
+    group_killed = False
+    host = None
     lock = None
     created = False
     native_temporary = None
@@ -359,6 +616,7 @@ def main():
     stopped = False
     deadline = None
     partial = b''
+    control_partial = b''
     stdout_open = True
     try:
         with (folder / 'stderr.log').open('wb') as errors, (folder / 'stream.jsonl').open('wb') as output:
@@ -380,7 +638,8 @@ def main():
                            workspace, json.dumps(scope), json.dumps(repository), json.dumps(created),
                            backend, str(folder), json.dumps(expected_context), *command]
             started_at = datetime.now(timezone.utc)
-            process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            process = subprocess.Popen(command, stdin=subprocess.PIPE if questions_enabled else subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE,
                                        stderr=errors, start_new_session=True,
                                        cwd=workspace if backend == 'claude' else None, env=environment)
             (folder / 'process.json').write_text(json.dumps({
@@ -388,14 +647,36 @@ def main():
             emit({'type': 'runtime.process_started', 'pid': process.pid})
             selector.register(sys.stdin, selectors.EVENT_READ, 'control')
             selector.register(process.stdout, selectors.EVENT_READ, 'output')
+            if questions_enabled:
+                os.set_blocking(process.stdin.fileno(), False)
+                host = QuestionHost(question_session, goal,
+                                    lambda event: write_native(process.stdin, event),
+                                    process.stdin.close, tools.split(',') + ['AskUserQuestion'],
+                                    model if session else None)
+                host.start()
             while True:
                 for key, _ in selector.select(.1):
                     if key.data == 'control':
-                        os.read(sys.stdin.fileno(), 4096)  # Any control input, including EOF, means stop.
-                        selector.unregister(sys.stdin)
-                        stopped = True
-                        deadline = time.monotonic() + 3
-                        signal_group(process, signal.SIGINT)
+                        data = os.read(sys.stdin.fileno(), 4096)
+                        should_stop = not questions_enabled or not data
+                        if not should_stop:
+                            control_partial += data
+                            while b'\n' in control_partial:
+                                line, control_partial = control_partial.split(b'\n', 1)
+                                if line == b'stop':
+                                    should_stop = True
+                                    break
+                                command = json_record(line, 32768)
+                                host.answer(command)
+                            if len(control_partial) > 32768:
+                                raise ValueError('Runtime control record exceeds 32 KiB')
+                        if should_stop:
+                            selector.unregister(sys.stdin)
+                            stopped = True
+                            if host is not None:
+                                host.cancel()
+                            deadline = time.monotonic() + 3
+                            signal_group(process, signal.SIGINT)
                     else:
                         data = os.read(process.stdout.fileno(), 65536)
                         if not data:
@@ -408,25 +689,28 @@ def main():
                             while b'\n' in partial:
                                 line, partial = partial.split(b'\n', 1)
                                 # Keep protocol records separate from helper diagnostics.
-                                event = json.loads(line)
+                                event = json_record(line, 1048576)
                                 forward(event)
                             if len(partial) > 1048576:
-                                raise ValueError('Codex event exceeds 1 MiB')
+                                raise ValueError('Native event exceeds 1 MiB')
                 if deadline is not None and time.monotonic() >= deadline:
                     signal_group(process, signal.SIGKILL)
+                    group_killed = True
                     deadline = None
                 if not stdout_open:
                     if partial.strip():
-                        forward(json.loads(partial))
+                        forward(json_record(partial, 1048576))
                         partial = b''
+                    if host is not None and not host.finished and not stopped:
+                        raise ValueError('Native question transport ended before its result')
                     # EOF can precede the leader's exit; do not turn a clean exit into SIGKILL.
                     try:
                         code = process.wait(timeout=3)
                     except subprocess.TimeoutExpired:
-                        signal_group(process, signal.SIGKILL)
+                        if not group_killed:
+                            signal_group(process, signal.SIGKILL)
+                            group_killed = True
                         code = process.wait()
-                    # A finished leader can leave descendants with redirected output.
-                    signal_group(process, signal.SIGKILL)
                     if session and not session_seen and not stopped:
                         raise ValueError(f'{backend.capitalize()} resume ended without confirming its session')
                     if backend == 'codex' and native_session and not stopped:
@@ -437,8 +721,12 @@ def main():
                     return
     finally:
         selector.close()
-        if process is not None and process.returncode is None:
-            signal_group(process, signal.SIGKILL)
+        if host is not None:
+            host.cancel()
+        if process is not None:
+            # Signal every descendant once; a second kill can hit orphan zombies on macOS.
+            if not group_killed:
+                signal_group(process, signal.SIGKILL)
             process.wait()
         if native_temporary is not None:
             try:

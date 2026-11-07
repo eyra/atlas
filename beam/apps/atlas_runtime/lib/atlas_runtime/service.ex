@@ -80,6 +80,37 @@ defmodule AtlasRuntime.Service do
 
   defp command(_, %{stopping: true}), do: raise("Runtime service is stopping")
 
+  defp command(%{"command" => "answer"} = request, state) do
+    fields = ["command", "worker_id", "turn_id", "question_id", "answers"]
+    if Enum.sort(Map.keys(request)) != Enum.sort(fields),
+      do: raise("Answer requires exactly worker_id, turn_id, question_id and answers")
+    if not valid_worker_id?(request["worker_id"]), do: raise("Invalid worker ID")
+    if not valid_id?(request["turn_id"]), do: raise("Invalid turn ID")
+    question_id = request["question_id"]
+    if not is_binary(question_id) or not Regex.match?(~r/\Aquestion-[0-9a-f]{1,64}\z/, question_id),
+      do: raise("Invalid question ID")
+    worker = state.workers[request["worker_id"]] || raise("Unknown worker: #{request["worker_id"]}")
+    if not is_pid(worker.agent) or worker.run.state != "running" or worker.run.id != request["turn_id"],
+      do: raise("Answer requires the current active worker turn")
+    if worker.run[:questions_enabled] != true or worker.run[:backend] != "claude",
+      do: raise("Questions are not enabled for this turn")
+    question = worker.run[:pending_question]
+    if is_nil(question) or question.id != question_id, do: raise("No matching pending question")
+    case Native.validate_answers(question, request["answers"]) do
+      :ok -> :ok
+      {:error, _} -> raise("Invalid answers for the pending question")
+    end
+
+    case Native.answer(worker.agent, question_id, request["answers"]) do
+      {:ok, evidence} ->
+        run = Map.merge(worker.run, %{pending_question: nil, last_answer: evidence})
+        reply = Map.merge(evidence, %{worker_id: request["worker_id"], turn_id: worker.run.id})
+        {reply, put_worker(state, request["worker_id"], %{worker | run: run}), false}
+      {:error, reason} ->
+        raise("Answer delivery not confirmed: #{inspect(reason)}")
+    end
+  end
+
   defp command(%{"command" => name} = request, state)
        when name in ["start", "status", "output", "stop", "continue"] do
     {worker_id, saved} = select_worker(request, state)
@@ -178,17 +209,19 @@ defmodule AtlasRuntime.Service do
        when is_binary(url) and is_binary(branch) and is_binary(assignment) do
     if worker.agent, do: raise("Worker #{worker_id} already has an active agent; use status or stop")
     selection = select_backend(request, state)
-    if Map.keys(request) -- ["command", "repository", "branch", "permissions", "assignment", "backend", "worker_id"] != [],
+    if Map.keys(request) -- ["command", "repository", "branch", "permissions", "assignment", "backend", "worker_id", "questions_enabled"] != [],
       do: raise("Repository provisioning cannot be combined with cwd or sandbox")
     prepared = Native.repository_request(Path.join([state.dir, "workers", worker_id]), url, branch)
     scope = prepared["permissions"]
-    start_turn(assignment, scope["root"], nil, scope, nil, state, worker_id, prepared["repository"], selection)
+    start_turn(assignment, scope["root"], nil, scope, nil, state, worker_id, prepared["repository"], selection, nil, Map.get(request, "questions_enabled", false))
   end
 
   defp worker_command(%{"command" => "start", "cwd" => cwd, "assignment" => assignment} = request,
                       worker_id, worker, _saved, state)
        when is_binary(cwd) and is_binary(assignment) do
     if worker.agent, do: raise("Worker #{worker_id} already has an active agent; use status or stop")
+    if Map.keys(request) -- ["command", "cwd", "assignment", "permissions", "sandbox", "backend", "worker_id", "questions_enabled"] != [],
+      do: raise("Unknown start fields")
     if Map.has_key?(request, "repository") or Map.has_key?(request, "branch"),
       do: raise("Repository provisioning requires a URL, branch and dedicated-repository permissions")
     selection = select_backend(request, state)
@@ -204,7 +237,7 @@ defmodule AtlasRuntime.Service do
           {nil, Native.permission_scope(cwd)}
         _ -> raise("Unknown permission profile")
       end
-    start_turn(assignment, cwd, sandbox, scope, nil, state, worker_id, nil, selection)
+    start_turn(assignment, cwd, sandbox, scope, nil, state, worker_id, nil, selection, nil, Map.get(request, "questions_enabled", false))
   end
 
   defp worker_command(%{"command" => "continue", "assignment" => assignment} = request,
@@ -216,6 +249,7 @@ defmodule AtlasRuntime.Service do
     run = saved || string_keys(worker.run)
     backend = Map.get(run, "backend", "codex")
     if backend not in ["codex", "claude"], do: raise("Unknown saved backend; sessions cannot switch vendors")
+    questions_enabled = questions_enabled!(run, backend)
     if run["state"] != "finished",
       do: raise("Continue requires a successfully finished turn")
     session = run["session_id"]
@@ -238,7 +272,7 @@ defmodule AtlasRuntime.Service do
       end
     target = %{"backend" => backend, "model" => run["model"] || run["requested_model"]}
     selection = %{"requested" => target, "selected" => target, "reason" => "continuation"}
-    start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, run["repository"], selection, context)
+    start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, run["repository"], selection, context, questions_enabled)
   end
 
   defp worker_command(_, _, _, _, _), do: raise("Unknown or malformed command")
@@ -289,10 +323,19 @@ defmodule AtlasRuntime.Service do
   defp select_backend(request, state) do
     if Map.has_key?(request, "backend") and is_nil(request["backend"]),
       do: raise("Backend must be codex or claude")
-    BackendPolicy.select(state.policy, request["backend"], request, System.system_time(:second))
+    selection = BackendPolicy.select(state.policy, request["backend"], request, System.system_time(:second))
+    questions_enabled!(request, selection["selected"]["backend"])
+    selection
   end
 
-  defp start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, repository, selection, context \\ nil) do
+  defp questions_enabled!(settings, backend) do
+    enabled = Map.get(settings, "questions_enabled", false)
+    if not is_boolean(enabled), do: raise("questions_enabled must be a boolean")
+    if enabled and backend != "claude", do: raise("Questions are supported only by Claude")
+    enabled
+  end
+
+  defp start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, repository, selection, context, questions_enabled) do
     backend = selection["selected"]["backend"]
     model = selection["selected"]["model"]
     if (not File.dir?(cwd) and is_nil(repository)) or String.trim(assignment) == "",
@@ -317,7 +360,8 @@ defmodule AtlasRuntime.Service do
       "permissions" => scope,
       "repository" => repository,
       "session_id" => session,
-      "resume_context" => context
+      "resume_context" => context,
+      "questions_enabled" => questions_enabled
     }
 
     case Native.start(%{key: key}, agent: settings, turns_dir: turns) do
@@ -326,6 +370,9 @@ defmodule AtlasRuntime.Service do
           id: key,
           worker_id: worker_id,
           backend: backend,
+          questions_enabled: questions_enabled,
+          pending_question: nil,
+          last_answer: nil,
           model: nil,
           requested_model: model,
           selection: selection,
@@ -356,7 +403,7 @@ defmodule AtlasRuntime.Service do
     :ok = Native.stop(state.agent)
     Process.demonitor(state.monitor, [:flush])
     %{state | agent: nil, monitor: nil,
-      run: Map.merge(state.run, %{state: "stopped", ended_at: DateTime.to_iso8601(DateTime.utc_now())})}
+      run: Map.merge(state.run, %{state: "stopped", pending_question: nil, ended_at: DateTime.to_iso8601(DateTime.utc_now())})}
   end
 
   def handle_info({:agent, pid, message}, state) when is_pid(pid) do
@@ -372,7 +419,7 @@ defmodule AtlasRuntime.Service do
          end) do
       nil -> {:noreply, state}
       {id, worker} ->
-        run = Map.merge(worker.run, %{state: "failed", error: inspect(reason),
+        run = Map.merge(worker.run, %{state: "failed", pending_question: nil, error: inspect(reason),
           ended_at: DateTime.to_iso8601(DateTime.utc_now())})
         next = put_worker(state, id, %{worker | agent: nil, monitor: nil, run: run})
         {:noreply, record_changes(state, next)}
@@ -385,6 +432,31 @@ defmodule AtlasRuntime.Service do
   end
 
   def handle_info(_, state), do: {:noreply, state}
+
+  defp agent_message({:question, question}, id,
+         %{run: %{state: "running", backend: "claude", questions_enabled: true}} = worker, state) do
+    if is_nil(worker.run[:pending_question]),
+      do: update_run(state, id, worker, Map.put(worker.run, :pending_question, question)),
+      else: state
+  end
+
+  defp agent_message({:answer, %{question_id: question_id, status: "delivered"} = evidence},
+         id, worker, state) do
+    case worker.run[:pending_question] do
+      %{id: ^question_id} ->
+        update_run(state, id, worker, Map.merge(worker.run, %{pending_question: nil, last_answer: evidence}))
+      _ -> state
+    end
+  end
+
+  defp agent_message({:answer, %{question_id: question_id, status: "processed"} = evidence},
+         id, worker, state) do
+    case worker.run[:last_answer] do
+      %{question_id: ^question_id, status: "delivered"} ->
+        update_run(state, id, worker, Map.put(worker.run, :last_answer, evidence))
+      _ -> state
+    end
+  end
 
   defp agent_message({:repository, repository}, id, worker, state),
     do: update_run(state, id, worker, Map.put(worker.run, :repository, repository))
@@ -406,7 +478,7 @@ defmodule AtlasRuntime.Service do
 
   defp agent_message({:ended, text}, id, worker, state) do
     Process.demonitor(worker.monitor, [:flush])
-    run = Map.merge(worker.run, %{state: "finished", result: text,
+    run = Map.merge(worker.run, %{state: "finished", pending_question: nil, result: text,
       ended_at: DateTime.to_iso8601(DateTime.utc_now())})
     next = put_worker(state, id, %{worker | agent: nil, monitor: nil, run: run})
     record_changes(state, next)
@@ -468,6 +540,7 @@ defmodule AtlasRuntime.Service do
         {:error, reason} -> raise("Cannot read turn #{id}: #{inspect(reason)}")
       end
       run = Map.put_new(run, "worker_id", "default")
+      run = run |> Map.put_new("questions_enabled", false) |> Map.put("pending_question", nil)
       if not valid_worker_id?(run["worker_id"]), do: raise("Invalid saved worker ID")
       run = if run["state"] == "running",
         do: Map.merge(run, %{"state" => "unknown", "recorded_state" => "running"}),
