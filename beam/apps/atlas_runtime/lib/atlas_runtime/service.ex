@@ -2,6 +2,7 @@ defmodule AtlasRuntime.Service do
   use GenServer
   alias AtlasRuntime.Agent.Native
   alias AtlasRuntime.BackendPolicy
+  alias AtlasRuntime.CommandAdmissions
   alias AtlasRuntime.ExecutionEvents
   alias AtlasRuntime.QuestionRecords
 
@@ -70,7 +71,7 @@ defmodule AtlasRuntime.Service do
       try do
         command(request, state)
       rescue
-        error in QuestionRecords.StorageError -> reraise error, __STACKTRACE__
+        error in [QuestionRecords.StorageError, CommandAdmissions.StorageError] -> reraise error, __STACKTRACE__
         error -> {%{command_error: Exception.message(error)}, state, false}
       catch
         :exit, why -> {%{command_error: "Operation not confirmed: #{inspect(why)}"}, state, false}
@@ -79,6 +80,8 @@ defmodule AtlasRuntime.Service do
     next = record_changes(state, next)
     reply =
       case {request, reply} do
+        {_, {:admission, record, run}} ->
+          state.dir |> CommandAdmissions.accept(record, run) |> CommandAdmissions.public()
         {%{"command" => "stop"}, %{worker_id: id}} ->
           Map.get(next.workers, id, %{run: reply}).run
         {%{"command" => "service-stop"}, %{workers: _}} ->
@@ -87,6 +90,25 @@ defmodule AtlasRuntime.Service do
         _ -> reply
       end
     {:reply, {reply, shutdown?}, next}
+  end
+
+  defp command(%{"request_id" => _} = request, state) do
+    canonical = CommandAdmissions.canonical(request)
+    request_id = request["request_id"]
+
+    case CommandAdmissions.load(state.dir, request_id) do
+      nil ->
+        if state.stopping, do: raise("Runtime service is stopping")
+        request = Map.delete(request, "request_id")
+        {worker_id, saved} = select_worker(request, state)
+        worker = Map.get(state.workers, worker_id, idle_worker(worker_id))
+        worker_command(request, worker_id, worker, saved, state, {request_id, canonical})
+
+      record ->
+        if record["request"] != canonical,
+          do: raise(ArgumentError, "Conflicting request ID: #{request_id}")
+        {CommandAdmissions.public(record), state, false}
+    end
   end
 
   defp command(_, %{stopping: true}), do: raise("Runtime service is stopping")
@@ -234,15 +256,17 @@ defmodule AtlasRuntime.Service do
   end
 
 
-  defp worker_command(%{"command" => "status"}, _id, worker, saved, state),
+  defp worker_command(request, id, worker, saved, state, admission \\ nil)
+
+  defp worker_command(%{"command" => "status"}, _id, worker, saved, state, _admission),
     do: {saved || worker.run, state, false}
 
-  defp worker_command(%{"command" => "output"}, _id, worker, saved, state) do
+  defp worker_command(%{"command" => "output"}, _id, worker, saved, state, _admission) do
     run = saved || worker.run
     {Map.merge(run, turn_output(run[:artifacts] || run["artifacts"])), state, false}
   end
 
-  defp worker_command(%{"command" => "stop"}, id, worker, _saved, state) do
+  defp worker_command(%{"command" => "stop"}, id, worker, _saved, state, _admission) do
     next = stop(worker)
     workers = if Map.has_key?(state.workers, id), do: Map.put(state.workers, id, next), else: state.workers
     {next.run, %{state | workers: workers}, false}
@@ -250,7 +274,7 @@ defmodule AtlasRuntime.Service do
 
   defp worker_command(%{"command" => "start", "repository" => url, "branch" => branch,
                  "permissions" => "dedicated-repository", "assignment" => assignment} = request,
-                 worker_id, worker, _saved, state)
+                 worker_id, worker, _saved, state, admission)
        when is_binary(url) and is_binary(branch) and is_binary(assignment) do
     if worker.agent, do: raise("Worker #{worker_id} already has an active agent; use status or stop")
     selection = select_backend(request, state)
@@ -258,11 +282,11 @@ defmodule AtlasRuntime.Service do
       do: raise("Repository provisioning cannot be combined with cwd or sandbox")
     prepared = Native.repository_request(Path.join([state.dir, "workers", worker_id]), url, branch)
     scope = prepared["permissions"]
-    start_turn(assignment, scope["root"], nil, scope, nil, state, worker_id, prepared["repository"], selection, nil, Map.get(request, "questions_enabled", false))
+    start_turn(assignment, scope["root"], nil, scope, nil, state, worker_id, prepared["repository"], selection, nil, Map.get(request, "questions_enabled", false), admission)
   end
 
   defp worker_command(%{"command" => "start", "cwd" => cwd, "assignment" => assignment} = request,
-                      worker_id, worker, _saved, state)
+                      worker_id, worker, _saved, state, admission)
        when is_binary(cwd) and is_binary(assignment) do
     if worker.agent, do: raise("Worker #{worker_id} already has an active agent; use status or stop")
     if Map.keys(request) -- ["command", "cwd", "assignment", "permissions", "sandbox", "backend", "worker_id", "questions_enabled"] != [],
@@ -282,11 +306,11 @@ defmodule AtlasRuntime.Service do
           {nil, Native.permission_scope(cwd)}
         _ -> raise("Unknown permission profile")
       end
-    start_turn(assignment, cwd, sandbox, scope, nil, state, worker_id, nil, selection, nil, Map.get(request, "questions_enabled", false))
+    start_turn(assignment, cwd, sandbox, scope, nil, state, worker_id, nil, selection, nil, Map.get(request, "questions_enabled", false), admission)
   end
 
   defp worker_command(%{"command" => "continue", "assignment" => assignment} = request,
-                      worker_id, worker, saved, state)
+                      worker_id, worker, saved, state, admission)
        when is_binary(assignment) do
     if Map.keys(request) -- ["command", "assignment", "turn_id", "worker_id"] != [],
       do: raise("Continue accepts only an assignment, worker and optional turn ID; working directory and permissions cannot change")
@@ -317,10 +341,10 @@ defmodule AtlasRuntime.Service do
       end
     target = %{"backend" => backend, "model" => run["model"] || run["requested_model"]}
     selection = %{"requested" => target, "selected" => target, "reason" => "continuation"}
-    start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, run["repository"], selection, context, questions_enabled)
+    start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, run["repository"], selection, context, questions_enabled, admission, run["id"])
   end
 
-  defp worker_command(_, _, _, _, _), do: raise("Unknown or malformed command")
+  defp worker_command(_, _, _, _, _, _), do: raise("Unknown or malformed command")
 
   defp select_worker(request, state) do
     explicit? = Map.has_key?(request, "worker_id")
@@ -380,7 +404,7 @@ defmodule AtlasRuntime.Service do
     enabled
   end
 
-  defp start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, repository, selection, context, questions_enabled) do
+  defp start_turn(assignment, cwd, sandbox, scope, session, state, worker_id, repository, selection, context, questions_enabled, admission, source_turn_id \\ nil) do
     backend = selection["selected"]["backend"]
     model = selection["selected"]["model"]
     if (not File.dir?(cwd) and is_nil(repository)) or String.trim(assignment) == "",
@@ -409,35 +433,68 @@ defmodule AtlasRuntime.Service do
       "questions_enabled" => questions_enabled
     }
 
-    case Native.start(%{key: key}, agent: settings, turns_dir: turns) do
-      {:ok, pid} ->
-        run = %{
-          id: key,
-          worker_id: worker_id,
-          backend: backend,
-          questions_enabled: questions_enabled,
-          pending_question: nil,
-          last_answer: nil,
-          model: nil,
-          requested_model: model,
-          selection: selection,
-          started_at: DateTime.to_iso8601(DateTime.utc_now()),
-          state: "running",
-          cwd: Path.expand(cwd),
-          assignment: assignment,
-          sandbox: sandbox,
-          session_id: session,
-          artifacts: Path.join(turns, key)
-        }
-        run = if scope, do: Map.put(run, :permissions, scope), else: run
-        run = if repository, do: Map.put(run, :repository, repository), else: run
+    run = %{
+      id: key,
+      worker_id: worker_id,
+      backend: backend,
+      questions_enabled: questions_enabled,
+      pending_question: nil,
+      last_answer: nil,
+      model: nil,
+      requested_model: model,
+      selection: selection,
+      started_at: DateTime.to_iso8601(DateTime.utc_now()),
+      state: "running",
+      cwd: Path.expand(cwd),
+      assignment: assignment,
+      sandbox: sandbox,
+      session_id: session,
+      artifacts: Path.join(turns, key)
+    }
+    run = if scope, do: Map.put(run, :permissions, scope), else: run
+    run = if repository, do: Map.put(run, :repository, repository), else: run
+    run = if admission, do: Map.put(run, :request_id, elem(admission, 0)), else: run
 
+    record =
+      if admission do
+        {request_id, canonical} = admission
+        binding = %{
+          "worker_id" => worker_id,
+          "source_turn_id" => source_turn_id,
+          "cwd" => run.cwd,
+          "sandbox" => sandbox,
+          "permissions" => scope,
+          "repository" => repository,
+          "backend" => backend,
+          "model" => model,
+          "session_id" => session,
+          "questions_enabled" => questions_enabled
+        }
+        CommandAdmissions.reserve(state.dir, request_id, canonical, binding, key, run)
+      end
+
+    result =
+      try do
+        Native.start(%{key: key}, agent: settings, turns_dir: turns)
+      rescue
+        error ->
+          if record, do: {:error, error}, else: reraise(error, __STACKTRACE__)
+      catch
+        :exit, reason ->
+          if record, do: {:error, reason}, else: exit(reason)
+      end
+
+    case result do
+      {:ok, pid} ->
         worker = %{agent: pid, monitor: Process.monitor(pid), run: run}
         next = %{state | workers: Map.put(state.workers, worker_id, worker)}
-        {run, next, false}
+        reply = if record, do: {:admission, record, run}, else: run
+        {reply, next, false}
 
       {:error, why} ->
-        raise("#{backend} start failed: #{inspect(why)}")
+        if record,
+          do: {CommandAdmissions.public(record), state, false},
+          else: raise("#{backend} start failed: #{inspect(why)}")
     end
   end
 

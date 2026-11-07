@@ -33,6 +33,27 @@ Real isolated public-CLI proof on 2026-11-07: Server `turn-849a0f44f47663c9`, Co
 
 After daemon restart, explicit Server continuation `turn-6f4aa53f92af74df` retained session `b400b621-68e0-488e-8d16-c95fec47e819`, model, cwd, repository and permissions, recalling the previous answer without tools. Targeted follow pinned worker/turn; replay from the prior global cursor returned only the continuation pair. The 39 focused ExUnit tests, 27 Python runner tests and Go CLI suite passed. All owned proof daemons/process groups/private temp directories were absent afterward; disposable binaries/builds were removed. That concurrent-worker proof did not exercise question/reply. Peer chat, scheduling, automatic recovery and Server/Console integration remain outside this capability.
 
+## Lost-response-safe start and continuation
+
+```sh
+atlas-runtime start --request-id task-42 --backend claude --cwd /path/to/project "Explain the entry points"
+atlas-runtime continue --request-id task-42-next --turn turn-0123456789abcdef "Explain the tradeoff"
+```
+
+`--request-id` is optional and caller-supplied; Runtime never generates an ID or retries a command automatically. IDs match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` and share one namespace across start/continue in the selected Runtime home. Existing commands without an ID retain their response and execution behavior.
+
+If the response is lost, repeat the same command with the same ID. Its recorded admission returns without launching or resuming again, including while running, after completion, and after daemon restart. Assignment bytes remain exact; cwd aliases resolve canonically; omitted read-only sandbox and disabled-question defaults normalize. Explicit versus omitted worker, source turn and backend selectors remain distinct. The first admission pins the resolved worker/source turn, cwd, scope, repository and provider/model/session settings. Later worker registrations, saved-turn changes, preferences and quota changes do not redirect a repeated command. Different valid caller intent under the same ID conflicts; malformed requests refuse. A new ID represents a separate explicit assignment, not recovery of a lost reply.
+
+ID-bearing responses contain `request_id`, `admission`, `worker_id`, `turn_id`, `source_turn_id`, `recorded_result` and `requires_reconciliation`. `accepted` means native startup returned and Runtime persisted the turn/lifecycle admission before acknowledging. `recorded_result` is the immutable original admission snapshot, **not current status or verified task success**. Use targeted `status`, `output --turn`, `turns` and events for later evidence. New turn metadata also retains `request_id`.
+
+Runtime reserves an `indeterminate` record before native startup. A launch failure or crash before acceptance can leave that state even if native execution happened. Its result remains null and `requires_reconciliation` remains true; identical retries return the uncertainty and never launch again. Inspect the recorded turn/artifacts and reconcile native ownership/effects before deciding on another assignment. Do not delete the admission to force a retry. Restart restores no worker or native process and never promotes an uncertain reservation by guessing from other files.
+
+Records use bounded atomic JSON replacement at `admissions/<request-id>.json`: canonical requests are limited to 128 KiB, records to 1 MiB, with the planned result checked before launch. Corrupt records and unresolved temporary-only records fail closed. This relies on one daemon owning its state directory and retained admission files; it is not a distributed lock, fsync/power-loss guarantee or exactly-once provider-execution claim.
+
+Real isolated public-CLI proof on 2026-11-07: request `Start_e0c8f2df4a4eea72` admitted only `turn-6d7fa4cdd96b84f7`. Explicit continuation `Continue_591e244adc78e4af` admitted only `turn-cf73e2ca48188090`, retained session `269badfc-2733-4ca8-9d44-3ada8691f7c9` and recalled the conversation-only marker `ADMISSION_239ddf30c505`. Both ran with native `claude-opus-5-5[1m]`, without a model preference override. Identical repeats while running, after completion and across restart returned the original snapshots. Changed assignment/source IDs conflicted. Both admissions remained queryable after deleting the disposable cwd, while a new ID refused that missing cwd. History held exactly two turns, one session and four unchanged lifecycle events; restart replay left workers empty. Both native groups and all three owned daemons were absent afterward; disposable client/build/workspace were removed and evidence retained.
+
+Focused verification passed: 103 ExUnit tests, 47 Python runner tests and the Go CLI suite. Deterministic native fixtures count actual launches/resumes across concurrent retries, conflicts, changed context, lost callers, startup failure, post-launch journal/acceptance-write failure and restart uncertainty. Managed saved-continuation metadata retains its base revision. This slice does not add automated reconciliation, cross-daemon coordination, provider fallback retries or Atlas integration.
+
 ## Durable execution discovery
 
 ```sh

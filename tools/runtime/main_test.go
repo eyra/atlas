@@ -472,3 +472,21 @@ func TestAnswerRequiresEveryTargetAndRejectsCapabilityChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestIDsRejectInvalidIdentitiesAndUnsupportedCommands(t *testing.T) {
+	t.Setenv("ATLAS_RUNTIME_HOME", t.TempDir())
+	for _, id := range []string{"", " ", "../escape", ".hidden", "_leading", "-leading", "with.dot", "é", "line\nbreak", strings.Repeat("x", 65)} {
+		for _, operation := range []string{"start", "continue"} {
+			_, err := execute([]string{operation, "--request-id", id, "assignment"})
+			if err == nil || !strings.Contains(err.Error(), "request-id must match") {
+				t.Fatalf("%s accepted invalid identity %q: %v", operation, id, err)
+			}
+		}
+	}
+	for _, operation := range []string{"status", "stop", "output", "events", "preferences", "question", "answer"} {
+		_, err := execute([]string{operation, "--request-id", "explicit-id"})
+		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("%s accepted unsupported request identity: %v", operation, err)
+		}
+	}
+}
