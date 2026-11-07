@@ -26,6 +26,7 @@ defmodule AtlasRuntime.Agent.Codex do
   def permission_scope(workspace) do
     helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
     python = System.find_executable("python3") || raise("Python 3 is required")
+
     case System.cmd(python, [helper, "--permission-scope", workspace], stderr_to_stdout: true) do
       {scope, 0} -> JSON.decode!(scope)
       {error, _} -> raise(String.trim(error))
@@ -43,6 +44,7 @@ defmodule AtlasRuntime.Agent.Codex do
     sandbox = Map.get(settings, "sandbox", "read-only")
     session = settings["session_id"]
     scope = settings["permissions"]
+
     valid_permissions =
       (is_nil(scope) && sandbox in ["read-only", "workspace-write"]) ||
         (is_map(scope) && is_nil(sandbox))
