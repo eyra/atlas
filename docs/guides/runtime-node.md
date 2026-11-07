@@ -6,11 +6,13 @@ after reconnect. The node starts only Runtime and Bus. Every endpoint is named
 `runtime@<machine>` or `runtime@<machine>/<turn>`; Control discovers machine endpoints
 for failure actions. A core with no configured agents starts no Runtime engine.
 
-The deployed test and prod settings intentionally have no `bus_link`. Activating the
-listener on Fly, installing its secret, and running agents on the user's test data
-require approval. No real model turns are part of this verification.
+Tracked test core settings enable the private Bus listener on `::`, port `7694`;
+the Fly configuration declares no public service for it. Production remains opt-in.
+The coordinator must install the test machine-token secret before deploying this
+configuration: missing or malformed `ATLAS_BUS_LINK_TOKEN` prevents core startup.
+Connecting a node does not start a worker or authorize model turns.
 
-For an approved activation, the core settings gain (with no public Fly service):
+The test core configuration is:
 
 ```json
 {"bus_link": {"host": "::", "port": 7694}}
@@ -30,9 +32,13 @@ Create `~/.local/share/atlas/test-runtime/runtime.json` locally:
   "env": "test",
   "bus_link": {"mode": "client", "host": "127.0.0.1", "port": 7695,
                "remote_port": 7694, "machine": "macbook"},
-  "runtime": {"machine": "macbook", "agents": {"stand-in": {"port": "stub"}}}
+  "runtime": {"machine": "macbook", "agents": {}}
 }
 ```
+
+This connection-only example uses local tunnel port `7695` to test's private Bus
+port `7694`, with a token bound to `macbook`. Configuring agents or assigning work
+requires separate authorization; an authenticated connection is not a running worker.
 
 `atlas runtime --env test` starts the tunnel and node in the background;
 `atlas runtime-status --env test` reports its process and log;
