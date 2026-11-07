@@ -209,9 +209,14 @@ func execute(args []string) (map[string]any, error) {
 		permissions := flags.String("permissions", "", "explicit dedicated-repository Git/GitHub scope")
 		repository := flags.String("repo", "", "GitHub HTTPS repository to provision")
 		branch := flags.String("branch", "", "new task branch based on freshly fetched develop")
+		backend := flags.String("backend", "codex", "codex or explicit read-only claude")
 		if err = flags.Parse(args[1:]); err != nil {
 			return nil, err
 		}
+		if *backend != "codex" && *backend != "claude" {
+			return nil, errors.New("backend must be codex or claude")
+		}
+		command["backend"] = *backend
 		if *sandbox != "read-only" && *sandbox != "workspace-write" {
 			return nil, errors.New("sandbox must be read-only or workspace-write")
 		}
@@ -390,7 +395,7 @@ func followOutput(out io.Writer) error {
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nCodex uses its existing login. Sandbox defaults to read-only. Dedicated-repository explicitly permits isolated Git writes and GitHub-only networking. One agent at a time.")
+		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nCodex is the default; Claude requires explicit --backend claude and supports fresh read-only file-tool assignments only. Both use their official CLI login. Claude write permissions, provisioning and continuation are refused. One agent at a time.")
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "output" && os.Args[2] == "--follow" {

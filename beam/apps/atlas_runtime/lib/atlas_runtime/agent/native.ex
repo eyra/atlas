@@ -1,13 +1,13 @@
-defmodule AtlasRuntime.Agent.Codex do
+defmodule AtlasRuntime.Agent.Native do
   @moduledoc """
-  Official Codex CLI, using its existing ChatGPT login. Goals default to read-only;
-  explicit `sandbox: workspace-write` permits edits under Codex's workspace policy.
-  Dedicated-repository permissions explicitly allow isolated Git metadata writes
-  and enforced GitHub-only command networking instead of a legacy sandbox mode.
+  Owned official CLI execution using existing native authentication. Codex remains
+  the default, with its read-only, workspace-write and dedicated-repository modes.
+  Explicit Claude execution supports fresh read-only assignments through restricted
+  Read/Glob/Grep tools only; no Claude provisioning or continuation is supported.
   Requires explicit `command`, `workspace` and `goal` agent settings. The Python
   runner owns a process group and reaps it on stop or parent loss. JSONL output,
   stderr and the final answer stay under `turns_dir/<turn key>`. Guidance is not
-  supported. Success requires both Codex's completed event and a clean process exit.
+  supported. Success requires a successful native result and clean process exit.
   """
   use GenServer
   @behaviour AtlasRuntime.Agent
@@ -29,7 +29,7 @@ defmodule AtlasRuntime.Agent.Codex do
     do: runner_request(["--repository-request", home, url, branch])
 
   defp runner_request(args) do
-    helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
+    helper = Path.join(:code.priv_dir(:atlas_runtime), "native_runner.py")
     python = System.find_executable("python3") || raise("Python 3 is required")
 
     case System.cmd(python, [helper | args], stderr_to_stdout: true) do
@@ -50,6 +50,12 @@ defmodule AtlasRuntime.Agent.Codex do
     session = settings["session_id"]
     scope = settings["permissions"]
     repository = settings["repository"]
+    backend = Map.get(settings, "backend", "codex")
+
+    supported =
+      backend == "codex" ||
+        (backend == "claude" && sandbox == "read-only" && is_nil(scope) &&
+           is_nil(repository) && is_nil(session))
 
     valid_permissions =
       (is_nil(scope) && sandbox in ["read-only", "workspace-write"]) ||
@@ -58,11 +64,11 @@ defmodule AtlasRuntime.Agent.Codex do
     if command && python && is_binary(workspace) &&
          (File.dir?(workspace) || is_map(repository)) &&
          (is_nil(repository) || (is_map(repository) && is_map(scope))) &&
-         is_binary(goal) && String.trim(goal) != "" && valid_permissions &&
+         is_binary(goal) && String.trim(goal) != "" && valid_permissions && supported &&
          (is_nil(session) || (is_binary(session) && session != "")) do
       File.mkdir_p!(folder)
-      helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
-      kept = ~w(HOME USER LOGNAME PATH TMPDIR LANG LC_ALL LC_CTYPE CODEX_HOME)
+      helper = Path.join(:code.priv_dir(:atlas_runtime), "native_runner.py")
+      kept = ~w(HOME USER LOGNAME PATH TMPDIR LANG LC_ALL LC_CTYPE CODEX_HOME CLAUDE_CONFIG_DIR)
 
       unset =
         for {key, _} <- System.get_env(), key not in kept, do: {String.to_charlist(key), false}
@@ -80,8 +86,11 @@ defmodule AtlasRuntime.Agent.Codex do
              Path.expand(folder),
              goal,
              sandbox || "",
-             session || ""
-           ] ++ if(scope, do: [JSON.encode!(scope), JSON.encode!(repository)], else: [])},
+             session || "",
+             JSON.encode!(scope),
+             JSON.encode!(repository),
+             backend
+           ]},
           {:env, unset}
         ])
 
@@ -90,6 +99,9 @@ defmodule AtlasRuntime.Agent.Codex do
       {:ok,
        %{
          owner: owner,
+         backend: backend,
+         model: nil,
+         session: nil,
          monitor: monitor,
          port: port,
          partial: "",
@@ -100,7 +112,7 @@ defmodule AtlasRuntime.Agent.Codex do
          stopping: nil
        }}
     else
-      {:stop, :codex_requires_command_workspace_goal_and_python}
+      {:stop, :native_requires_supported_backend_permissions_command_workspace_goal_and_python}
     end
   end
 
@@ -118,14 +130,14 @@ defmodule AtlasRuntime.Agent.Codex do
 
   def handle_info({port, {:data, {:noeol, part}}}, %{port: port} = state) do
     if byte_size(state.partial) + byte_size(part) > 2_097_152,
-      do: {:stop, :codex_event_too_large, state},
+      do: {:stop, :native_event_too_large, state},
       else: {:noreply, %{state | partial: state.partial <> part}}
   end
 
   def handle_info({port, {:data, {:eol, line}}}, %{port: port} = state) do
     case JSON.decode(state.partial <> line) do
       {:ok, record} -> {:noreply, consume(record, %{state | partial: ""})}
-      _ -> {:stop, :invalid_codex_runner_event, state}
+      _ -> {:stop, :invalid_native_runner_event, state}
     end
   end
 
@@ -135,12 +147,18 @@ defmodule AtlasRuntime.Agent.Codex do
         if state.stopping != :owner_gone, do: GenServer.reply(state.stopping, :ok)
         {:stop, :normal, %{state | port: nil}}
 
-      status == 0 and state.process_exit == 0 and state.completed and not state.failed ->
-        send(state.owner, {:agent, self(), {:ended, state.result || "Codex completed the goal"}})
+      status == 0 and state.process_exit == 0 and state.completed and not state.failed and
+          (state.backend == "codex" or (is_binary(state.model) and is_binary(state.session))) ->
+        send(
+          state.owner,
+          {:agent, self(), {:ended, state.result || "#{state.backend} completed the goal"}}
+        )
+
         {:stop, :normal, %{state | port: nil}}
 
       true ->
-        {:stop, {:codex_failed, status, state.process_exit}, %{state | port: nil}}
+        failure = if state.backend == "codex", do: :codex_failed, else: :claude_failed
+        {:stop, {failure, status, state.process_exit}, %{state | port: nil}}
     end
   end
 
@@ -159,11 +177,82 @@ defmodule AtlasRuntime.Agent.Codex do
            "type" => "runtime.event",
            "event" => %{"type" => "thread.started", "thread_id" => id}
          },
-         state
+         %{backend: "codex"} = state
        )
        when is_binary(id) and id != "" do
     send(state.owner, {:agent, self(), {:session, id}})
     state
+  end
+
+  defp consume(
+         %{
+           "type" => "runtime.event",
+           "event" => %{
+             "type" => "system",
+             "subtype" => "init",
+             "session_id" => id,
+             "model" => model
+           }
+         },
+         %{backend: "claude"} = state
+       )
+       when is_binary(id) and id != "" and is_binary(model) and model != "" do
+    send(state.owner, {:agent, self(), {:session, id}})
+    identify(%{state | session: id}, model)
+  end
+
+  defp consume(
+         %{"type" => "runtime.event", "event" => %{"type" => "assistant", "message" => message}},
+         %{backend: "claude"} = state
+       )
+       when is_map(message) do
+    parts =
+      Enum.flat_map(message["content"] || [], fn
+        %{"type" => "text", "text" => text} when is_binary(text) ->
+          [%{"kind" => "text", "text" => text}]
+
+        %{"type" => "tool_use", "name" => name} ->
+          [
+            %{
+              "kind" => "tool",
+              "tool_name" => AtlasRuntime.Agent.tool_name(name),
+              "status" => "started"
+            }
+          ]
+
+        _ ->
+          []
+      end)
+
+    AtlasRuntime.Agent.emit(state.owner, "claude: assistant activity", parts)
+    identify(state, message["model"])
+  end
+
+  defp consume(
+         %{"type" => "runtime.event", "event" => %{"type" => "result"} = event},
+         %{backend: "claude"} = state
+       ) do
+    text = event["result"]
+    success = event["subtype"] == "success" and event["is_error"] != true and is_binary(text)
+    output = if is_binary(text), do: [%{"kind" => "text", "text" => text}], else: []
+
+    AtlasRuntime.Agent.emit(
+      state.owner,
+      if(success, do: "claude: completed", else: "claude: failed"),
+      output
+    )
+
+    %{
+      state
+      | completed: success,
+        failed: state.failed or not success,
+        result: if(is_binary(text), do: String.slice(text, 0, 2_000), else: nil)
+    }
+  end
+
+  defp consume(%{"type" => "runtime.event", "event" => event}, %{backend: "claude"} = state) do
+    AtlasRuntime.Agent.emit(state.owner, "claude: activity", [])
+    %{state | failed: state.failed or event["type"] == "error"}
   end
 
   defp consume(%{"type" => "runtime.event", "event" => event}, state) do
@@ -180,6 +269,18 @@ defmodule AtlasRuntime.Agent.Codex do
   end
 
   defp consume(_, state), do: state
+
+  # Local Claude failures can carry a synthetic assistant instead of a model response.
+  defp identify(state, "<synthetic>"), do: state
+
+  defp identify(state, model) when is_binary(model) and model != "" do
+    if state.model != model,
+      do: send(state.owner, {:agent, self(), {:identity, state.backend, model}})
+
+    %{state | model: model}
+  end
+
+  defp identify(state, _), do: state
 
   # Native records remain in stream.jsonl. Only completed public assistant messages
   # and closed tool metadata cross the live-output boundary; reasoning is never text.

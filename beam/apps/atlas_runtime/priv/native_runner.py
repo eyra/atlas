@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Own a Codex process group; parent EOF/stop interrupts it before this helper exits."""
+"""Own a native CLI process group; parent EOF/stop interrupts it before this helper exits."""
 import fcntl
 import json
 import os
@@ -192,8 +192,13 @@ def main():
         return
     executable, workspace, folder, goal, sandbox, session, *extra = sys.argv[1:]
     scope = json.loads(extra[0]) if extra else None
-    repository = json.loads(extra[1]) if len(extra) == 2 else None
-    if len(extra) > 2 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
+    repository = json.loads(extra[1]) if len(extra) >= 2 else None
+    backend = extra[2] if len(extra) == 3 else 'codex'
+    if backend not in ('codex', 'claude'):
+        raise ValueError('Backend must be codex or claude')
+    if backend == 'claude' and (sandbox != 'read-only' or scope or repository or session):
+        raise ValueError('Claude supports only fresh read-only assignments; no provisioning or continuation')
+    if len(extra) > 3 or (scope is None and sandbox not in ('read-only', 'workspace-write')):
         raise ValueError('Sandbox must be read-only or workspace-write')
     if repository is not None and (scope != dedicated_scope(Path(workspace)) or
                                    bool(session) != ('base_sha' in repository)):
@@ -205,18 +210,27 @@ def main():
     else:
         permissions = ['--sandbox', sandbox]
     folder = Path(folder)
-    command = [executable, 'exec', *permissions, '--disable', 'hooks',
-               '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
-               '--color', 'never', '--cd', workspace]
-    if session:
-        command.append('resume')
-    command += ['--json', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
-                '--output-last-message', str(folder / 'answer.txt'), '--']
-    command += [session, goal] if session else [goal]
+    if backend == 'claude':
+        command = [executable, '--print', '--output-format', 'stream-json', '--verbose',
+                   '--restricted', '--safe-mode', '--strict-mcp-config', '--no-chrome',
+                   '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep',
+                   '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
+                   '--no-session-persistence', '--', goal]
+    else:
+        command = [executable, 'exec', *permissions, '--disable', 'hooks',
+                   '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
+                   '--color', 'never', '--cd', workspace]
+        if session:
+            command.append('resume')
+        command += ['--json', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+                    '--output-last-message', str(folder / 'answer.txt'), '--']
+        command += [session, goal] if session else [goal]
     session_seen = False
 
     def forward(event):
         nonlocal session_seen
+        if backend == 'claude' and event.get('type') == 'result' and isinstance(event.get('result'), str):
+            (folder / 'answer.txt').write_text(event['result'])
         if event.get('type') == 'runtime.repository_prepared':
             emit(event)
             return
@@ -246,7 +260,8 @@ def main():
                            workspace, json.dumps(scope), json.dumps(repository), json.dumps(created),
                            *command]
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                       stderr=errors, start_new_session=True)
+                                       stderr=errors, start_new_session=True,
+                                       cwd=workspace if backend == 'claude' else None)
             (folder / 'process.json').write_text(json.dumps({'pid': process.pid, 'command': command}))
             emit({'type': 'runtime.process_started', 'pid': process.pid})
             selector.register(sys.stdin, selectors.EVENT_READ, 'control')
@@ -310,5 +325,5 @@ if __name__ == '__main__':
     except BrokenPipeError:
         pass  # Parent disappeared; main's finally has already reaped the process.
     except Exception as error:
-        print(f'Codex runner: {error}', file=sys.stderr)
+        print(f'Native runner: {error}', file=sys.stderr)
         sys.exit(1)

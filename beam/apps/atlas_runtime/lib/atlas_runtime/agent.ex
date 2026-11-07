@@ -223,7 +223,7 @@ defmodule AtlasRuntime.Agent do
   @ports %{
     "stub" => AtlasRuntime.Agent.Stub,
     "claude" => AtlasRuntime.Agent.Claude,
-    "codex" => AtlasRuntime.Agent.Codex
+    "codex" => AtlasRuntime.Agent.Native
   }
 
   @doc "The port a machine's settings name for an agent, or nil."

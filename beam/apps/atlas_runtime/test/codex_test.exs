@@ -1,6 +1,6 @@
 defmodule AtlasRuntime.CodexTest do
   use ExUnit.Case, async: true
-  alias AtlasRuntime.Agent.Codex
+  alias AtlasRuntime.Agent.Native
   @moduletag :tmp_dir
   @turn %{key: "TU-CODEX-1", item: "work", agent: "worker"}
 
@@ -18,7 +18,7 @@ defmodule AtlasRuntime.CodexTest do
         )
     ]
 
-    if owner, do: send(owner, {:launch, opts}), else: Codex.start(@turn, opts)
+    if owner, do: send(owner, {:launch, opts}), else: Native.start(@turn, opts)
   end
 
   test "clean exit and completed event preserve the real final answer", %{tmp_dir: dir} do
@@ -83,7 +83,7 @@ defmodule AtlasRuntime.CodexTest do
 
     assert_receive {:agent, ^pid, {:activity, "codex: item started"}}, 5_000
     child = native_child(dir)
-    assert :ok = Codex.stop(pid)
+    assert :ok = Native.stop(pid)
     refute Process.alive?(pid)
     assert_dead(String.trim(child))
     refute_received {:agent, ^pid, {:ended, _}}
@@ -96,7 +96,7 @@ defmodule AtlasRuntime.CodexTest do
       spawn(fn ->
         receive do
           {:launch, opts} ->
-            {:ok, adapter} = Codex.start(@turn, opts)
+            {:ok, adapter} = Native.start(@turn, opts)
             send(parent, {:adapter, adapter})
 
             receive do
@@ -138,7 +138,7 @@ defmodule AtlasRuntime.CodexTest do
       }
     ]
 
-    assert {:error, _} = Codex.start(@turn, opts)
+    assert {:error, _} = Native.start(@turn, opts)
     refute File.exists?(Path.join(dir, "turns"))
   end
 
