@@ -253,11 +253,12 @@ defmodule AtlasRuntime.Agent.Native do
   end
 
   defp consume(
-         %{"type" => "runtime.question", "question" => %{"id" => id, "questions" => questions}},
+         %{"type" => "runtime.question",
+           "question" => %{"id" => id, "questions" => questions, "correlation" => correlation}},
          %{questions_enabled: true, pending_question: nil, answer_waiter: nil, stopping: nil,
            completed: false, failed: false} = state
-       ) when is_binary(id) and is_list(questions) do
-    question = %{id: id, questions: questions}
+       ) when is_binary(id) and is_list(questions) and is_map(correlation) do
+    question = %{id: id, questions: questions, correlation: correlation}
     send(state.owner, {:agent, self(), {:question, question}})
     %{state | pending_question: question}
   end

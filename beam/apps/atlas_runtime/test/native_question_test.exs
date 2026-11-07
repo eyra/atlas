@@ -34,20 +34,29 @@ defmodule AtlasRuntime.NativeQuestionTest do
     emit(init)
     question_input = {'questions':[{'question':'Choose?', 'header':'Choice', 'multiSelect':False,
                                    'options':[{'label':'A','description':'A'}, {'label':'B','description':'B'}]}]}
-    emit({'type':'assistant', 'session_id':session, 'message':{'model':model, 'content':[
-          {'type':'tool_use', 'id':'tool-1', 'name':'AskUserQuestion', 'input':question_input}]}})
-    emit({'type':'control_request', 'request_id':'request-1', 'request':{
+    assistant = {'type':'assistant', 'session_id':session, 'message':{'model':model, 'content':[
+          {'type':'tool_use', 'id':'tool-1', 'name':'AskUserQuestion', 'input':question_input}]}}
+    control = {'type':'control_request', 'request_id':'request-1', 'request':{
           'subtype':'can_use_tool', 'tool_name':'AskUserQuestion', 'input':question_input,
-          'tool_use_id':'tool-1', 'requires_user_interaction':True}})
+          'tool_use_id':'tool-1', 'requires_user_interaction':True}}
+    with open('question-source.json', 'w') as file:
+        json.dump({'assistant':assistant, 'control_request':control, 'native_pid':os.getpid()}, file)
+    emit(assistant)
+    emit(control)
     response = json.loads(sys.stdin.readline())
     with open('received-answer.json', 'w') as file:
         json.dump(response, file)
+    with open('received-answers.jsonl', 'w') as file:
+        file.write(json.dumps(response) + '\n')
     while not os.path.exists('process-answer'):
         time.sleep(0.01)
     emit({'type':'user', 'session_id':session, 'message':{'content':[
           {'type':'tool_result', 'tool_use_id':'tool-1', 'content':'processed'}]}})
     emit(result)
-    assert sys.stdin.read() == ''
+    remaining = sys.stdin.read()
+    with open('received-answers.jsonl', 'a') as file:
+        file.write(remaining)
+    assert remaining == ''
     """)
     File.chmod!(executable, 0o700)
     previous = System.fetch_env!("PATH")
@@ -65,12 +74,41 @@ defmodule AtlasRuntime.NativeQuestionTest do
 
   defp cleanup(pid), do: on_exit(fn -> if Process.alive?(pid), do: Native.stop(pid) end)
 
+  defp assert_source(question, workspace) do
+    source = workspace |> Path.join("question-source.json") |> File.read!() |> JSON.decode!()
+    assistant = source["assistant"]
+    control = source["control_request"]
+    tool = hd(assistant["message"]["content"])
+    assert question.correlation == %{
+      "session_id" => assistant["session_id"], "model" => assistant["message"]["model"],
+      "tool_use_id" => tool["id"], "request_id" => control["request_id"],
+      "native_pid" => source["native_pid"]
+    }
+    assert question.correlation["tool_use_id"] == control["request"]["tool_use_id"]
+    assert %{"questions" => question.questions} == tool["input"]
+    assert tool["input"] == control["request"]["input"]
+    assert to_string(question.correlation["native_pid"]) == File.read!(Path.join(workspace, "native.pid"))
+  end
+
+  defp assert_one_answer(workspace, answers) do
+    [response] =
+      workspace
+      |> Path.join("received-answers.jsonl")
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&JSON.decode!/1)
+
+    assert response["response"]["response"]["updatedInput"]["answers"] == answers
+  end
+
   test "delivery acknowledges stdin, processing requires native tool_result, duplicate never writes", context do
     {:ok, pid} = launch(context)
     cleanup(pid)
     ref = Process.monitor(pid)
     assert_receive {:agent, ^pid, {:question, question}}, 5_000
     assert question.questions |> hd() |> Map.fetch!("question") == "Choose?"
+    assert_source(question, context.workspace)
+    assert :sys.get_state(pid).pending_question == question
     assert {:error, :no_matching_pending_question} = Native.answer(pid, "question-dead", %{"Choose?" => "A"})
     assert {:error, :invalid_answers} = Native.answer(pid, question.id, %{"Choose?" => " "})
     assert {:ok, %{question_id: id, status: "delivered"}} = Native.answer(pid, question.id, %{"Choose?" => "fresh answer"})
@@ -80,11 +118,13 @@ defmodule AtlasRuntime.NativeQuestionTest do
     assert :sys.get_state(pid).pending_question == nil
     assert :sys.get_state(pid).last_answer.status == "delivered"
     assert {:error, :no_matching_pending_question} = Native.answer(pid, id, %{"Choose?" => "duplicate"})
+    assert {:error, :no_matching_pending_question} = Native.answer(pid, id, %{"Choose?" => "fresh answer"})
     File.write!(Path.join(context.workspace, "process-answer"), "")
     assert_receive {:agent, ^pid, {:answer, %{question_id: ^id, status: "processed"}}}, 5_000
     assert_receive {:agent, ^pid, {:ended, "done"}}, 5_000
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
     assert {:error, _} = Native.answer(pid, id, %{"Choose?" => "late"})
+    assert_one_answer(context.workspace, %{"Choose?" => "fresh answer"})
     response = Path.join(context.workspace, "received-answer.json") |> File.read!() |> JSON.decode!()
     assert response["response"]["response"]["updatedInput"]["answers"] == %{"Choose?" => "fresh answer"}
     refute Map.has_key?(response["response"]["response"], "updatedPermissions")
@@ -189,16 +229,38 @@ defmodule AtlasRuntime.NativeQuestionTest do
     assert run.questions_enabled
     state = await_run(state, & &1.pending_question)
     pending = state.workers["alpha"].run.pending_question
+    assert_source(pending, context.workspace)
+    query = %{"command" => "question", "worker_id" => "alpha", "turn_id" => run.id,
+              "question_id" => pending.id}
+    {record, state} = call(state, query)
+    assert record["correlation"] == pending.correlation
+    assert record["original_input"] == %{"questions" => pending.questions}
     answer = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => run.id,
                "question_id" => pending.id, "answers" => %{"Choose?" => "fresh"}}
     {evidence, state} = call(state, answer)
     assert evidence.status == "delivered"
     assert state.workers["alpha"].run.pending_question == nil
     assert state.workers["alpha"].run.last_answer.status == "delivered"
+    assert evidence.admission == "accepted"
+    {duplicate, state} = call(state, answer)
+    assert duplicate == evidence
+    {record, state} = call(state, query)
+    assert record["answers"] == answer["answers"]
+    assert record["transport"] == "delivered"
+    assert record["processing"] != "processed"
     File.write!(Path.join(context.workspace, "process-answer"), "")
     state = await_run(state, &(&1.state == "finished"))
     original = state.workers["alpha"].run
     assert original.last_answer.status == "processed"
+    {processed, state} = call(state, answer)
+    assert processed.status == "processed"
+    {historical, _} = call(%{state | workers: %{}}, query)
+    assert historical["correlation"] == pending.correlation
+    assert historical["original_input"] == %{"questions" => pending.questions}
+    assert historical["processing"] == "processed"
+    {restarted_duplicate, _} = call(%{state | workers: %{}}, answer)
+    assert restarted_duplicate == processed
+    assert_one_answer(context.workspace, answer["answers"])
     {continued, state} = call(state, %{"command" => "continue", "worker_id" => "alpha", "turn_id" => run.id, "assignment" => "Choose again"})
     cleanup(state.workers["alpha"].agent)
     assert continued.questions_enabled
@@ -209,7 +271,15 @@ defmodule AtlasRuntime.NativeQuestionTest do
     assert continued.pending_question == nil
     assert continued.last_answer == nil
     state = await_run(state, & &1.pending_question)
-    assert state.workers["alpha"].run.pending_question.id != pending.id
+    next_pending = state.workers["alpha"].run.pending_question
+    assert_source(next_pending, context.workspace)
+    assert next_pending.id != pending.id
+    assert next_pending.correlation["session_id"] == pending.correlation["session_id"]
+    assert next_pending.correlation["model"] == pending.correlation["model"]
+    assert next_pending.correlation["native_pid"] != pending.correlation["native_pid"]
+    {old_duplicate, state} = call(state, answer)
+    assert old_duplicate == processed
+    assert state.workers["alpha"].run.pending_question == next_pending
     {stopped, _} = call(state, %{"command" => "stop", "worker_id" => "alpha"})
     assert stopped.pending_question == nil
   end

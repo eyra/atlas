@@ -420,25 +420,30 @@ func executeTo(args []string, out io.Writer) (map[string]any, error) {
 			return nil, errors.New("use continue [--worker NAME] [--turn TURN_ID] \"assignment\"; working directory and sandbox cannot change")
 		}
 		command["assignment"] = flags.Arg(0)
-	case "answer":
-		flags := flag.NewFlagSet("answer", flag.ContinueOnError)
+	case "answer", "question":
+		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 		workerFlag(flags, command)
 		turnFlag(flags, command)
-		question := flags.String("question", "", "opaque current pending question ID")
-		raw := flags.String("answers", "", "JSON object mapping exact question texts to answers")
+		question := flags.String("question", "", "opaque question ID")
+		var raw string
+		if args[0] == "answer" {
+			flags.StringVar(&raw, "answers", "", "JSON object mapping exact question texts to answers")
+		}
 		if err = flags.Parse(args[1:]); err != nil {
 			return nil, err
 		}
 		if flags.NArg() != 0 || command["worker_id"] == nil || command["turn_id"] == nil ||
 			strings.TrimSpace(*question) == "" || len(*question) > 128 {
-			return nil, errors.New("use answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT")
-		}
-		answers, parseErr := parseAnswers(*raw)
-		if parseErr != nil {
-			return nil, parseErr
+			return nil, errors.New("question and answer require --worker, --turn and --question, with no positional arguments")
 		}
 		command["question_id"] = *question
-		command["answers"] = answers
+		if args[0] == "answer" {
+			answers, parseErr := parseAnswers(raw)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			command["answers"] = answers
+		}
 	case "events":
 		flags := flag.NewFlagSet("events", flag.ContinueOnError)
 		cursor := flags.String("cursor", "", "opaque cursor from an earlier events page")
@@ -623,7 +628,7 @@ func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
 		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start [--worker NAME] --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start [--worker NAME] --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH [--backend codex|claude] --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--worker NAME] [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|stop [--worker NAME]\natlas-runtime turns\natlas-runtime output [--worker NAME] [--follow | --turn TURN_ID]\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude defaults to read-only; explicit dedicated-repository uses native sandboxed Bash in an independent repository outside system temp roots. Both use their official CLI login. Managed provisioning requires the installed Codex sandbox for Git preparation, including for Claude. Claude workspace-write is refused. Continue requires a successful saved native session and retains its worker, backend, model and scope. One active execution per worker. NAME must match ^[a-z][a-z0-9_-]{0,63}$. Omitted --worker selects the sole registered worker, or default when none exist; multiple workers require an explicit name. --turn selects its recorded worker; an explicit --worker must match. Flags precede assignment text; use -- before an assignment starting with a dash. Follow pins the selected worker and turn. Turns and events include all workers. Service status lists worker states; service stop stops all workers.")
 		fmt.Println("atlas-runtime events [--cursor CURSOR] [--limit N]\nEvents returns one finite page of durable execution events, not native output or task-success claims. Limit defaults to 50 (1..100); follow is not supported.")
-		fmt.Println("Claude question opt-in: add --questions to start; continuation retains the saved capability.\natlas-runtime answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT\nAnswers map exact pending question texts to strings. Delivery is not native processing or verified task success. Codex does not support questions.")
+		fmt.Println("Claude question opt-in: add --questions to start; continuation retains the saved capability.\natlas-runtime question --worker NAME --turn TURN_ID --question QUESTION_ID\natlas-runtime answer --worker NAME --turn TURN_ID --question QUESTION_ID --answers JSON_OBJECT\nAnswers map exact question texts to strings. Identical repeats return recorded admission without resending; conflicting answers refuse. Admission, delivery, native processing and verified task success are distinct. Codex does not support questions.")
 		return
 	}
 	result, err := executeTo(os.Args[1:], os.Stdout)

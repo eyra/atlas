@@ -304,10 +304,11 @@ def write_native(stream, event):
 class QuestionHost:
     """One owned native query; fixture tests do not establish provider behavior."""
 
-    def __init__(self, session, goal, send, close, tools, resume_model=None):
+    def __init__(self, session, goal, send, close, tools, native_pid, resume_model=None):
         self.session, self.goal = session, goal
         self.send, self.close, self.tools = send, close, set(tools)
         self.resume_model = resume_model
+        self.native_pid = native_pid
         self.model = None
         self.initialize_id = 'initialize-' + uuid.uuid4().hex
         self.initialized = False
@@ -441,7 +442,11 @@ class QuestionHost:
                             'id': 'question-' + uuid.uuid4().hex}
             self.candidate = None
             emit({'type': 'runtime.question',
-                  'question': {'id': self.pending['id'], 'questions': questions}})
+                  'question': {'id': self.pending['id'], 'questions': questions,
+                               'correlation': {'session_id': self.session, 'model': self.model,
+                                               'tool_use_id': self.pending['tool'],
+                                               'request_id': self.pending['request'],
+                                               'native_pid': self.native_pid}}})
         elif kind == 'user':
             message = event.get('message')
             if not isinstance(message, dict) or not isinstance(message.get('content'), list):
@@ -652,7 +657,7 @@ def main():
                 host = QuestionHost(question_session, goal,
                                     lambda event: write_native(process.stdin, event),
                                     process.stdin.close, tools.split(',') + ['AskUserQuestion'],
-                                    model if session else None)
+                                    process.pid, model if session else None)
                 host.start()
             while True:
                 for key, _ in selector.select(.1):

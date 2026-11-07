@@ -3,6 +3,7 @@ defmodule AtlasRuntime.Service do
   alias AtlasRuntime.Agent.Native
   alias AtlasRuntime.BackendPolicy
   alias AtlasRuntime.ExecutionEvents
+  alias AtlasRuntime.QuestionRecords
 
   def start(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
 
@@ -12,7 +13,7 @@ defmodule AtlasRuntime.Service do
       {:error, :enoent} -> BackendPolicy.empty()
       {:error, reason} -> raise("Cannot read backend policy: #{inspect(reason)}")
     end
-    events = ExecutionEvents.open(dir)
+    events = QuestionRecords.recover(dir, ExecutionEvents.open(dir))
     path = Path.join(dir, "runtime.sock")
 
     {:ok, listener} =
@@ -69,47 +70,64 @@ defmodule AtlasRuntime.Service do
       try do
         command(request, state)
       rescue
+        error in QuestionRecords.StorageError -> reraise error, __STACKTRACE__
         error -> {%{command_error: Exception.message(error)}, state, false}
       catch
         :exit, why -> {%{command_error: "Operation not confirmed: #{inspect(why)}"}, state, false}
       end
 
     next = record_changes(state, next)
+    reply =
+      case {request, reply} do
+        {%{"command" => "stop"}, %{worker_id: id}} ->
+          Map.get(next.workers, id, %{run: reply}).run
+        {%{"command" => "service-stop"}, %{workers: _}} ->
+          reply = Map.put(reply, :workers, worker_runs(next))
+          if Map.has_key?(reply, :agent), do: Map.put(reply, :agent, sole_run(next)), else: reply
+        _ -> reply
+      end
     {:reply, {reply, shutdown?}, next}
   end
 
   defp command(_, %{stopping: true}), do: raise("Runtime service is stopping")
 
-  defp command(%{"command" => "answer"} = request, state) do
-    fields = ["command", "worker_id", "turn_id", "question_id", "answers"]
-    if Enum.sort(Map.keys(request)) != Enum.sort(fields),
-      do: raise("Answer requires exactly worker_id, turn_id, question_id and answers")
-    if not valid_worker_id?(request["worker_id"]), do: raise("Invalid worker ID")
-    if not valid_id?(request["turn_id"]), do: raise("Invalid turn ID")
-    question_id = request["question_id"]
-    if not is_binary(question_id) or not Regex.match?(~r/\Aquestion-[0-9a-f]{1,64}\z/, question_id),
-      do: raise("Invalid question ID")
-    worker = state.workers[request["worker_id"]] || raise("Unknown worker: #{request["worker_id"]}")
-    if not is_pid(worker.agent) or worker.run.state != "running" or worker.run.id != request["turn_id"],
-      do: raise("Answer requires the current active worker turn")
-    if worker.run[:questions_enabled] != true or worker.run[:backend] != "claude",
-      do: raise("Questions are not enabled for this turn")
-    question = worker.run[:pending_question]
-    if is_nil(question) or question.id != question_id, do: raise("No matching pending question")
-    case Native.validate_answers(question, request["answers"]) do
-      :ok -> :ok
-      {:error, _} -> raise("Invalid answers for the pending question")
-    end
+  defp command(%{"command" => "question"} = request, state) do
+    question_selectors!(request, [])
+    record = owned_question!(state, request)
+    {QuestionRecords.public(record), state, false}
+  end
 
-    case Native.answer(worker.agent, question_id, request["answers"]) do
-      {:ok, evidence} ->
-        run = Map.merge(worker.run, %{pending_question: nil, last_answer: evidence})
-        reply = Map.merge(evidence, %{worker_id: request["worker_id"], turn_id: worker.run.id})
-        {reply, put_worker(state, request["worker_id"], %{worker | run: run}), false}
-      {:error, reason} ->
-        raise("Answer delivery not confirmed: #{inspect(reason)}")
+  defp command(%{"command" => "answer"} = request, state) do
+    question_selectors!(request, ["answers"])
+    record = owned_question!(state, request)
+    if record["admission"] == "accepted" do
+      if record["answers"] != request["answers"], do: raise("Conflicting answer: question already admitted")
+      {QuestionRecords.evidence(record), state, false}
+    else
+      worker = state.workers[request["worker_id"]] || raise("Unknown worker: #{request["worker_id"]}")
+      if not record["active"] or not is_pid(worker.agent) or
+           worker.run.state != "running" or worker.run.id != request["turn_id"],
+        do: raise("Answer requires the current active worker turn")
+      if worker.run[:questions_enabled] != true or worker.run[:backend] != "claude",
+        do: raise("Questions are not enabled for this turn")
+      question = worker.run[:pending_question]
+      if is_nil(question) or question.id != request["question_id"], do: raise("No matching pending question")
+      if Native.validate_answers(%{questions: record["original_input"]["questions"]}, request["answers"]) != :ok,
+        do: raise("Invalid answers for the pending question")
+
+      # Admission and its journal checkpoint must precede the only native send.
+      {record, events} = QuestionRecords.admit(state.dir, state.events, record, request["answers"])
+      {record, events} =
+        case send_answer(worker.agent, request["question_id"], request["answers"]) do
+          {:ok, %{status: "delivered"}} -> QuestionRecords.delivered(state.dir, events, record)
+          _ -> {record, events}
+        end
+      evidence = QuestionRecords.evidence(record)
+      run = Map.merge(worker.run, %{pending_question: nil, last_answer: evidence})
+      {evidence, put_worker(%{state | events: events}, request["worker_id"], %{worker | run: run}), false}
     end
   end
+
 
   defp command(%{"command" => name} = request, state)
        when name in ["start", "status", "output", "stop", "continue"] do
@@ -188,6 +206,33 @@ defmodule AtlasRuntime.Service do
   end
 
   defp command(_, _), do: raise("Unknown or malformed command")
+  defp question_selectors!(request, extra) do
+    fields = ["command", "worker_id", "turn_id", "question_id"] ++ extra
+    if Enum.sort(Map.keys(request)) != Enum.sort(fields),
+      do: raise("#{String.capitalize(request["command"])} requires exactly worker_id, turn_id, question_id#{if extra == [], do: "", else: " and answers"}")
+    if not valid_worker_id?(request["worker_id"]), do: raise("Invalid worker ID")
+    if not valid_id?(request["turn_id"]), do: raise("Invalid turn ID")
+    if not is_binary(request["question_id"]) or
+         not Regex.match?(~r/\Aquestion-[0-9a-f]{1,64}\z/, request["question_id"]),
+      do: raise("Invalid question ID")
+  end
+
+  defp owned_question!(state, request) do
+    record = QuestionRecords.load(state.dir, request["turn_id"], request["question_id"]) ||
+      raise("Question record unavailable; no matching recorded question")
+    if record["worker_id"] != request["worker_id"],
+      do: raise("Question belongs to worker #{record["worker_id"]}, not #{request["worker_id"]}")
+    record
+  end
+
+  defp send_answer(agent, question_id, answers) do
+    Native.answer(agent, question_id, answers)
+  rescue
+    _ -> {:error, :delivery_unknown}
+  catch
+    :exit, _ -> {:error, :delivery_unknown}
+  end
+
 
   defp worker_command(%{"command" => "status"}, _id, worker, saved, state),
     do: {saved || worker.run, state, false}
@@ -435,26 +480,32 @@ defmodule AtlasRuntime.Service do
 
   defp agent_message({:question, question}, id,
          %{run: %{state: "running", backend: "claude", questions_enabled: true}} = worker, state) do
-    if is_nil(worker.run[:pending_question]),
-      do: update_run(state, id, worker, Map.put(worker.run, :pending_question, question)),
-      else: state
-  end
-
-  defp agent_message({:answer, %{question_id: question_id, status: "delivered"} = evidence},
-         id, worker, state) do
-    case worker.run[:pending_question] do
-      %{id: ^question_id} ->
-        update_run(state, id, worker, Map.merge(worker.run, %{pending_question: nil, last_answer: evidence}))
-      _ -> state
+    if is_nil(worker.run[:pending_question]) do
+      {record, events} = QuestionRecords.create(state.dir, state.events, worker.run, question)
+      question = Map.merge(question, %{record_ref: record["record_ref"], revision: record["revision"]})
+      update_run(%{state | events: events}, id, worker, Map.put(worker.run, :pending_question, question))
+    else
+      state
     end
   end
 
-  defp agent_message({:answer, %{question_id: question_id, status: "processed"} = evidence},
-         id, worker, state) do
-    case worker.run[:last_answer] do
-      %{question_id: ^question_id, status: "delivered"} ->
-        update_run(state, id, worker, Map.put(worker.run, :last_answer, evidence))
-      _ -> state
+  defp agent_message({:answer, %{question_id: question_id, status: status}}, id, worker, state)
+       when status in ["delivered", "processed"] do
+    record = QuestionRecords.load(state.dir, worker.run.id, question_id)
+    if record && record["worker_id"] == id && record["admission"] == "accepted" do
+      {record, events} =
+        if status == "processed",
+          do: QuestionRecords.processed(state.dir, state.events, record),
+          else: QuestionRecords.delivered(state.dir, state.events, record)
+      evidence = QuestionRecords.evidence(record)
+      pending = worker.run[:pending_question]
+      pending = if pending && pending.id == question_id, do: nil, else: pending
+      last = worker.run[:last_answer]
+      last = if is_nil(last) or last.question_id == question_id, do: evidence, else: last
+      run = Map.merge(worker.run, %{pending_question: pending, last_answer: last})
+      update_run(%{state | events: events}, id, worker, run)
+    else
+      state
     end
   end
 
@@ -495,6 +546,22 @@ defmodule AtlasRuntime.Service do
   defp record_changes(previous, next) do
     Enum.reduce(Enum.sort(next.workers), next, fn {id, worker}, acc ->
       old = Map.get(previous.workers, id, idle_worker(id)).run
+      {worker, acc} =
+        if worker.run[:id] && worker.run.state in ["stopped", "finished", "failed"] &&
+             {worker.run[:id], worker.run.state} != {old[:id], old.state} do
+          events = QuestionRecords.invalidate_turn(acc.dir, acc.events, worker.run.id, worker.run.state)
+          worker =
+            case worker.run[:last_answer] do
+              %{question_id: question_id} ->
+                record = QuestionRecords.load(acc.dir, worker.run.id, question_id)
+                if record, do: %{worker | run: Map.put(worker.run, :last_answer, QuestionRecords.evidence(record))},
+                  else: worker
+              _ -> worker
+            end
+          {worker, put_worker(%{acc | events: events}, id, worker)}
+        else
+          {worker, acc}
+        end
       if worker.run != old, do: persist(worker.run)
       if {worker.run[:id], worker.run.state} != {old[:id], old.state} do
         %{acc | events: ExecutionEvents.append(acc.dir, acc.events, worker.run)}
@@ -542,6 +609,18 @@ defmodule AtlasRuntime.Service do
       run = Map.put_new(run, "worker_id", "default")
       run = run |> Map.put_new("questions_enabled", false) |> Map.put("pending_question", nil)
       if not valid_worker_id?(run["worker_id"]), do: raise("Invalid saved worker ID")
+      run =
+        case run["last_answer"] do
+          %{"question_id" => question_id, "record_ref" => _} ->
+            if not is_binary(question_id) or not Regex.match?(~r/\Aquestion-[0-9a-f]{1,64}\z/, question_id),
+              do: raise(QuestionRecords.StorageError, message: "Invalid saved question reference")
+            record = QuestionRecords.load(state.dir, id, question_id) ||
+              raise(QuestionRecords.StorageError, message: "Saved question record is missing")
+            if record["worker_id"] != run["worker_id"],
+              do: raise(QuestionRecords.StorageError, message: "Saved question ownership changed")
+            Map.put(run, "last_answer", string_keys(QuestionRecords.evidence(record)))
+          _ -> run
+        end
       run = if run["state"] == "running",
         do: Map.merge(run, %{"state" => "unknown", "recorded_state" => "running"}),
         else: run

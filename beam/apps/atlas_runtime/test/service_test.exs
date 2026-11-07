@@ -1,7 +1,7 @@
 defmodule AtlasRuntime.ServiceTest do
   use ExUnit.Case, async: true
 
-  alias AtlasRuntime.{BackendPolicy, ExecutionEvents, Service}
+  alias AtlasRuntime.{BackendPolicy, ExecutionEvents, QuestionRecords, Service}
   alias AtlasRuntime.Agent.Native
 
   @moduletag :tmp_dir
@@ -12,7 +12,16 @@ defmodule AtlasRuntime.ServiceTest do
     def handle_call(:stop, _from, reply), do: {:reply, reply, reply}
     def handle_call({:answer, question_id, answers}, {caller, _}, reply) do
       send(caller, {:answer_write, question_id, answers})
-      {:reply, {:ok, %{question_id: question_id, status: "delivered"}}, reply}
+      result =
+        case reply do
+          {:inspect_admission, path, result} ->
+            send(caller, {:admission_before_write, JSON.decode!(File.read!(path))})
+            result
+          _ -> :delivered
+        end
+      evidence = if result == :delivered, do: {:ok, %{question_id: question_id, status: "delivered"}},
+        else: {:error, :response_lost}
+      {:reply, evidence, reply}
     end
   end
 
@@ -57,6 +66,13 @@ defmodule AtlasRuntime.ServiceTest do
   end
 
   defp events(state), do: ExecutionEvents.query(state.events, nil, 100)["events"]
+
+  defp question do
+    %{id: "question-ab12", questions: [%{"question" => "Choose?"}],
+      correlation: %{"session_id" => "00000000-0000-4000-8000-000000000001",
+        "model" => "claude-sonnet-4-6", "tool_use_id" => "tool-use-1",
+        "request_id" => "request-1", "native_pid" => 12345}}
+  end
 
   defp saved(state, number, values) do
     id = "turn-" <> String.pad_leading(Integer.to_string(number, 16), 16, "0")
@@ -261,7 +277,8 @@ defmodule AtlasRuntime.ServiceTest do
       {%{"session_id" => nil}, "no confirmed native session"},
       {%{"cwd" => "relative"}, "no valid saved working directory"},
       {%{"sandbox" => "unrestricted"}, "no valid saved working directory"},
-      {%{"backend" => "claude"}, "no confirmed model"}
+      {%{"backend" => "claude"}, "no confirmed model"},
+      {%{"backend" => "claude", "model" => "claude-sonnet-4-6"}, "no such file or directory"}
     ]
     for {{changes, message}, number} <- Enum.with_index(invalid, 1) do
       id = saved(state, number, Map.merge(base, changes))
@@ -298,7 +315,7 @@ defmodule AtlasRuntime.ServiceTest do
   test "answer requires every exact selector and bounded exact question keys before writing", %{state: state} do
     state = state |> worker("alpha", 1, backend: "claude", questions_enabled: true) |> worker("beta", 2)
     alpha = state.workers["alpha"]
-    question = %{id: "question-ab12", questions: [%{"question" => "Choose?"}]}
+    question = question()
     {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, question}}, state)
     request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
                 "question_id" => question.id, "answers" => %{"Choose?" => "custom"}}
@@ -308,10 +325,10 @@ defmodule AtlasRuntime.ServiceTest do
     for key <- ["permissions", "updatedPermissions", "questions_enabled", "backend"] do
       error(state, Map.put(request, key, true), "requires exactly")
     end
-    error(state, %{request | "worker_id" => "missing"}, "Unknown worker")
-    error(state, %{request | "worker_id" => "beta"}, "current active worker turn")
-    error(state, %{request | "turn_id" => "turn-ffffffffffffffff"}, "current active worker turn")
-    error(state, %{request | "question_id" => "question-dead"}, "No matching pending")
+    error(state, %{request | "worker_id" => "missing"}, "belongs to worker")
+    error(state, %{request | "worker_id" => "beta"}, "belongs to worker")
+    error(state, %{request | "turn_id" => "turn-ffffffffffffffff"}, "record unavailable")
+    error(state, %{request | "question_id" => "question-dead"}, "record unavailable")
     for value <- [nil, "", 1, true, %{}] do
       error(state, %{request | "worker_id" => value}, "Invalid worker ID")
       error(state, %{request | "turn_id" => value}, "Invalid turn ID")
@@ -329,20 +346,24 @@ defmodule AtlasRuntime.ServiceTest do
     assert_received {:answer_write, "question-ab12", %{"Choose?" => "custom"}}
     assert state.workers["alpha"].run.pending_question == nil
     assert state.workers["alpha"].run.last_answer.status == "delivered"
-    error(state, request, "No matching pending")
+    assert {duplicate, ^state, false} = call(state, request)
+    assert duplicate == state.workers["alpha"].run.last_answer
+    refute_received {:answer_write, _, _}
+    error(state, %{request | "answers" => %{"Choose?" => "different"}}, "Conflicting answer")
     {:noreply, state} = Service.handle_info(
       {:agent, alpha.agent, {:answer, %{question_id: question.id, status: "processed"}}}, state)
     assert state.workers["alpha"].run.last_answer.status == "processed"
     assert {:noreply, ^state} = Service.handle_info(
       {:agent, alpha.agent, {:answer, %{question_id: question.id, status: "delivered"}}}, state)
-    assert events(state) == []
+    assert Enum.map(events(state), & &1["kind"]) ==
+      ["question_available", "answer_accepted", "answer_delivered", "answer_processed"]
   end
 
   test "pending questions clear on every terminal path and old pid cannot affect a successor", %{state: state} do
-    for terminal <- [:stop, :finish, :loss, :service_stop] do
-      current = worker(state, "alpha", 1, backend: "claude", questions_enabled: true)
+    for {terminal, number} <- Enum.with_index([:stop, :finish, :loss, :service_stop], 1) do
+      current = worker(state, "alpha", number, backend: "claude", questions_enabled: true)
       alpha = current.workers["alpha"]
-      question = %{id: "question-ab12", questions: [%{"question" => "Choose?"}]}
+      question = question()
       {:noreply, current} = Service.handle_info({:agent, alpha.agent, {:question, question}}, current)
       current = case terminal do
         :stop -> {_, next, false} = call(current, %{"command" => "stop", "worker_id" => "alpha"}); next
@@ -351,14 +372,196 @@ defmodule AtlasRuntime.ServiceTest do
         :loss -> {:noreply, next} = Service.handle_info({:DOWN, alpha.monitor, :process, alpha.agent, :lost}, current); next
       end
       assert current.workers["alpha"].run.pending_question == nil
+      record = QuestionRecords.load(current.dir, alpha.run.id, question.id)
+      assert record["active"] == false
+      assert record["outcome"] == "invalidated"
+      assert record["transport"] == "not_attempted"
+      assert List.last(events(current))["kind"] in ["execution_stopped", "execution_finished", "execution_failed"]
       late = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
                "question_id" => question.id, "answers" => %{"Choose?" => "x"}}
       assert {%{command_error: _}, ^current, false} = call(current, late)
-      successor = worker(%{current | stopping: false}, "alpha", 2, backend: "claude", questions_enabled: true)
+      successor = worker(%{current | stopping: false}, "alpha", number + 10, backend: "claude", questions_enabled: true)
       for message <- [{:question, question}, {:answer, %{question_id: question.id, status: "processed"}},
                       {:ended, "stale"}, {:session, "stale"}] do
         assert {:noreply, ^successor} = Service.handle_info({:agent, alpha.agent, message}, successor)
       end
     end
+  end
+
+  test "lost response records admission before one native send and reconnect never sends twice", %{state: state} do
+    turn = "turn-0000000000000001"
+    path = Path.join(state.dir, QuestionRecords.reference(turn, "question-ab12"))
+    state = worker(state, "alpha", 1, backend: "claude", questions_enabled: true,
+      stop_reply: {:inspect_admission, path, :lost})
+    alpha = state.workers["alpha"]
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, question()}}, state)
+    request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => turn,
+      "question_id" => "question-ab12", "answers" => %{"Choose?" => "yes"}}
+    {first, state, false} = call(state, request)
+    assert first.status == "accepted"
+    assert first.admission == "accepted"
+    assert first.transport == "unknown"
+    assert first.processing == "unknown"
+    assert_received {:answer_write, "question-ab12", %{"Choose?" => "yes"}}
+    assert_received {:admission_before_write, %{"admission" => "accepted", "answers" => %{"Choose?" => "yes"}}}
+    assert {^first, ^state, false} = call(state, request)
+    error(state, %{request | "answers" => %{"Choose?" => "no"}}, "Conflicting answer")
+    refute_received {:answer_write, _, _}
+
+    query = request |> Map.delete("answers") |> Map.put("command", "question")
+    {record, state, false} = call(state, query)
+    assert record["original_input"] == %{"questions" => question().questions}
+    assert record["correlation"] == question().correlation
+    assert record["answers"] == request["answers"]
+    assert record["record_ref"] == first.record_ref
+    assert record["transport"] == "unknown"
+    error(state, Map.put(query, "worker_id", "other"), "belongs to worker")
+    for key <- ["worker_id", "turn_id", "question_id"] do
+      error(state, Map.delete(query, key), "requires exactly")
+    end
+    error(state, Map.put(query, "answers", %{}), "requires exactly")
+
+    events = QuestionRecords.recover(state.dir, ExecutionEvents.open(state.dir))
+    restarted = %{state | workers: %{}, events: events}
+    {record, ^restarted, false} = call(restarted, query)
+    assert record["active"] == false
+    assert record["admission"] == "accepted"
+    assert record["transport"] == "unknown"
+    assert record["processing"] == "unknown"
+    assert record["outcome"] == "unknown"
+    {duplicate, ^restarted, false} = call(restarted, request)
+    assert duplicate.admission == "accepted"
+    assert duplicate.transport == "unknown"
+    error(restarted, %{request | "answers" => %{"Choose?" => "no"}}, "Conflicting answer")
+    refute_received {:answer_write, _, _}
+    assert Enum.map(events(restarted), & &1["kind"]) ==
+      ["question_available", "answer_accepted", "question_invalidated"]
+  end
+
+  test "late delivery and processing preserve a newer pending question", %{state: state} do
+    state = worker(state, "alpha", 1, backend: "claude", questions_enabled: true)
+    alpha = state.workers["alpha"]
+    first = question()
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, first}}, state)
+    request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
+      "question_id" => first.id, "answers" => %{"Choose?" => "yes"}}
+    {_, state, false} = call(state, request)
+    second = %{first | id: "question-ab13"}
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, second}}, state)
+    for status <- ["delivered", "processed"] do
+      {:noreply, next} = Service.handle_info(
+        {:agent, alpha.agent, {:answer, %{question_id: first.id, status: status}}}, state)
+      assert next.workers["alpha"].run.pending_question.id == second.id
+    end
+  end
+
+  test "journal failure after admission fails closed before transport and restart flushes admission", %{state: state} do
+    state = worker(state, "alpha", 1, backend: "claude", questions_enabled: true)
+    alpha = state.workers["alpha"]
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, question()}}, state)
+    request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
+      "question_id" => "question-ab12", "answers" => %{"Choose?" => "yes"}}
+    blocker = Path.join(state.dir, "execution-events.json.tmp")
+    File.mkdir!(blocker)
+    assert_raise QuestionRecords.StorageError, fn -> call(state, request) end
+    refute_received {:answer_write, _, _}
+    record = QuestionRecords.load(state.dir, alpha.run.id, "question-ab12")
+    assert record["admission"] == "accepted"
+    assert record["transport"] == "unknown"
+    assert record["published_revision"] == 1
+    assert [%{"kind" => "answer_accepted", "revision" => 2}] = record["transitions"]
+    File.rmdir!(blocker)
+    store = QuestionRecords.recover(state.dir, ExecutionEvents.open(state.dir))
+    restarted = %{state | workers: %{}, events: store}
+    {duplicate, ^restarted, false} = call(restarted, request)
+    assert duplicate.status == "accepted"
+    assert duplicate.transport == "unknown"
+    assert duplicate.processing == "unknown"
+    refute_received {:answer_write, _, _}
+    assert Enum.map(events(restarted), & &1["kind"]) ==
+      ["question_available", "answer_accepted", "question_invalidated"]
+  end
+
+  test "record write failure cannot send and corrupt records cannot be treated as absent", %{state: state} do
+    state = worker(state, "alpha", 1, backend: "claude", questions_enabled: true)
+    alpha = state.workers["alpha"]
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, question()}}, state)
+    request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
+      "question_id" => "question-ab12", "answers" => %{"Choose?" => "yes"}}
+    path = Path.join(state.dir, QuestionRecords.reference(alpha.run.id, "question-ab12"))
+    File.mkdir!(path <> ".tmp")
+    assert_raise QuestionRecords.StorageError, fn -> call(state, request) end
+    refute_received {:answer_write, _, _}
+    assert QuestionRecords.load(state.dir, alpha.run.id, "question-ab12")["admission"] == "pending"
+    File.rmdir!(path <> ".tmp")
+    File.write!(path, "not JSON")
+    assert_raise QuestionRecords.StorageError, fn -> call(state, request) end
+    query = request |> Map.delete("answers") |> Map.put("command", "question")
+    assert_raise QuestionRecords.StorageError, fn -> call(state, query) end
+    refute_received {:answer_write, _, _}
+  end
+
+  test "legacy question history is explicitly unavailable rather than reconstructed", %{state: state} do
+    turn = saved(state, 1, %{"state" => "finished", "worker_id" => "alpha",
+      "last_answer" => %{"question_id" => "question-ab12", "status" => "delivered"}})
+    query = %{"command" => "question", "worker_id" => "alpha", "turn_id" => turn,
+      "question_id" => "question-ab12"}
+    error(state, query, "record unavailable")
+    error(state, query |> Map.put("command", "answer") |> Map.put("answers", %{"Choose?" => "yes"}),
+      "record unavailable")
+    refute_received {:answer_write, _, _}
+  end
+
+  test "stopping delivered work preserves evidence and historical duplicate admission", %{state: state} do
+    state = worker(state, "alpha", 1, backend: "claude", questions_enabled: true)
+    alpha = state.workers["alpha"]
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, question()}}, state)
+    request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
+      "question_id" => "question-ab12", "answers" => %{"Choose?" => "yes"}}
+    {delivered, state, false} = call(state, request)
+    assert delivered.status == "delivered"
+    assert_received {:answer_write, "question-ab12", %{"Choose?" => "yes"}}
+    {stopped, state, false} = call(state, %{"command" => "stop", "worker_id" => "alpha"})
+    evidence = state.workers["alpha"].run.last_answer
+    assert stopped == state.workers["alpha"].run
+    assert stopped.last_answer == evidence
+    assert evidence.admission == "accepted"
+    assert evidence.transport == "delivered"
+    assert evidence.processing == "unknown"
+    assert evidence.outcome == "unknown"
+    assert evidence.active == false
+    assert {^evidence, ^state, false} = call(state, request)
+    restarted = %{state | workers: %{}, events: QuestionRecords.recover(state.dir, ExecutionEvents.open(state.dir))}
+    assert {^evidence, ^restarted, false} = call(restarted, request)
+    {historical, ^restarted, false} = call(restarted,
+      %{"command" => "output", "worker_id" => "alpha", "turn_id" => alpha.run.id})
+    assert historical["last_answer"]["transport"] == "delivered"
+    assert historical["last_answer"]["active"] == false
+    assert historical["last_answer"]["processing"] == "unknown"
+    refute_received {:answer_write, _, _}
+  end
+
+  test "service-stop returns finalized accepted evidence without duplicate terminal events", %{state: state} do
+    state = worker(state, "alpha", 1, backend: "claude", questions_enabled: true)
+    alpha = state.workers["alpha"]
+    {:noreply, state} = Service.handle_info({:agent, alpha.agent, {:question, question()}}, state)
+    request = %{"command" => "answer", "worker_id" => "alpha", "turn_id" => alpha.run.id,
+      "question_id" => "question-ab12", "answers" => %{"Choose?" => "yes"}}
+    {accepted, state, false} = call(state, request)
+    assert accepted.active == true
+    assert_received {:answer_write, "question-ab12", %{"Choose?" => "yes"}}
+    {reply, state, true} = call(state, %{"command" => "service-stop"})
+    assert reply.workers["alpha"] == state.workers["alpha"].run
+    assert reply.agent == state.workers["alpha"].run
+    evidence = reply.agent.last_answer
+    assert evidence.active == false
+    assert evidence.revision == accepted.revision + 1
+    assert evidence.admission == "accepted"
+    assert evidence.transport == "delivered"
+    assert evidence.processing == "unknown"
+    assert evidence.outcome == "unknown"
+    assert Enum.map(events(state), & &1["kind"]) ==
+      ["question_available", "answer_accepted", "answer_delivered", "question_invalidated", "execution_stopped"]
+    refute_received {:answer_write, _, _}
   end
 end
