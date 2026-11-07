@@ -34,8 +34,8 @@ def assistant(session=SESSION, tool='tool-1'):
                  'caller': {'type': 'direct'}, 'input': {'questions': [copy.deepcopy(QUESTION)]}}]}}
 
 
-def request(tool='tool-1'):
-    return {'type': 'control_request', 'request_id': 'request-1',
+def request(tool='tool-1', identifier='request-1'):
+    return {'type': 'control_request', 'request_id': identifier,
             'request': {'subtype': 'can_use_tool', 'tool_name': 'AskUserQuestion',
                         'tool_use_id': tool, 'requires_user_interaction': True,
                         'input': {'questions': [copy.deepcopy(QUESTION)]}}}
@@ -56,7 +56,7 @@ class QuestionHostTest(unittest.TestCase):
         self.redirect.__enter__()
         self.addCleanup(self.redirect.__exit__, None, None, None)
         self.host = runner.QuestionHost(SESSION, 'one assignment', self.sent.append,
-                                        self.close, TOOLS)
+                                        self.close, TOOLS, native_pid=7319)
         self.host.start()
         self.host.event({'type': 'control_response', 'response': {
             'subtype': 'success', 'request_id': self.host.initialize_id, 'response': {}}})
@@ -98,6 +98,32 @@ class QuestionHostTest(unittest.TestCase):
         self.answer(identifier)
         self.assertEqual(self.events()[-1]['type'], 'runtime.answer_rejected')
         self.assertEqual(sum(event['type'] == 'user' for event in self.sent), 1)
+
+    def test_sequential_questions_keep_exact_source_correlation(self):
+        previous = None
+        for index in (1, 2):
+            tool, identifier = f'tool-{index}', f'request-{index}'
+            source = assistant(tool=tool)
+            control = request(tool, identifier)
+            self.host.event(source)
+            self.host.event(control)
+            question = self.events()[-1]['question']
+            self.assertEqual(question['questions'], control['request']['input']['questions'])
+            self.assertEqual(question['correlation'], {
+                'session_id': source['session_id'], 'model': source['message']['model'],
+                'tool_use_id': source['message']['content'][0]['id'],
+                'request_id': control['request_id'], 'native_pid': 7319})
+            self.assertEqual(question['correlation']['tool_use_id'], control['request']['tool_use_id'])
+            if previous is not None:
+                self.assertNotEqual(question['id'], previous['id'])
+                count = len(self.sent)
+                self.answer(previous['id'])
+                self.assertEqual(len(self.sent), count)
+                self.assertEqual(self.host.pending['id'], question['id'])
+            self.answer(question['id'])
+            self.assertEqual(self.sent[-1]['response']['request_id'], identifier)
+            self.host.event(processed(tool=tool))
+            previous = question
 
     def test_wrong_answers_leave_exact_pending_question(self):
         identifier = self.pending()
@@ -168,7 +194,7 @@ class QuestionHostTest(unittest.TestCase):
 
     def test_resume_model_must_match_native_init(self):
         host = runner.QuestionHost(SESSION, 'assignment', self.sent.append, self.close,
-                                   TOOLS, resume_model='saved-model')
+                                   TOOLS, native_pid=7319, resume_model='saved-model')
         host.event({'type': 'control_response', 'response': {
             'subtype': 'success', 'request_id': host.initialize_id, 'response': {}}})
         with self.assertRaisesRegex(ValueError, 'identity'):
@@ -179,7 +205,7 @@ class QuestionHostTest(unittest.TestCase):
         configured = 'claude-opus-5-5[1m]'
         for resume_model in (None, configured):
             host = runner.QuestionHost(SESSION, 'assignment', self.sent.append, self.close,
-                                       TOOLS, resume_model=resume_model)
+                                       TOOLS, native_pid=7319, resume_model=resume_model)
             host.event({'type': 'control_response', 'response': {
                 'subtype': 'success', 'request_id': host.initialize_id, 'response': {}}})
             host.event({'type': 'system', 'subtype': 'init', 'session_id': SESSION,
@@ -302,8 +328,11 @@ def fixture_native():
                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL)
     Path(os.environ['ATLAS_QUESTION_CHILD']).write_text(str(descendant.pid))
-    runner.emit(assistant(session))
-    runner.emit(request())
+    source, control = assistant(session), request()
+    Path(os.environ['ATLAS_QUESTION_SOURCE']).write_text(json.dumps({
+        'assistant': source, 'control_request': control, 'native_pid': os.getpid()}))
+    runner.emit(source)
+    runner.emit(control)
     if mode == 'output-loss':
         os.close(sys.stdout.fileno())
         time.sleep(30)
@@ -379,7 +408,8 @@ class QuestionProcessTest(unittest.TestCase):
              'null', backend, 'null', 'null', enabled], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=dict(os.environ, ATLAS_QUESTION_FIXTURE=mode,
-                     ATLAS_QUESTION_CHILD=str(self.root / 'child.pid')))
+                     ATLAS_QUESTION_CHILD=str(self.root / 'child.pid'),
+                     ATLAS_QUESTION_SOURCE=str(self.root / 'question-source.json')))
 
     def next_event(self, wanted):
         deadline = time.monotonic() + 8
@@ -425,6 +455,7 @@ class QuestionProcessTest(unittest.TestCase):
         return error
 
     def test_read_only_and_write_scoped_query_delivery_processing_and_cleanup(self):
+        previous = None
         for scoped in (False, True):
             with self.subTest(scoped=scoped):
                 self.launch(scoped=scoped)
@@ -432,6 +463,21 @@ class QuestionProcessTest(unittest.TestCase):
                 self.assertEqual(event['question']['questions'], [QUESTION])
                 identifier = event['question']['id']
                 self.assertRegex(identifier, '^question-[0-9a-f]{32}$')
+                source = json.loads((self.root / 'question-source.json').read_text())
+                message, control = source['assistant'], source['control_request']
+                correlation = event['question']['correlation']
+                self.assertEqual(correlation, {
+                    'session_id': message['session_id'], 'model': message['message']['model'],
+                    'tool_use_id': message['message']['content'][0]['id'],
+                    'request_id': control['request_id'], 'native_pid': source['native_pid']})
+                self.assertEqual(correlation['tool_use_id'], control['request']['tool_use_id'])
+                self.assertEqual(event['question']['questions'], control['request']['input']['questions'])
+                self.assertNotEqual(correlation['native_pid'], self.process.pid)
+                if previous is not None:
+                    self.assertNotEqual(identifier, previous['id'])
+                    self.assertNotEqual(correlation['session_id'], previous['correlation']['session_id'])
+                    self.assertNotEqual(correlation['native_pid'], previous['correlation']['native_pid'])
+                previous = event['question']
                 self.send(identifier)
                 delivered = self.next_event('runtime.answer_delivered')
                 self.assertEqual(delivered['question_id'], identifier)

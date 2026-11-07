@@ -459,6 +459,11 @@ func TestAnswerRequiresEveryTargetAndRejectsCapabilityChanges(t *testing.T) {
 		{"answer", "--worker", "server", "--turn", "turn-1", "--question", "question-1"},
 		{"answer", "--worker", "server", "--turn", "turn-1", "--question", "question-1", "--answers", `{"q":"a"}`, "extra"},
 		{"answer", "--worker", "server", "--turn", "turn-1", "--question", "question-1", "--answers", `{"q":"a"}`, "--permissions", "dedicated-repository"},
+		{"question", "--turn", "turn-1", "--question", "question-1"},
+		{"question", "--worker", "server", "--question", "question-1"},
+		{"question", "--worker", "server", "--turn", "turn-1"},
+		{"question", "--worker", "server", "--turn", "turn-1", "--question", "question-1", "--answers", `{"q":"a"}`},
+		{"question", "--worker", "server", "--turn", "turn-1", "--question", "question-1", "extra"},
 		{"continue", "--questions", "next"},
 		{"start", "--backend", "codex", "--questions", "--cwd", ".", "next"},
 	} {

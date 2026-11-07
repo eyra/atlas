@@ -5,6 +5,28 @@ defmodule AtlasRuntime.ExecutionEvents do
   @max_bytes 4 * 1024 * 1024
   @max_sequence 9_223_372_036_854_775_807
   @filename "execution-events.json"
+  @question_kinds ~w(question_available answer_accepted answer_delivered answer_processed question_invalidated)
+
+  def append_question(dir, store, transition) do
+    duplicate = Enum.find(store["events"], fn event ->
+      event["turn_id"] == transition["turn_id"] and
+        event["question_id"] == transition["question_id"] and
+        event["revision"] == transition["revision"]
+    end)
+
+    if duplicate do
+      unless Map.delete(duplicate, "sequence") == transition,
+        do: raise(ArgumentError, "conflicting question event revision")
+      store
+    else
+      event = Map.put(transition, "sequence", store["sequence"] + 1)
+      unless valid_event?(event), do: raise(ArgumentError, "invalid question event")
+      store
+      |> Map.put("sequence", event["sequence"])
+      |> Map.put("events", Enum.take(store["events"] ++ [event], -@retention))
+      |> then(&persist(dir, &1))
+    end
+  end
 
   def open(dir) do
     path = Path.join(dir, @filename)
@@ -163,6 +185,18 @@ defmodule AtlasRuntime.ExecutionEvents do
   end
 
   defp validate!(_), do: invalid_store!()
+
+  defp valid_event?(%{"kind" => kind, "question_id" => question, "revision" => revision,
+         "record_ref" => reference, "turn_id" => turn, "worker_id" => worker,
+         "sequence" => sequence, "timestamp" => timestamp} = event)
+       when kind in @question_kinds do
+    map_size(event) == 8 and is_integer(sequence) and sequence > 0 and
+      sequence <= @max_sequence and is_integer(revision) and revision in 1..5 and
+      is_binary(question) and Regex.match?(~r/\Aquestion-[0-9a-f]{1,64}\z/, question) and
+      is_binary(turn) and Regex.match?(~r/\Aturn-[0-9a-f]{16}\z/, turn) and
+      is_binary(worker) and Regex.match?(~r/\A[a-z][a-z0-9_-]{0,63}\z/, worker) and
+      reference == Path.join(["turns", turn, "questions", question <> ".json"]) and timestamp?(timestamp)
+  end
 
   defp valid_event?(%{
          "sequence" => sequence,
