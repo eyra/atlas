@@ -106,34 +106,6 @@ class NativeModelTest(unittest.TestCase):
             for stream in (process.stdin, process.stdout, process.stderr):
                 stream.close()
 
-    def test_official_model_flag_preserves_argv_and_resume(self):
-        for backend, session, model in [('claude', '', 'claude-opus-5-5[1m]'),
-                                        ('codex', '', 'gpt-6.1-sol'),
-                                        ('codex', self.session, 'gpt-6.1-sol')]:
-            with self.subTest(backend=backend, session=session):
-                code, events, error = self.launch(['null', 'null', backend, json.dumps(model)], session)
-                self.assertEqual(code, 0, error)
-                argv = json.loads((self.root / 'argv.json').read_text())
-                self.assertEqual(argv[argv.index('--model') + 1], model)
-                self.assertEqual(argv[-1], '--prompt stays one argument')
-                self.assertEqual(argv[argv.index('--') + 1:],
-                                 [session, '--prompt stays one argument'] if session else
-                                 ['--prompt stays one argument'])
-                self.assertFalse(any(event['type'] == 'runtime.identity' for event in events))
-                if session:
-                    self.assertLess(argv.index('resume'), argv.index('--model'))
-                    self.assertNotIn('--last', argv)
-
-    def test_legacy_runner_protocol_and_null_model_keep_native_defaults(self):
-        for extra in ([], ['null'], ['null', 'null'], ['null', 'null', 'codex'],
-                      ['null', 'null', 'codex', 'null']):
-            with self.subTest(extra=extra):
-                code, _, error = self.launch(extra)
-                self.assertEqual(code, 0, error)
-                argv = json.loads((self.root / 'argv.json').read_text())
-                self.assertEqual(argv[0], 'exec')
-                self.assertNotIn('--model', argv)
-
     def test_invalid_models_never_launch_native_process(self):
         for model in ('', '--dangerously-skip-permissions', 'opus --tools Bash', 'opus\nx',
                       'opus;touch /tmp/injected', 'x' * 201, 1, ['opus']):

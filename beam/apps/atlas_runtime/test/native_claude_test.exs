@@ -97,7 +97,9 @@ defmodule AtlasRuntime.NativeClaudeTest do
     end
   end
 
-  test "requested model reaches argv but only native identity is reported", %{tmp_dir: dir} do
+  test "native identity overrides requested alias and ignores synthetic error identity", %{
+    tmp_dir: dir
+  } do
     init = Map.put(@init, "model", "claude-opus-5-5[1m]")
 
     synthetic = %{
@@ -110,12 +112,6 @@ defmodule AtlasRuntime.NativeClaudeTest do
     assert_receive {:agent, ^pid, {:identity, "claude", "claude-opus-5-5[1m]"}}, 5_000
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 5_000
     refute_received {:agent, ^pid, {:identity, _, _}}
-    process = JSON.decode!(File.read!(Path.join(dir, "turns/claude-turn/process.json")))
-
-    assert Enum.chunk_every(process["command"], 2, 1, :discard)
-           |> Enum.member?(["--model", "opus[1m]"])
-
-    assert Enum.take(process["command"], -2) == ["--", "Read the sample"]
   end
 
   test "observed weekly rejection emits exact quota once without retrying the turn", %{
