@@ -102,18 +102,21 @@ def permission_arguments(scope):
             '-c', 'features.network_proxy=true']
 
 
-def claude_repository_settings(scope):
+def claude_repository_settings(scope, native_temporary):
     root = Path(scope['root'])
     temporary_roots = {Path(path).resolve() for path in
                        ('/tmp', '/var/tmp', tempfile.gettempdir())}
     if any(root == path or root.is_relative_to(path) for path in temporary_roots):
         raise ValueError('Claude dedicated repositories must be outside system temporary directories')
+    # Claude 2.1.280 redirects longer child-temp paths to shared /tmp/claude-<uid>.
+    if len(os.fsencode(Path(native_temporary) / f'claude-{os.getuid()}')) > 44:
+        raise ValueError('Claude private native temp path exceeds the 44-byte child-temp limit')
     protected = [root / name for name in ('.agents', '.codex', '.aws', '.claude')]
     protected += [root / '.git/config', root / '.git/hooks']
     return {'sandbox': {
         'enabled': True, 'failIfUnavailable': True, 'allowUnsandboxedCommands': False,
         'excludedCommands': [],
-        'filesystem': {'allowWrite': [str(root)],
+        'filesystem': {'allowWrite': [str(root), str(native_temporary)],
                        'denyWrite': sorted(str(path) for path in temporary_roots) +
                                     [str(path) for path in protected]},
         'network': {'allowedDomains': scope['network_hosts'],
@@ -268,12 +271,11 @@ def main():
     model_arguments = ['--model', model] if model is not None else []
     if backend == 'claude':
         tools = 'Bash,Read,Glob,Grep' if scope is not None else 'Read,Glob,Grep'
-        settings = ['--settings', json.dumps(claude_repository_settings(scope))] if scope is not None else []
         command = [executable, '--print', '--output-format', 'stream-json', '--verbose',
                    '--restricted', '--safe-mode', '--strict-mcp-config', '--no-chrome',
                    '--tools', tools, '--allowedTools', tools,
                    '--permission-mode', 'dontAsk', '--permission-prompts', 'none',
-                   '--no-session-persistence', *settings, *model_arguments, '--', goal]
+                   '--no-session-persistence', *model_arguments, '--', goal]
     else:
         command = [executable, 'exec', *permissions, '--disable', 'hooks',
                    '-c', 'forced_login_method="chatgpt"', '-c', 'approval_policy="never"',
@@ -322,7 +324,9 @@ def main():
                 if backend == 'claude' and scope is not None:
                     if scope != permission_scope(workspace):
                         raise ValueError('Dedicated repository permission scope changed')
-                    native_temporary = tempfile.mkdtemp(prefix='atlas-claude-', dir=Path(workspace) / '.git')
+                    native_temporary = tempfile.mkdtemp(prefix='.ac-', dir=Path.home().resolve())
+                    command[1:1] = ['--settings', json.dumps(
+                        claude_repository_settings(scope, native_temporary))]
                     environment = dict(os.environ, CLAUDE_CODE_TMPDIR=native_temporary)
                 command = [sys.executable, str(Path(__file__).resolve()), '--execute-assignment',
                            workspace, json.dumps(scope), json.dumps(repository), json.dumps(created),
@@ -331,7 +335,8 @@ def main():
             process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=errors, start_new_session=True,
                                        cwd=workspace if backend == 'claude' else None, env=environment)
-            (folder / 'process.json').write_text(json.dumps({'pid': process.pid, 'command': command}))
+            (folder / 'process.json').write_text(json.dumps({
+                'pid': process.pid, 'command': command, 'native_temporary': native_temporary}))
             emit({'type': 'runtime.process_started', 'pid': process.pid})
             selector.register(sys.stdin, selectors.EVENT_READ, 'control')
             selector.register(process.stdout, selectors.EVENT_READ, 'output')
