@@ -15,6 +15,7 @@ defmodule AtlasRuntime.ExecutionEventsTest do
   defp run(id, state \\ "running") do
     %{
       id: "turn-#{id}",
+      worker_id: "default",
       backend: "codex",
       model: nil,
       session_id: nil,
@@ -78,6 +79,7 @@ defmodule AtlasRuntime.ExecutionEventsTest do
              "sequence" => 1,
              "kind" => "execution_accepted",
              "turn_id" => "turn-1",
+             "worker_id" => "default",
              "backend" => "codex",
              "model" => nil,
              "session_id" => nil,
@@ -89,6 +91,7 @@ defmodule AtlasRuntime.ExecutionEventsTest do
              "sequence" => 2,
              "kind" => "execution_finished",
              "turn_id" => "turn-1",
+             "worker_id" => "default",
              "backend" => "codex",
              "model" => "native-model",
              "session_id" => "native-session",
@@ -224,9 +227,31 @@ defmodule AtlasRuntime.ExecutionEventsTest do
     end
   end
 
+  test "upgraded journals preserve unattributed history and interleaved worker checkpoints", %{dir: dir, path: path} do
+    store = ExecutionEvents.append(dir, ExecutionEvents.open(dir), run(1))
+    legacy = %{store | "events" => Enum.map(store["events"], &Map.delete(&1, "worker_id"))}
+    File.write!(path, JSON.encode!(legacy))
+    reopened = ExecutionEvents.open(dir)
+    checkpoint = ExecutionEvents.query(reopened, nil, 100)["next_cursor"]
+    store = Enum.reduce([{"server", "running"}, {"console", "running"}, {"server", "stopped"}],
+      reopened, fn {worker, state}, acc ->
+        ExecutionEvents.append(dir, acc, %{run(worker, state) | worker_id: worker})
+      end)
+    assert hd(store["events"]) == hd(legacy["events"])
+    page = ExecutionEvents.query(ExecutionEvents.open(dir), checkpoint, 2)
+    assert Enum.map(page["events"], &{&1["worker_id"], &1["kind"]}) ==
+      [{"server", "execution_accepted"}, {"console", "execution_accepted"}]
+    assert page["has_more"]
+    last = ExecutionEvents.query(store, page["next_cursor"], 2)
+    assert Enum.map(last["events"], &{&1["worker_id"], &1["kind"]}) ==
+      [{"server", "execution_stopped"}]
+    refute last["has_more"]
+  end
+
   test "maximum escaped identity fields keep a full page below the socket response cap", %{dir: dir} do
     largest = %{run(1) | id: String.duplicate("\u0000", 128),
       backend: String.duplicate("\u0000", 64), model: String.duplicate("\u0000", 256),
+      worker_id: String.duplicate("w", 64),
       session_id: String.duplicate("\u0000", 1024)}
     store = Enum.reduce(1..100, ExecutionEvents.open(dir), fn _, store ->
       ExecutionEvents.append(dir, store, largest)
@@ -241,6 +266,9 @@ defmodule AtlasRuntime.ExecutionEventsTest do
     bytes = File.read!(path)
 
     for snapshot <- [
+          %{run(1) | worker_id: "../server"},
+          %{run(1) | worker_id: String.duplicate("w", 65)},
+          %{run(1) | worker_id: nil},
           %{run(1) | id: String.duplicate("x", 129)},
           %{run(1) | backend: String.duplicate("x", 65)},
           %{run(1) | model: String.duplicate("x", 257)},
