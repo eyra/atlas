@@ -13,6 +13,26 @@ atlas-runtime service stop
 
 Commands return one JSON response, except `output --follow`, which streams JSON lines. `start` returns while the selected native agent runs. `stop` stops the agent, not the service. `service stop` stops both. `service status` checks the daemon. No automatic daemon startup, assignment retries or stdin session. Command failures exit nonzero. A successful `status` or `output` query exits zero even for a failed turn, retaining its `state: "failed"`, `error`, ID and artifact location.
 
+## Durable execution discovery
+
+```sh
+atlas-runtime events --limit 50
+atlas-runtime events --cursor "$NEXT_CURSOR" --limit 50
+atlas-runtime output --turn turn-0123456789abcdef
+```
+
+`events` is a finite query, not a watcher. It returns immutable ordered lifecycle snapshots with stable turn IDs, backend/native identity when known, and references usable by `output --turn` for status and logs. `execution_accepted` means Runtime accepted a start or continuation; `execution_finished` means the native turn ended normally, **not that its assigned task was verified successful**. Failure and explicit stop use `execution_failed` and `execution_stopped`. Assignments, answers and full logs are not copied into the event stream.
+
+The response includes `events`, `next_cursor`, `has_more`, `earliest_cursor`, `retention_gap` and `recording_started_at`. Save `next_cursor` only after processing the returned page. It advances only through returned events; an empty page preserves the supplied cursor. The initial empty query still returns a usable cursor. Replaying a retained cursor returns the same ordered prefix; newly appended events may extend a previously short page.
+
+Default page size is 50, maximum 100. The bounded journal retains the latest 256 events with bounded identity fields. Omitted cursor starts at the oldest retained event and reports `retention_gap` if earlier events were removed. Explicit stale, foreign, malformed and future cursors are refused; a stale-cursor error identifies the earliest usable cursor. Cursor identity and events survive clean daemon restart. Replacing/removing the journal starts a different stream, never silently reuses old cursors.
+
+The journal begins when this capability is first started; `recording_started_at` marks coverage. Existing mutable turn files are not backfilled into invented historical acceptance/terminal events. Corrupt journals fail visibly rather than reset. This is not abrupt-crash recovery, automatic re-execution or verified-task reporting; existing output/history remain the detailed evidence.
+
+Verification on 2026-11-07: eight focused journal tests and the Go CLI suite passed, including retention gaps, malformed/foreign/future/stale cursors, corrupt storage and a worst-case escaped 100-event response below the 1 MiB socket cap. Real isolated Claude turns `turn-c5719def1b653ee6` and `turn-75138de581f8e32f` produced accepted/finished sequences 1–4 with native session `da1e4115-ee6b-415b-8a47-a3f4fd5a40fe` and model `claude-opus-5-5`. One-event pagination, repeated-cursor replay, daemon restart from the prior cursor, empty checkpoint stability and historical output lookup passed. A separately labelled synthetic native executable exercised actual daemon failure/stop transitions, repeated-stop deduplication and post-restart stop replay; these are lifecycle checks, not provider-failure evidence. All owned proof daemons/process groups were stopped and build/fixture scaffolding removed.
+
+## Continuing a conversation
+
 After `status` reports `finished`, continue that Codex conversation:
 
 ```sh

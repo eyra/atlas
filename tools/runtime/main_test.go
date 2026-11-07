@@ -174,6 +174,41 @@ func TestExecuteRejectsInvalidPreferencesBeforeSocketRequest(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsInvalidEventsBeforeSocketRequest(t *testing.T) {
+	t.Setenv("ATLAS_RUNTIME_HOME", t.TempDir())
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"zero limit", []string{"--limit", "0"}, "limit must be between 1 and 100"},
+		{"negative limit", []string{"--limit=-1"}, "limit must be between 1 and 100"},
+		{"above maximum", []string{"--limit", "101"}, "limit must be between 1 and 100"},
+		{"noninteger limit", []string{"--limit", "1.5"}, "invalid value"},
+		{"overflow limit", []string{"--limit", "999999999999999999999999"}, "invalid value"},
+		{"empty limit", []string{"--limit="}, "invalid value"},
+		{"missing limit", []string{"--limit"}, "flag needs an argument"},
+		{"empty cursor", []string{"--cursor", ""}, "cursor must be nonempty"},
+		{"empty cursor equals", []string{"--cursor="}, "cursor must be nonempty"},
+		{"missing cursor", []string{"--cursor"}, "flag needs an argument"},
+		{"positional", []string{"extra"}, "does not accept positional arguments"},
+		{"trailing positional", []string{"--limit", "50", "extra"}, "does not accept positional arguments"},
+		{"positional after separator", []string{"--", "extra"}, "does not accept positional arguments"},
+		{"unknown flag", []string{"--unknown"}, "flag provided but not defined"},
+		{"follow unsupported", []string{"--follow"}, "flag provided but not defined"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := execute(append([]string{"events"}, test.args...))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected argument refusal %q, got result %#v, error %v", test.want, result, err)
+			}
+			if result != nil {
+				t.Fatalf("invalid request returned a result: %#v", result)
+			}
+		})
+	}
+}
+
 func TestExecuteRejectsInvalidStartBackendBeforeSocketRequest(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ATLAS_RUNTIME_HOME", dir)

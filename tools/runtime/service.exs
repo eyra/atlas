@@ -10,6 +10,7 @@ defmodule AtlasRuntime.Service do
   use GenServer
   alias AtlasRuntime.Agent.Native
   alias AtlasRuntime.BackendPolicy
+  alias AtlasRuntime.ExecutionEvents
 
   def start(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
 
@@ -19,6 +20,7 @@ defmodule AtlasRuntime.Service do
       {:error, :enoent} -> BackendPolicy.empty()
       {:error, reason} -> raise("Cannot read backend policy: #{inspect(reason)}")
     end
+    events = ExecutionEvents.open(dir)
     path = Path.join(dir, "runtime.sock")
 
     {:ok, listener} =
@@ -34,7 +36,7 @@ defmodule AtlasRuntime.Service do
     File.chmod!(path, 0o600)
     System.at_exit(fn _ -> File.rm(path) end)
     spawn_link(fn -> accept(listener) end)
-    {:ok, %{dir: dir, policy: policy, agent: nil, monitor: nil, stopping: false, run: %{state: "idle"}}}
+    {:ok, %{dir: dir, policy: policy, events: events, agent: nil, monitor: nil, stopping: false, run: %{state: "idle"}}}
   end
 
   defp accept(listener) do
@@ -80,7 +82,13 @@ defmodule AtlasRuntime.Service do
         :exit, why -> {%{command_error: "Operation not confirmed: #{inspect(why)}"}, state, false}
       end
 
-    if next.run != state.run, do: persist(next.run)
+    next =
+      if next.run != state.run do
+        persist(next.run)
+        %{next | events: ExecutionEvents.append(next.dir, next.events, next.run)}
+      else
+        next
+      end
     {:reply, {reply, shutdown?}, next}
   end
 
@@ -99,6 +107,13 @@ defmodule AtlasRuntime.Service do
   defp command(%{"command" => "stop"}, state) do
     next = stop(state)
     {next.run, next, false}
+  end
+
+  defp command(%{"command" => "events"} = request, state) do
+    if Map.keys(request) -- ["command", "cursor", "limit"] != [],
+      do: raise("Events accepts only an optional cursor and limit")
+    reply = ExecutionEvents.query(state.events, Map.get(request, "cursor"), Map.get(request, "limit", 50))
+    {reply, state, false}
   end
 
   defp command(%{"command" => "turns"}, state) do
@@ -313,13 +328,15 @@ defmodule AtlasRuntime.Service do
     run = Map.merge(state.run, %{state: "finished", result: text,
       ended_at: DateTime.to_iso8601(DateTime.utc_now())})
     persist(run)
+    events = ExecutionEvents.append(state.dir, state.events, run)
 
     {:noreply,
      %{
        state
        | agent: nil,
          monitor: nil,
-         run: run
+         run: run,
+         events: events
      }}
   end
 
@@ -327,12 +344,14 @@ defmodule AtlasRuntime.Service do
     run = Map.merge(state.run, %{state: "failed", error: inspect(reason),
       ended_at: DateTime.to_iso8601(DateTime.utc_now())})
     persist(run)
+    events = ExecutionEvents.append(state.dir, state.events, run)
     {:noreply,
      %{
        state
        | agent: nil,
          monitor: nil,
-         run: run
+         run: run,
+         events: events
      }}
   end
 
