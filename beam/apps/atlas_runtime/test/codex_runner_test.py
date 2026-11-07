@@ -21,6 +21,118 @@ runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
 
 
+class ClaudeRepositoryLifecycleTest(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory(prefix='.runtime-claude-scope-', dir=Path.home())
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name).resolve()
+        self.repo = self.root / 'repo'
+        self.repo.mkdir()
+        subprocess.run(['git', 'init', '-q', str(self.repo)], check=True)
+        self.scope = runner.permission_scope(str(self.repo))
+        self.capture = self.root / 'owned-temp.txt'
+        self.native = self.root / 'fixture-native'
+
+    def launch(self, scope, hang=False, fail=False, home=None):
+        self.native.write_text(
+            f'#!{sys.executable}\n'
+            'import json, os, sys, time\nfrom pathlib import Path\n'
+            'temporary = Path(os.environ["CLAUDE_CODE_TMPDIR"])\n'
+            f'Path({str(self.capture)!r}).write_text(json.dumps({{"path": str(temporary), '
+            '"mode": temporary.stat().st_mode & 0o777, '
+            '"settings": json.loads(sys.argv[sys.argv.index("--settings") + 1])}))\n'
+            'print(\'{"type":"fixture.ready"}\', flush=True)\n' +
+            ('time.sleep(30)\n' if hang else '') +
+            ('sys.exit(7)\n' if fail else ''))
+        self.native.chmod(0o700)
+        return subprocess.Popen(
+            [sys.executable, str(HELPER), str(self.native), str(self.repo), str(self.root),
+             'fixture lifecycle only', '', '', json.dumps(scope), 'null', 'claude'],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=dict(os.environ, HOME=str(home),
+                     CODEX_HOME=os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
+            if home is not None else None)
+
+    def test_owned_private_temp_is_removed_after_completion_failure_and_stop(self):
+        for stop, fail in ((False, False), (False, True), (True, False)):
+            with self.subTest(stop=stop, fail=fail):
+                process = self.launch(self.scope, hang=stop, fail=fail)
+                try:
+                    self.assertEqual(json.loads(process.stdout.readline())['type'], 'runtime.process_started')
+                    self.assertEqual(json.loads(process.stdout.readline())['event']['type'], 'fixture.ready')
+                    captured = json.loads(self.capture.read_text())
+                    temporary = Path(captured['path'])
+                    self.assertEqual(temporary.parent, Path.home().resolve())
+                    self.assertEqual(captured['mode'], 0o700)
+                    filesystem = captured['settings']['sandbox']['filesystem']
+                    self.assertEqual(filesystem['allowWrite'], [str(self.repo), str(temporary)])
+                    self.assertIn(str(Path('/tmp').resolve()), filesystem['denyWrite'])
+                    self.assertIn(str(self.repo / '.git/config'), filesystem['denyWrite'])
+                    evidence = json.loads((self.root / 'process.json').read_text())
+                    self.assertEqual(evidence['native_temporary'], str(temporary))
+                    if stop:
+                        process.stdin.write('stop\n')
+                        process.stdin.flush()
+                    process.wait(timeout=5)
+                    _, error = process.communicate()
+                    self.assertEqual(process.returncode, 0, error)
+                    self.assertFalse(temporary.exists())
+                    subprocess.run(['git', '-C', str(self.repo), 'rev-parse', '--git-dir'],
+                                   check=True, capture_output=True)
+                finally:
+                    if process.poll() is None:
+                        process.stdin.close()
+                        process.wait(timeout=5)
+                    for stream in (process.stdin, process.stdout, process.stderr):
+                        stream.close()
+
+    def test_changed_scope_never_executes_native_cli(self):
+        process = self.launch({**self.scope, 'network_hosts': ['example.com']})
+        try:
+            process.wait(timeout=5)
+            _, error = process.communicate()
+            self.assertNotEqual(process.returncode, 0)
+            self.assertIn('permission scope changed', error)
+            self.assertFalse(self.capture.exists())
+        finally:
+            if process.poll() is None:
+                process.stdin.close()
+                process.wait(timeout=5)
+            for stream in (process.stdin, process.stdout, process.stderr):
+                stream.close()
+
+    def test_system_temp_repository_cannot_bypass_native_temp_denial(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, 'outside system temporary directories'):
+                runner.claude_repository_settings(
+                    runner.dedicated_scope(Path(directory).resolve()), '/private-owned')
+
+    def test_native_temp_byte_limit_fails_closed_before_fallback(self):
+        suffix = len(os.fsencode(f'/claude-{os.getuid()}'))
+        for extra in (0, 1):
+            temporary = '/' + 'x' * (44 - suffix - 1 + extra)
+            if extra:
+                with self.assertRaisesRegex(ValueError, '44-byte'):
+                    runner.claude_repository_settings(self.scope, temporary)
+            else:
+                runner.claude_repository_settings(self.scope, temporary)
+        with self.assertRaisesRegex(ValueError, '44-byte'):
+            runner.claude_repository_settings(self.scope, '/' + 'é' * 22)
+
+    def test_long_home_refuses_native_and_removes_created_temp(self):
+        process = self.launch(self.scope, home=self.root)
+        try:
+            _, error = process.communicate(timeout=5)
+            self.assertNotEqual(process.returncode, 0)
+            self.assertIn('44-byte', error)
+            self.assertFalse(self.capture.exists())
+            self.assertEqual(list(self.root.glob('.ac-*')), [])
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
+
 class NativeModelTest(unittest.TestCase):
     session = '01a1b578-c3b5-7972-9664-1d250bf64cdf'
 

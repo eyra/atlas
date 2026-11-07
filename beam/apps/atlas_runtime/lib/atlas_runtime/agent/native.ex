@@ -2,8 +2,8 @@ defmodule AtlasRuntime.Agent.Native do
   @moduledoc """
   Owned official CLI execution using existing native authentication. Codex remains
   the default, with its read-only, workspace-write and dedicated-repository modes.
-  Explicit Claude execution supports fresh read-only assignments through restricted
-  Read/Glob/Grep tools only; no Claude provisioning or continuation is supported.
+  Claude supports fresh restricted read-only assignments and explicit independent
+  repository Bash execution; no Claude provisioning or continuation is supported.
   Requires explicit `command`, `workspace` and `goal` agent settings. The Python
   runner owns a process group and reaps it on stop or parent loss. JSONL output,
   stderr and the final answer stay under `turns_dir/<turn key>`. Guidance is not
@@ -59,8 +59,9 @@ defmodule AtlasRuntime.Agent.Native do
 
     supported =
       backend == "codex" ||
-        (backend == "claude" && sandbox == "read-only" && is_nil(scope) &&
-           is_nil(repository) && is_nil(session))
+        (backend == "claude" && is_nil(repository) && is_nil(session) &&
+           ((sandbox == "read-only" && is_nil(scope)) ||
+              (is_nil(sandbox) && is_map(scope) && scope["profile"] == "dedicated-repository")))
 
     valid_permissions =
       (is_nil(scope) && sandbox in ["read-only", "workspace-write"]) ||

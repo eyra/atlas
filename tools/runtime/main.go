@@ -209,7 +209,7 @@ func execute(args []string) (map[string]any, error) {
 		permissions := flags.String("permissions", "", "explicit dedicated-repository Git/GitHub scope")
 		repository := flags.String("repo", "", "GitHub HTTPS repository to provision")
 		branch := flags.String("branch", "", "new task branch based on freshly fetched develop")
-		backend := flags.String("backend", "", "explicit codex or read-only claude; omitted uses preferences")
+		backend := flags.String("backend", "", "explicit codex or claude; omitted uses preferences")
 		if err = flags.Parse(args[1:]); err != nil {
 			return nil, err
 		}
@@ -448,7 +448,7 @@ func followOutput(out io.Writer) error {
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--help" || os.Args[1] == "-h") {
-		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude supports fresh read-only file-tool assignments only. Both use their official CLI login. Claude write permissions, provisioning and continuation are refused. One agent at a time.")
+		fmt.Println("atlas-runtime service start|status|stop\natlas-runtime start --cwd PATH [--backend codex|claude] [--sandbox read-only|workspace-write | --permissions dedicated-repository] \"assignment\"\natlas-runtime start --repo https://github.com/OWNER/REPO.git --branch NEW_BRANCH --permissions dedicated-repository \"assignment\"\natlas-runtime continue [--turn TURN_ID] \"next assignment\"\natlas-runtime preferences\natlas-runtime preferences --preferred claude --fallback codex [--preferred-model MODEL] [--fallback-model MODEL]\natlas-runtime preferences --reenable claude\natlas-runtime status|turns|output|stop\natlas-runtime output --follow\natlas-runtime output --turn TURN_ID\nStart uses configured preferences when --backend is omitted; without preferences it uses Codex. An explicit --backend never falls back. Configured models apply to the selected backend. Preferences inspects configuration and eligibility; --reenable claude clears its quota block. Claude defaults to read-only; explicit dedicated-repository uses native sandboxed Bash in an independent repository outside system temp roots. Both use their official CLI login. Claude workspace-write, provisioning and continuation are refused. One agent at a time.")
 		return
 	}
 	if len(os.Args) == 3 && os.Args[1] == "output" && os.Args[2] == "--follow" {
