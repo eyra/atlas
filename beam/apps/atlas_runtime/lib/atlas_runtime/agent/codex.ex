@@ -23,11 +23,16 @@ defmodule AtlasRuntime.Agent.Codex do
     :exit, {:normal, _} -> :ok
   end
 
-  def permission_scope(workspace) do
+  def permission_scope(workspace), do: runner_request(["--permission-scope", workspace])
+
+  def repository_request(home, url, branch),
+    do: runner_request(["--repository-request", home, url, branch])
+
+  defp runner_request(args) do
     helper = Path.join(:code.priv_dir(:atlas_runtime), "codex_runner.py")
     python = System.find_executable("python3") || raise("Python 3 is required")
 
-    case System.cmd(python, [helper, "--permission-scope", workspace], stderr_to_stdout: true) do
+    case System.cmd(python, [helper | args], stderr_to_stdout: true) do
       {scope, 0} -> JSON.decode!(scope)
       {error, _} -> raise(String.trim(error))
     end
@@ -44,12 +49,15 @@ defmodule AtlasRuntime.Agent.Codex do
     sandbox = Map.get(settings, "sandbox", "read-only")
     session = settings["session_id"]
     scope = settings["permissions"]
+    repository = settings["repository"]
 
     valid_permissions =
       (is_nil(scope) && sandbox in ["read-only", "workspace-write"]) ||
         (is_map(scope) && is_nil(sandbox))
 
-    if command && python && is_binary(workspace) && File.dir?(workspace) &&
+    if command && python && is_binary(workspace) &&
+         (File.dir?(workspace) || is_map(repository)) &&
+         (is_nil(repository) || (is_map(repository) && is_map(scope))) &&
          is_binary(goal) && String.trim(goal) != "" && valid_permissions &&
          (is_nil(session) || (is_binary(session) && session != "")) do
       File.mkdir_p!(folder)
@@ -73,7 +81,7 @@ defmodule AtlasRuntime.Agent.Codex do
              goal,
              sandbox || "",
              session || ""
-           ] ++ if(scope, do: [JSON.encode!(scope)], else: [])},
+           ] ++ if(scope, do: [JSON.encode!(scope), JSON.encode!(repository)], else: [])},
           {:env, unset}
         ])
 
@@ -140,6 +148,11 @@ defmodule AtlasRuntime.Agent.Codex do
 
   defp consume(%{"type" => "runtime.process_ended", "exit_code" => code}, state),
     do: %{state | process_exit: code}
+
+  defp consume(%{"type" => "runtime.repository_prepared", "repository" => repository}, state) do
+    send(state.owner, {:agent, self(), {:repository, repository}})
+    state
+  end
 
   defp consume(
          %{

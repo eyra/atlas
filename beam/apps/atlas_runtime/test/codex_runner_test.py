@@ -1,5 +1,6 @@
 """Owned-process cleanup regressions; injected permission errors are labelled."""
 import errno
+import fcntl
 import importlib.util
 import os
 from pathlib import Path
@@ -182,6 +183,122 @@ class DedicatedRepositoryTest(unittest.TestCase):
                 runner.permission_scope(str(self.repo))
             (config / 'config.toml').unlink()
             config.rmdir()
+
+
+class ProvisioningTest(unittest.TestCase):
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory(prefix='runtime-provision-')
+        self.addCleanup(self.folder.cleanup)
+        self.root = Path(self.folder.name).resolve()
+        self.source = self.root / 'source'
+        self.url = 'https://github.com/test/fixture.git'
+        self.git(self.root, 'init', '-q', '-b', 'develop', str(self.source))
+        (self.source / 'state.txt').write_text('base\n')
+        self.git(self.source, 'add', 'state.txt')
+        self.git(self.source, 'commit', '-qm', 'base')
+        # Local Git transport bridge: real clone/fetch/checkout, not native sandbox proof.
+        self.bridge = self.root / 'local-git'
+        self.bridge.write_text(
+            f'#!{sys.executable}\nimport os, sys\n'
+            "args = sys.argv[sys.argv.index('--') + 1:]\n"
+            "os.chdir(sys.argv[sys.argv.index('-C') + 1])\n"
+            "if 'clone' in args or 'fetch' in args:\n"
+            f"    args[1:1] = ['-c', 'url.{self.source.as_uri()}.insteadOf={self.url}']\n"
+            "os.execvp(args[0], args)\n")
+        self.bridge.chmod(0o700)
+        self.request = runner.repository_request(str(self.root / 'runtime'), self.url, 'task/first')
+        self.repo = Path(self.request['permissions']['root'])
+        self.repo.mkdir(parents=True)
+        runner.prepare_repository(str(self.bridge), self.request['permissions'],
+                                  self.request['repository'], True)
+
+    def git(self, cwd, *args):
+        return subprocess.check_output(
+            ['git', '-C', str(cwd), '-c', 'user.name=Test',
+             '-c', 'user.email=test@example.invalid', *args], text=True).strip()
+
+    def prepare(self, branch):
+        request = runner.repository_request(str(self.root / 'runtime'), self.url, branch)
+        return runner.prepare_repository(str(self.bridge), request['permissions'],
+                                         request['repository'], False)
+
+    def test_reuse_uses_fresh_develop_and_preserves_prior_task_commit(self):
+        self.git(self.repo, 'commit', '--allow-empty', '-qm', 'task change')
+        previous = self.git(self.repo, 'rev-parse', 'HEAD')
+        self.git(self.source, 'commit', '--allow-empty', '-qm', 'new develop')
+        latest = self.git(self.source, 'rev-parse', 'HEAD')
+        prepared = self.prepare('task/second')
+        self.assertEqual(prepared['base_sha'], latest)
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), latest)
+        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), 'task/second')
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'task/first'), previous)
+
+    def test_continuation_preserves_work_and_refuses_branch_drift(self):
+        head = self.git(self.repo, 'rev-parse', 'HEAD')
+        saved = {**self.request['repository'], 'base_sha': head}
+        (self.repo / 'unfinished.txt').write_text('keep working\n')
+        self.git(self.source, 'commit', '--allow-empty', '-qm', 'new remote base')
+        runner.prepare_repository(str(self.bridge), self.request['permissions'], saved, False)
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), head)
+        self.git(self.repo, 'checkout', '-qb', 'different-task')
+        with self.assertRaises(ValueError):
+            runner.prepare_repository(str(self.bridge), self.request['permissions'], saved, False)
+        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), 'different-task')
+        self.assertEqual((self.repo / 'unfinished.txt').read_text(), 'keep working\n')
+
+    def test_dirty_and_existing_branches_are_preserved(self):
+        head = self.git(self.repo, 'rev-parse', 'HEAD')
+        for name in ('state.txt', 'untracked.txt'):
+            path = self.repo / name
+            original = path.read_bytes() if path.exists() else None
+            path.write_text('keep my work\n')
+            with self.assertRaises(ValueError):
+                self.prepare('task/second')
+            self.assertEqual(path.read_text(), 'keep my work\n')
+            self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), head)
+            if original is None:
+                path.unlink()
+            else:
+                path.write_bytes(original)
+        with self.assertRaises(ValueError):
+            self.prepare('task/first')
+        self.git(self.source, 'branch', 'task/remote')
+        with self.assertRaises(ValueError):
+            self.prepare('task/remote')
+        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), 'task/first')
+        self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), head)
+
+    def test_mismatched_and_unmanaged_paths_are_preserved(self):
+        self.git(self.repo, 'remote', 'set-url', 'origin', 'https://github.com/other/repo.git')
+        with self.assertRaises(ValueError):
+            self.prepare('task/second')
+        self.assertEqual(self.git(self.repo, 'remote', 'get-url', 'origin'),
+                         'https://github.com/other/repo.git')
+        marker = self.repo / '.git/atlas-runtime-repository.json'
+        marker.unlink()
+        with self.assertRaises(ValueError):
+            self.prepare('task/second')
+        self.assertEqual((self.repo / 'state.txt').read_text(), 'base\n')
+
+    def test_active_owner_blocks_reacquisition_until_release(self):
+        lock = os.open(self.repo, os.O_RDONLY)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with self.assertRaises(ValueError):
+                runner.lock_repository(str(self.repo), False)
+        finally:
+            os.close(lock)
+        acquired, created = runner.lock_repository(str(self.repo), False)
+        self.assertFalse(created)
+        os.close(acquired)
+
+    def test_untrusted_repository_and_branch_inputs_are_rejected(self):
+        for url, branch in (
+                ('file:///tmp/repo', 'task/new'), ('https://example.com/test/repo', 'task/new'),
+                ('https://github.com/test/../repo', 'task/new'),
+                (self.url, 'develop'), (self.url, '../branch'), (self.url, '--force')):
+            with self.subTest(url=url, branch=branch), self.assertRaises(ValueError):
+                runner.repository_request(str(self.root / 'runtime'), url, branch)
 
 
 if __name__ == '__main__':
